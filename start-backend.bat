@@ -1,15 +1,22 @@
 @echo off
-cd /d "%~dp0backend"
+setlocal
+
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr "127.0.0.1:8000" ^| findstr "LISTENING"') do (
+  echo Stopping old backend on port 8000 ^(PID %%a^) ...
+  taskkill /F /PID %%a >nul 2>&1
+)
+timeout /t 2 >nul
 
 netstat -ano | findstr "127.0.0.1:8000" | findstr "LISTENING" >nul
 if not errorlevel 1 (
-  echo Backend is already running on port 8000.
-  echo Open http://127.0.0.1:8000/ in your browser.
-  echo To restart it, close the existing backend window first.
+  echo.
+  echo Port 8000 is still in use. Close the old backend window and try again.
+  netstat -ano | findstr "127.0.0.1:8000"
   pause
-  exit /b 0
+  exit /b 1
 )
 
+cd /d "%~dp0backend"
 echo Starting backend on http://127.0.0.1:8000 ...
 echo Wait for "Uvicorn running" and keep this window open.
 echo.
