@@ -1,10 +1,12 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy import inspect, text
 
 from .db import Base, engine
-from .routers import auth, reports, scenes, sessions
+from .routers import admin, auth, reports, scenes, sessions
 
 Base.metadata.create_all(bind=engine)
 
@@ -40,15 +42,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(scenes.router)
 app.include_router(sessions.router)
 app.include_router(reports.router)
 
 
-@app.get("/")
+_ADMIN_HTML = Path(__file__).parent / "static" / "admin.html"
+
+
+def _admin_page() -> HTMLResponse:
+    return HTMLResponse(_ADMIN_HTML.read_text(encoding="utf-8"))
+
+
+@app.get("/", response_class=HTMLResponse)
 def root():
-    return RedirectResponse(url="/docs")
+    return _admin_page()
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return _admin_page()
 
 
 @app.get("/api/health")
