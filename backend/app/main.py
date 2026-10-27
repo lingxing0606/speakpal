@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy import inspect, text
 
 from .db import Base, engine
@@ -43,6 +44,11 @@ app.include_router(auth.router)
 app.include_router(scenes.router)
 app.include_router(sessions.router)
 app.include_router(reports.router)
+
+
+@app.get("/")
+def root():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/api/health")
