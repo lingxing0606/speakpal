@@ -1,0 +1,36 @@
+{
+  "n": 20,
+  "raters": [
+    "human1",
+    "human2"
+  ],
+  "icc_2_1": 0.9021721306995201,
+  "icc_2_1_interpret": "优秀（>0.9）",
+  "icc_2_k": 0.9485704433780638,
+  "icc_2_k_interpret": "优秀（>0.9）",
+  "rater_pairs": {
+    "human1~human2": {
+      "pearson": 0.898376659864234,
+      "spearman": 0.7161928541047109
+    }
+  },
+  "system_vs_human_mean": {
+    "pearson": 0.8075351267117249,
+    "spearman": 0.6749533499017303,
+    "mae": 5.525,
+    "rmse": 6.491340385467396,
+    "bland_altman": {
+      "n": 20,
+      "mean_diff": 1.575,
+      "sd_diff": 6.460965790605025,
+      "loa_lower": -11.088492949585849,
+      "loa_upper": 14.238492949585847,
+      "within_loa": 20,
+      "within_loa_ratio": 1.0
+    }
+  },
+  "fleiss_kappa": 0.3873085339168491,
+  "fleiss_kappa_interpret": "一般（0.21–0.4）",
+  "cohens_kappa": 0.41908713692946054,
+  "cohens_kappa_interpret": "中等（0.41–0.6）"
+}
