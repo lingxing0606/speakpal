@@ -52,7 +52,17 @@
         <div class="stat"><div class="label">用户</div><div class="value" id="s-users">-</div></div>
         <div class="stat"><div class="label">练习会话</div><div class="value" id="s-sessions">-</div></div>
         <div class="stat"><div class="label">报告</div><div class="value" id="s-reports">-</div></div>
-        <div class="stat"><div class="label">平均分</div><div class="value" id="s-avg">-</div></div>
+        <div class="stat"><div class="label">未完成会话</div><div class="value" id="s-incomplete">-</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin:0 0 12px;font-size:16px;">用户概览</h2>
+        <table>
+          <thead>
+            <tr><th>用户</th><th>账号</th><th>会话数</th><th>已出报告</th><th>平均分</th></tr>
+          </thead>
+          <tbody id="user-rows"></tbody>
+        </table>
       </div>
 
       <div class="card">
@@ -111,7 +121,20 @@
         document.getElementById('s-users').textContent = stats.users;
         document.getElementById('s-sessions').textContent = stats.sessions;
         document.getElementById('s-reports').textContent = stats.reports;
-        document.getElementById('s-avg').textContent = stats.avg_score;
+        document.getElementById('s-incomplete').textContent = stats.incomplete;
+
+        const users = await api('/api/admin/users');
+        const userBody = document.getElementById('user-rows');
+        userBody.replaceChildren();
+        for (const u of users) {
+          const tr = document.createElement('tr');
+          tr.appendChild(cell(u.nickname));
+          tr.appendChild(cell(u.username));
+          tr.appendChild(cell(u.sessions));
+          tr.appendChild(cell(u.reports));
+          tr.appendChild(cell(u.avg_score === null ? '—' : u.avg_score));
+          userBody.appendChild(tr);
+        }
 
         const list = await api('/api/admin/sessions?limit=20');
         const tbody = document.getElementById('rows');
@@ -121,7 +144,7 @@
           tr.appendChild(cell(it.id));
           tr.appendChild(cell(it.user));
           tr.appendChild(cell(it.scene));
-          tr.appendChild(cell(it.status === 'finished' ? '已结束' : '进行中'));
+          tr.appendChild(cell(it.status === 'finished' ? '已结束' : '未完成'));
           tr.appendChild(cell(it.score === null ? '—' : it.score));
           tr.appendChild(cell(new Date(it.created_at).toLocaleString()));
           tbody.appendChild(tr);

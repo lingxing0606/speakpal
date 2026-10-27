@@ -21,13 +21,49 @@ def stats(_=Depends(require_admin), db: OrmSession = Depends(get_db)):
     users = db.query(func.count(User.id)).scalar() or 0
     sessions = db.query(func.count(PracticeSession.id)).scalar() or 0
     reports = db.query(func.count(Report.id)).scalar() or 0
-    avg = db.query(func.avg(Report.total_score)).scalar()
     return {
         "users": users,
         "sessions": sessions,
         "reports": reports,
-        "avg_score": round(float(avg), 1) if avg is not None else 0.0,
+        "incomplete": max(sessions - reports, 0),
     }
+
+
+@router.get("/users")
+def user_stats(_=Depends(require_admin), db: OrmSession = Depends(get_db)):
+    rows = db.query(User).order_by(User.id).all()
+    out = []
+    for u in rows:
+        session_count = (
+            db.query(func.count(PracticeSession.id))
+            .filter(PracticeSession.user_id == u.id)
+            .scalar()
+            or 0
+        )
+        report_count = (
+            db.query(func.count(Report.id))
+            .join(PracticeSession, Report.session_id == PracticeSession.id)
+            .filter(PracticeSession.user_id == u.id)
+            .scalar()
+            or 0
+        )
+        avg = (
+            db.query(func.avg(Report.total_score))
+            .join(PracticeSession, Report.session_id == PracticeSession.id)
+            .filter(PracticeSession.user_id == u.id)
+            .scalar()
+        )
+        out.append(
+            {
+                "id": u.id,
+                "username": u.username,
+                "nickname": u.nickname or u.username,
+                "sessions": session_count,
+                "reports": report_count,
+                "avg_score": round(float(avg), 1) if avg is not None else None,
+            }
+        )
+    return out
 
 
 @router.get("/sessions")
@@ -51,7 +87,7 @@ def recent_sessions(
                 "id": s.id,
                 "user": (s.user.nickname or s.user.username) if s.user else "",
                 "scene": scene["name"] if scene else s.scene_id,
-                "status": s.status,
+                "status": "finished" if s.report else "incomplete",
                 "score": s.report.total_score if s.report else None,
                 "created_at": s.created_at.isoformat(),
             }
