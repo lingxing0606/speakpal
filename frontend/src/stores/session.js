@@ -14,11 +14,19 @@ export const useSessionStore = defineStore('session', () => {
     turns.value = opening ? [{ role: 'ai', content: opening }] : []
   }
 
+  // 刷新后按服务端记录回填（GET /api/sessions/{id}）
+  function restore(id, sceneObj, diff, restoredTurns) {
+    sessionId.value = id
+    scene.value = sceneObj
+    difficulty.value = diff
+    turns.value = restoredTurns || []
+  }
+
   function clear() {
     sessionId.value = null
     scene.value = null
     turns.value = []
   }
 
-  return { sessionId, scene, difficulty, turns, start, clear }
+  return { sessionId, scene, difficulty, turns, start, restore, clear }
 })

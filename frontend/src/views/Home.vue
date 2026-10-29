@@ -43,7 +43,7 @@ async function start(scene) {
       difficulty: difficulty.value,
     })
     session.start(data.session_id, scene, difficulty.value, data.opening_question)
-    router.push('/practice')
+    router.push(`/practice/${data.session_id}`)
   } catch (e) {
     error.value = '开始失败：' + (e?.response?.data?.detail || e.message)
   } finally {
