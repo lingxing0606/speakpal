@@ -5,7 +5,7 @@ export default {
       colors: {
         // 画布与文字
         canvas: '#F5F8F8',
-        ink: { DEFAULT: '#1B2430', soft: '#475467', mute: '#6B7785' },
+        ink: { DEFAULT: '#1B2430', soft: '#475467', mute: '#5F6B78' },
         line: '#E3EAE9',
         // 品牌青（主色）：语音 / 青玉
         brand: {

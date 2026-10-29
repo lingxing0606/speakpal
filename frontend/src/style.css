@@ -8,7 +8,7 @@
   :root {
     --sp-ink: #1b2430;
     --sp-ink-soft: #475467;
-    --sp-ink-mute: #6b7785;
+    --sp-ink-mute: #5f6b78;
     --sp-brand: #14806f;
     --sp-brand-soft: #d5f1ea;
     --sp-canvas: #f5f8f8;
@@ -161,6 +161,21 @@
   /* 头像/图标底板 */
   .sp-icon-tile {
     @apply flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-50 text-xl ring-1 ring-brand-100;
+  }
+
+  /* 录音按钮：仅珊瑚色不够（WCAG 1.4.1），必须配「录音中 0:03」文字 */
+  .sp-mic {
+    @apply relative flex h-14 w-14 items-center justify-center rounded-full text-2xl text-white shadow-soft
+      transition duration-200 ease-out disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .sp-mic-idle {
+    @apply bg-brand-600 hover:bg-brand-700;
+  }
+
+  /* coral-600 白图标 3.65:1：只够图形，文字另给 ink-soft 标签 */
+  .sp-mic-rec {
+    @apply bg-coral-600 hover:bg-coral-700;
   }
 
   /* 录音按钮呼吸圈 */
