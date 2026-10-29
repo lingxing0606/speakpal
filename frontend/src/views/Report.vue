@@ -39,6 +39,27 @@ const featureLabels = {
 
 const isMock = computed(() => report.value?.source === 'mock')
 const hasScore = computed(() => report.value?.total_score !== null && report.value?.total_score !== undefined)
+const scoringDims = computed(() => report.value?.scoring_detail?.dimensions || {})
+const hasDetail = computed(() => Object.keys(scoringDims.value).length > 0)
+
+function evidenceText(d) {
+  const inputs = d?.inputs
+  if (!inputs || typeof inputs !== 'object') return ''
+  const parts = []
+  for (const [k, v] of Object.entries(inputs)) {
+    if (v === null || v === undefined || v === '') continue
+    const label = featureLabels[k] || k
+    if (Array.isArray(v)) {
+      if (v.length) parts.push(`${label}：${v.join('、')}`)
+    } else if (typeof v === 'number') {
+      parts.push(`${label}：${Number.isInteger(v) ? v : v.toFixed(2)}`)
+    } else {
+      parts.push(`${label}：${v}`)
+    }
+    if (parts.length >= 6) break
+  }
+  return parts.join(' · ')
+}
 
 const bandText = computed(() => {
   const r = report.value
@@ -139,6 +160,27 @@ function again() {
               <div class="text-xs text-slate-500">{{ featureLabels[k] || k }}</div>
               <div class="mt-1 font-medium">{{ v }}</div>
             </div>
+          </div>
+        </div>
+
+        <div
+          v-if="hasDetail"
+          class="mt-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
+        >
+          <div class="font-semibold">评分依据（可复现）</div>
+          <div v-if="report.scoring_detail.note" class="mt-1 text-xs text-slate-500">
+            {{ report.scoring_detail.note }}
+          </div>
+          <div v-for="(d, k) in scoringDims" :key="k" class="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
+            <div class="flex items-center justify-between">
+              <span>{{ dimLabels[k] || k }}</span>
+              <span class="text-xs text-slate-500">
+                模型 {{ d.model_score ?? '—' }} · 规则 {{ d.rule_score ?? '—' }} · 最终 {{ d.final_score ?? '—' }}
+              </span>
+            </div>
+            <div v-if="d.clamped" class="mt-1 text-xs text-amber-600">{{ d.clamp_reason }}</div>
+            <div class="mt-1 text-xs text-slate-500">{{ d.note }}</div>
+            <div v-if="evidenceText(d)" class="mt-1 text-xs text-slate-400">{{ evidenceText(d) }}</div>
           </div>
         </div>
 
