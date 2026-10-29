@@ -160,9 +160,11 @@ speakpal/
 
 ### Settings 设置页（需登录）
 
-两块（「数据存储位置」已按用户要求从网页移除，见 §13.3）：
+四块（「数据存储位置」已按用户要求从网页移除，见 §13.3）：
 
-- **模型密钥**：输入 → 「测试连接」→ 成功显示脱敏结果（只露后四位）→ 可删除本地密钥。key 只存 localStorage，不落库、不打日志。
+- **模型密钥（对话）**：输入 → 「测试连接」→ 成功显示脱敏结果（只露后四位）→ 可删除本地密钥。key 只存 localStorage，不落库、不打日志。旁边要有「怎么拿 key」的说明和**真实可用**的官方链接。
+- **语音合成密钥（可选）**：`key / base_url / model / voice` 四项；说明写清「不填就用浏览器内置朗读，填了走第三方计费」，同样附官方链接与获取步骤。
+  它不参与评分，填错只影响朗读（回落 `speechSynthesis`），接口与错误码见 §13.4。
 - **个人资料**：改昵称、改密码。改密码必须填**当前密码**（服务端会校验，`account.py:44-49`），不填或填错返 400——防的是别人借你电脑直接改密。
   接口 `PATCH /api/me/profile`，`{nickname?, password?, current_password?}`，两项都不给返 400；昵称 ≤32 字、密码 4–64 位（`schemas.py:ProfileUpdateIn`）。
   只改昵称不必带密码；**改密码会让其他设备掉线**：`token_version` +1，旧 token 立刻 401，当前设备用响应里新签发的 `token` 续命（前端要 `auth.setAuth` 存回去），见 §14。
@@ -198,6 +200,7 @@ speakpal/
 | GET | /api/config/llm | 服务端兜底 key 是否配置（不回显 key） | 是 |
 | GET | /api/system/storage | 数据目录/库文件/可写性（运维用，网页不展示，见 §13.3） | 是 |
 | PATCH | /api/me/profile | 改昵称 / 密码（改密码要带 `current_password`，见 §5 设置页） | 是 |
+| POST | /api/tts | 语音合成（可选；无 key 409，key 被拒/不可达 502，见 §13.4） | 是 |
 | DELETE | /api/me/data | 清除自己的练习记录（只接受 `scope=records`，见 §13.2） | 是 |
 | DELETE | /api/me/account | 注销账号：删记录 + 删用户，`confirm="注销"`（见 §13.2） | 是 |
 | DELETE | /api/admin/data | 清空全库（ADMIN_KEY，`confirm="删除"`，`scope=account` 连用户） | 否（管理密钥） |
@@ -446,7 +449,27 @@ System prompt 模板：
 
 实现要点：在 `load_dotenv()` **之前**取一份 `os.environ` 快照，只有出现在快照里的 `DATABASE_URL` 才算第 1 级。若第 1 级已生效，`PUT /api/admin/storage` 返回 `409 {"kind": "env_override", "hint": "DATABASE_URL 由环境变量指定，配置文件不会生效"}`，不写 json。
 
-### 13.4 验收（最容易漏的几条）
+### 13.4 语音合成密钥（可选，`X-TTS-*`）
+
+朗读默认用浏览器内置 `speechSynthesis`（`frontend/src/utils/speech.js`，不需要 key）。想更自然就填第三方 TTS，**不填不影响任何功能**。
+
+- 设置页第二块「语音合成密钥（可选）」，四个字段：`key / base_url / model / voice`。
+  说明必须写清两件事：**不填就用浏览器内置朗读**；**填了走第三方计费**（谁付费、谁承担，讲明白）。
+  「怎么拿 key」要给**真实可用的官方链接**（抓一下官网确认，别凭记忆写死地址），和对话 key 那块同样对待。
+- 请求头：`X-TTS-Key` / `X-TTS-Base-URL` / `X-TTS-Model` / `X-TTS-Voice`；规则和 LLM key 一致——**只存浏览器、不落库、不打日志**，`.env` 的 `TTS_API_KEY` 只是兜底，优先级「浏览器 > `.env`」。
+- 接口：`POST /api/tts`，body `{text, voice?}`，成功返回音频流（`audio/mpeg`）。失败分三种，别混：
+  | 情形 | 返回 |
+  |---|---|
+  | 浏览器与 `.env` 都没有 TTS key | `409 {"kind": "tts_not_configured"}` |
+  | 填的 key 被第三方拒（401/403） | `502 {"kind": "tts_key_invalid"}` |
+  | 超时 / 不可达 / 返回不是音频 | `502 {"kind": "tts_unavailable"}` |
+- **回落是硬要求**：前端先试 `/api/tts`，任何失败（含无 key）都退回 `speechSynthesis` 朗读，
+  **不能因为 TTS 挂了就连朗读都没了**——语音是演示里最显眼的一环，宁可声音普通也不能没声音。
+- 兼容范围：按 OpenAI 兼容的 `/audio/speech` 做（OpenAI `tts-1`、SiliconFlow、Groq 同一套参数）。
+  讯飞/火山那类要 AppID + Secret 三件套的**不在本契约内**，要接得另立一套字段，别硬塞进这四件。
+- `.env.example` 必须加 `TTS_API_KEY=` 与一行注释（留空 = 用浏览器朗读）。
+
+### 13.5 验收（最容易漏的几条）
 
 1. **用户 key**：用错 key 跑 `finish` 必须 **502 `key_invalid`**、不生成报告、会话保持 active（换好 key 能重试）；`grep` 响应体、日志、DB 三处都搜不到 key 明文；**不能用 401**（前端会当成掉登录）。
    `mock_reason` 三个值各自对应一条路：`invalid_key`=服务端 `.env` 兜底密钥失效（请求头不带 key 时才会出现），`unavailable`=超时/不可达/解析失败，`not_configured`=中途丢 key 后 finish。用户 key 无效是 502、**不产生任何 `mock_reason`**。
