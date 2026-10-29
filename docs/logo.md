@@ -1,6 +1,6 @@
 # SpeakPal 品牌标识规范 v1
 
-> 负责人：logo设计师。落地状态：矢量在 `frontend/public/`，`frontend/src/components/BrandLogo.vue` 内联同一套几何；
+> 负责人：logo设计师。落地状态：矢量在 `frontend/public/`，**图形只有这一份真源**——`frontend/src/components/BrandLogo.vue` 只按尺寸/深浅挑文件，不复制几何，所以改 SVG 就是全站生效；
 > 色值只取 [docs/ui-visual.md](ui-visual.md) 的色板，末节有实测对比度与未验证项。
 
 ## 1 释义
@@ -16,7 +16,8 @@
 | 气泡尾 | 从 `(12,43)` 三次贝塞尔到尖端 `(7.4,54.2)`，回到 `(28,43.5)`；尾长约为气泡高 1/3，圆尖不用直角 |
 | 声波柱 | 宽 5、圆角 2.5，x = 10 / 19.5 / 29，高 8 / 14 / 20，垂直居中于 y=29；**柱间空隙固定 4.5 单位** |
 | 星标 | 圆 `(53,11) r=10`，白色四尖星 r=6.2，与气泡四角不相切 |
-| 无底版 | 整组 `translate(10,-3.7)` 居中于 64 画布，四周留白相等 |
+| 无底版 | 整组 `translate(10,-3.7)` 居中于 64 画布，四周留白相等（左右各 12、上下各 10.3） |
+| 完整标 | 整组 `translate(0,2.8)`：墨迹从 1..57.4 变成 3.8..60.2，和文字横排时不会偏上 |
 
 ## 3 颜色
 
@@ -60,7 +61,16 @@
 | `frontend/public/favicon.svg` | 青底方标（16px 优化） | 浏览器标签 |
 | `frontend/public/logo-app.svg` | 512 应用图标 | 收藏夹、PWA、PPT、头像 |
 
-页面里**统一走组件**，不要直接 `<img src="/logo.svg">`：组件带 `aria-label`、反白和星标档位，且不会多发一次请求。
+页面里**统一走组件**，不要直接 `<img src="/logo.svg">`：组件按 `size` / `tone` 自动挑上表里的文件（≥32 带星、<32 换居中简化版、深色底换反白版），并处理 `alt`。
+
+组件档位表（`frontend/src/components/BrandLogo.vue`）：
+
+| 条件 | 实际加载 |
+| --- | --- |
+| `size ≥ 32`，浅底 | `/logo.svg` |
+| `size ≥ 32`，`tone="inverse"` | `/logo-inverse.svg` |
+| `size < 32`，浅底 | `/logo-mark.svg` |
+| `size < 32`，`tone="inverse"` | `/logo-mark-inverse.svg` |
 
 ## 6 用法
 
