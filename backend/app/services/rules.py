@@ -322,7 +322,7 @@ def fuse(model_score, rule_score, weight_rule, note=""):
             f"模型分比规则分高 {gap:.1f} 分（超过 {CLAMP_GAP:.0f}），按“只压不抬”压回规则分 +{CLAMP_TO:.0f}"
         )
     elif -gap > CLAMP_GAP:
-        detail["note"] = (note + "；" if note else "") + "模型分显著低于可测指标，请人工复核"
+        detail["note"] = (note + "；" if note else "") + "模型分显著低于可测规则分，请人工复核"
     detail["final_score"] = round(max(0.0, min(100.0, final)), 1)
     return detail
 
@@ -414,7 +414,6 @@ def apply_to_report(
     answer_mode = infer_answer_mode(dims)
     total = weighted_total(dims, answer_mode)
     band = score_to_band(total)
-    used_rules = [k for k, d in detail.items() if d.get("rule_score") is not None]
 
     out = dict(data)
     out["dimensions"] = dims
@@ -428,8 +427,7 @@ def apply_to_report(
     out["comparable_score"] = comparable_score(dims)
     out["comparable_band"] = comparable_band(dims)
     out["scoring_detail"] = detail
-    out["scoring_note"] = (
-        "分数由模型分与可测指标融合得出"
-        + (f"（参与融合的维度：{', '.join(used_rules)}）" if used_rules else "")
-    )
+    # 不再在括号里列维度内部键（fluency / grammar_vocab…）：中文报告里露英文键是硬伤，
+    # 逐维卡片已经写了模型分/规则分/最终分，这里只需要一句口径。
+    out["scoring_note"] = "分数由模型分与可测规则分融合得出"
     return out
