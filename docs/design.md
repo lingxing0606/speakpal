@@ -124,14 +124,17 @@ speakpal/
 
 ### History 历史页（需登录）
 - 只显示当前用户的记录
-- 列表：时间、场景、综合分
-- 点击进入该次报告
+- 列表：时间、场景、综合分（降级报告显示「—」，不显示 0）
+- 点击进入该次报告。**未出分 / 降级 / 未完成的会话也必须能点开**——降级报告本身就是一份（示例）报告，点不开等于用户看不到自己那次练习；`History.vue:21` 原来只给有分的会话绑跳转，是 bug。
 
 ### Settings 设置页（需登录）
 
 两块（「数据存储位置」已按用户要求从网页移除，见 §13.3）：
 
 - **模型密钥**：输入 → 「测试连接」→ 成功显示脱敏结果（只露后四位）→ 可删除本地密钥。key 只存 localStorage，不落库、不打日志。
+- **个人资料**：改昵称、改密码。改密码必须填**当前密码**（服务端会校验，`account.py:44-49`），不填或填错返 400——防的是别人借你电脑直接改密。
+  接口 `PATCH /api/me/profile`，`{nickname?, password?, current_password?}`，两项都不给返 400；昵称 ≤32 字、密码 4–64 位（`schemas.py:ProfileUpdateIn`）。
+  只改昵称不必带密码；改密码成功后旧 token 仍有效（JWT 里只放 user_id，没有密码版本号）。
 - **我的数据**：清除练习记录（手打「删除」）；注销账号（手打「注销」，账号与全部记录一起删，不可恢复）。
 
 首次登录若本浏览器与服务端都没有密钥，会引导到 `/settings?onboarding=1`，但**可以跳过**；真正拦住的是开始练习时（§13.1）。
@@ -155,6 +158,7 @@ speakpal/
 | POST | /api/config/llm/test | 验证用户自带 API key（见 §13） | 是 |
 | GET | /api/config/llm | 服务端兜底 key 是否配置（不回显 key） | 是 |
 | GET | /api/system/storage | 数据目录/库文件/可写性（运维用，网页不展示，见 §13.3） | 是 |
+| PATCH | /api/me/profile | 改昵称 / 密码（改密码要带 `current_password`，见 §5 设置页） | 是 |
 | DELETE | /api/me/data | 清除自己的练习记录（只接受 `scope=records`，见 §13.2） | 是 |
 | DELETE | /api/me/account | 注销账号：删记录 + 删用户，`confirm="注销"`（见 §13.2） | 是 |
 | DELETE | /api/admin/data | 清空全库（ADMIN_KEY，`confirm="删除"`，`scope=account` 连用户） | 否（管理密钥） |
