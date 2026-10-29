@@ -101,7 +101,7 @@ speakpal/
 
 ### Home 首页 / 场景选择（需登录）
 - 顶部：昵称 + 退出登录
-- 3 张场景卡（图标、场景名、一句描述）
+- 6 张场景卡（图标、场景名、一句描述）：求职面试 `job_interview` / 咖啡店点单 `cafe_order` / 雅思 Part 1 `ielts_part1` / 酒店入住 `hotel_checkin` / 机场值机 `airport_checkin` / 餐厅点餐 `restaurant_order`
 - 难度选择（简单 / 中等 / 困难）
 - 开始按钮
 - 「历史记录」入口
@@ -116,7 +116,9 @@ speakpal/
   **禁止用 `window.prompt` / `alert` / `confirm`**——浏览器弹窗会打断对话流，看起来也很突兀（`Practice.vue:111` 原来就是 `window.prompt`，已改掉）
 - 无可用模型密钥时，点「开始练习」或「发送」都会被拦下并引导到 `/settings`（见 §13.1），不进入一段注定 mock 的对话
 - 每句 AI 气泡带「播放」按钮（speechSynthesis）
-- 底部：只有一个「结束并生成报告」入口
+- 底部：只有一个「结束并生成报告」
+- **作答方式要分开记**：每轮存 `input_mode`（`voice` / `typed`）。前端能显式传就传，不传则后端按「有没有 audio_json」推断（`sessions.py:107-109`）。
+  录音轮和打字轮在报告里算不同维度，气泡上也应标出「打字 / 录音」，别让人分不清自己哪句是说的。入口
 
 ### Report 复盘页（需登录）
 - 综合分大数字（衬线、等宽，切报告时不抖），旁边是「B1 · 雅思 5.5」这类档位文字；**分数不配红绿灯**，红绿只给错误/成功
@@ -125,6 +127,10 @@ speakpal/
 - 「评分依据（可复现）」默认收起，展开看每维模型分/规则分/最终分/钳制原因/输入特征
 - 降级报告用琥珀横幅（不是红色——那不是用户做错），按 `mock_reason` 分文案：「未配置/兜底密钥失效」给「去设置」，「服务不可用」只提示稍后重试
 - 直接输地址进未完成会话时给「这次练习还没有报告 + 重新练一次」，不显示「加载报告失败」
+- 维度集合**随作答方式变化**，不是固定 4 个：有录音轮才出现「发音 / 流利度」，有打字轮才出现 **`written_expression`（文字表达）**。
+  纯打字只有 3 维、纯录音 4 维、混合 5 维；模型多给了也会被后端丢掉（`rules.py:343-347`）。
+- 综合分 = **参与维度的平均值**（代码现状 `rules.py:407`，等权；加权口径待功能指导师定，改前别在文档里写「加权」）。
+  因为维度数不同，**3 维的总分不能和 4 维的总分直接比**：报告顶部要写明「本次为打字作答，发音 / 流利度未计入」，历史成长曲线只画含录音的会话（口径见 §15）。
 - 一句总评
 - 按钮：再来一次 / 导出 PDF / 返回首页
 
@@ -142,7 +148,8 @@ speakpal/
 - **模型密钥**：输入 → 「测试连接」→ 成功显示脱敏结果（只露后四位）→ 可删除本地密钥。key 只存 localStorage，不落库、不打日志。
 - **个人资料**：改昵称、改密码。改密码必须填**当前密码**（服务端会校验，`account.py:44-49`），不填或填错返 400——防的是别人借你电脑直接改密。
   接口 `PATCH /api/me/profile`，`{nickname?, password?, current_password?}`，两项都不给返 400；昵称 ≤32 字、密码 4–64 位（`schemas.py:ProfileUpdateIn`）。
-  只改昵称不必带密码；改密码成功后旧 token 仍有效（JWT 里只放 user_id，没有密码版本号）。
+  只改昵称不必带密码；**改密码会让其他设备掉线**：`token_version` +1，旧 token 立刻 401，当前设备用响应里新签发的 `token` 续命（前端要 `auth.setAuth` 存回去），见 §14。
+  **不要在界面上写「不影响其他设备」之类的小字**——行为相反，留着就是错。
 - **我的数据**：清除练习记录（手打「删除」）；注销账号（手打「注销」，账号与全部记录一起删，不可恢复）。
 
 首次登录若本浏览器与服务端都没有密钥，会引导到 `/settings?onboarding=1`，但**可以跳过**；真正拦住的是开始练习时（§13.1）。
@@ -158,10 +165,10 @@ speakpal/
 | GET | /api/auth/me | 当前用户 | 是 |
 | GET | /api/scenes | 场景列表 | 是 |
 | POST | /api/sessions | 开始会话 | 是 |
-| POST | /api/sessions/{id}/turn | 用户作答一轮 | 是 |
+| POST | /api/sessions/{id}/turn | 用户作答一轮（body 可带 `input_mode: voice|typed`，见 §5） | 是 |
 | POST | /api/sessions/{id}/finish | 结束并生成报告 | 是 |
-| GET | /api/sessions/{id} | 单个会话的完整对话，用于刷新/从历史回填（见 §5） | 是 |
-| GET | /api/sessions | 历史会话列表（当前用户，带 `status` / `report_id`） | 是 |
+| GET | /api/sessions/{id} | 单个会话完整对话，用于刷新/回填；每轮带 `input_mode`（见 §5） | 是 |
+| GET | /api/sessions | 历史会话列表（当前用户，带 `status` / `report_id` / `voice_turns` / `typed_turns`） | 是 |
 | GET | /api/sessions/{id}/report | 读取某次报告 | 是 |
 | POST | /api/stt | （可选）后端兜底转写 | 是 |
 | POST | /api/config/llm/test | 验证用户自带 API key（见 §13） | 是 |
@@ -246,10 +253,11 @@ speakpal/
 ## 7. 数据模型（SQLite）
 
 ```
-users(id, username UNIQUE, password_hash, nickname, created_at)
-sessions(id, user_id, scene_id, difficulty, status, created_at)
-turns(id, session_id, role, content, created_at)      -- role: ai | user
-reports(id, session_id, total_score, dimensions_json, fixes_json, comment, created_at)
+users(id, username UNIQUE, password_hash, nickname, created_at, token_version)  -- token_version: 改密码即 +1，见 §14
+sessions(id, user_id, scene_id, difficulty, status, created_at)                   -- status: active | finished
+turns(id, session_id, role, content, audio_json, input_mode, created_at)         -- role: ai | user；input_mode: voice | typed
+reports(id, session_id, total_score, band, cefr, bands_json, dimensions_json,
+        fixes_json, comment, source, mock_reason, scoring_json, created_at)
 ```
 
 ## 8. AI 设计
@@ -421,3 +429,17 @@ System prompt 模板：
 3. **管理密钥**：`DELETE /api/admin/data`、`PUT /api/admin/storage` 用错 `X-Admin-Key` 必须 **403**；缺 header 也是 403。这两条要单独断言，因为前端把 401 当登录失效。
 4. **数据位置**：设了真实 `DATABASE_URL` 时 `PUT` 返回 `409 env_override` 且不写 json；管理密钥错时必须是 **403**（不是 401，否则前端会把人踢回登录页）→ 清掉 env 后改路径、重启生效 → 旧库原位没被删 → 目标目录不存在/不可写时报错且配置没被写坏；`data_location.json` 不在 `git ls-files` 里。
 
+
+## 14. token_version：改密码即踢其他设备（v0.4）
+
+- `users` 加 `token_version`（默认 0），JWT 里带 `tv`（`security.py:36-43`）。校验时 `token.tv != user.token_version` 直接 401，文案「密码已修改，请重新登录」（`security.py:60-67`）。
+- 改密码：`token_version += 1`，**同一响应里返回新签发的 `token`**（`account.py:55-64`）。当前设备把它存回去继续用，其他设备的旧 token 立刻失效——这就是「其他设备掉线」的实现方式。
+- 管理员 `PATCH /api/admin/users/{id}` 改密码同样 `+1`（`admin.py:231`），所以管理员重置密码后，该用户所有设备都要重新登录，属预期。
+- 只改昵称不动 `token_version`，不登出。
+- 旧库启动时补列（`main.py:51-54`）；旧 token 没有 `tv` 时按 0 处理，不会把所有老用户一并踢下线。
+
+## 15. 打字报告 vs 录音报告：能不能比（v0.4 口径）
+
+- 维度数随作答方式变（纯打字 3 / 纯录音 4 / 混合 5），综合分是参与维度等权平均 → **不同作答方式的分数不能直接比**。
+- 报告顶部写「本次为打字作答，发音 / 流利度未计入」；打字会话在历史里打标记，但**不进 band 成长曲线**（曲线只画含录音的会话）。
+- `written_expression` 目前**没有规则分**，权重 0 : 1（只有模型判断，`rules.py:394-402`）。锚点与加权方案由功能指导师定，定之前保持等权，别偷改分数。
