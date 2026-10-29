@@ -32,7 +32,9 @@ const ttsInput = ref({
 const ttsTip = ref('')
 const ttsTest = ref({ running: false, ok: null, message: '' })
 
-// 留空时实际会用到的默认值：优先服务端给的，再退回硅基流动这套
+// 留空时实际会用到的默认值。页面上教的供应商是硅基流动，所以：
+// 服务端给了「非 OpenAI 出厂值」的默认就尊重它，否则用硅基流动这套——
+// 否则用户拿了硅基流动的 key、字段留空，请求会打到 api.openai.com 然后 401
 const TTS_FALLBACK = {
   base: 'https://api.siliconflow.cn/v1',
   model: 'FunAudioLLM/CosyVoice2-0.5B',
@@ -41,10 +43,11 @@ const TTS_FALLBACK = {
 
 function ttsDefaults() {
   const s = server.value || {}
+  const isStockOpenAi = /api\.openai\.com/i.test(s.default_tts_base_url || '')
   return {
-    base: s.default_tts_base_url || TTS_FALLBACK.base,
-    model: s.default_tts_model || TTS_FALLBACK.model,
-    voice: s.default_tts_voice || TTS_FALLBACK.voice,
+    base: (!isStockOpenAi && s.default_tts_base_url) || TTS_FALLBACK.base,
+    model: (s.default_tts_model && s.default_tts_model !== 'tts-1' ? s.default_tts_model : '') || TTS_FALLBACK.model,
+    voice: (s.default_tts_voice && s.default_tts_voice !== 'alloy' ? s.default_tts_voice : '') || TTS_FALLBACK.voice,
   }
 }
 
@@ -147,10 +150,12 @@ async function loadServerStatus() {
     }
     if (!modelInput.value && data?.default_model) modelInput.value = data.default_model
     if (!baseInput.value && data?.default_base_url) baseInput.value = data.default_base_url
-    // 语音合成占位符用服务端的默认值，避免页面教的供应商和实际请求的对不上
-    if (!ttsInput.value.base) ttsInput.value.base = data?.default_tts_base_url || ''
-    if (!ttsInput.value.model) ttsInput.value.model = data?.default_tts_model || ''
-    if (!ttsInput.value.voice) ttsInput.value.voice = data?.default_tts_voice || ''
+    // 语音合成的输入框也填「页面上教的供应商」那套，而不是服务端的 OpenAI 出厂值：
+    // 服务端默认值只用于 placeholder，避免「保存成功但请求打到别家」
+    const d = ttsDefaults()
+    if (!ttsInput.value.base) ttsInput.value.base = d.base
+    if (!ttsInput.value.model) ttsInput.value.model = d.model
+    if (!ttsInput.value.voice) ttsInput.value.voice = d.voice
   } catch (e) {
     server.value = { env_configured: null, tts_env_configured: null, error: errText(e) }
   }
@@ -457,7 +462,8 @@ function logout() {
             rel="noopener noreferrer"
             class="font-medium text-brand-700 underline-offset-2 hover:underline"
           >语音合成文档</a>
-          ）。下面的 Base URL / 模型 / 音色留空就用默认值，一般只粘 key 就行。
+          ）。下面的 Base URL / 模型 / 音色留空就用上面的硅基流动默认值（CosyVoice2），一般只粘 key 就行；
+          保存时会把实际用到的值一起存下来，不会出现「保存成功但请求打到别家」。
         </p>
 
         <div class="mt-4 space-y-3">
