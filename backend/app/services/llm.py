@@ -1,6 +1,6 @@
 import httpx
 
-from ..config import settings
+from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
 
 MOCK_FOLLOW_UPS = {
     "job_interview": [
@@ -26,8 +26,20 @@ def _mock_reply(scene_id: str, turn_index: int) -> str:
     return lst[min(max(turn_index, 0), len(lst) - 1)]
 
 
-def chat_reply(scene: dict, difficulty: str, history: list, turn_index: int) -> str:
-    if not settings.llm_api_key:
+def chat_reply(
+    scene: dict,
+    difficulty: str,
+    history: list,
+    turn_index: int,
+    llm: LLMConfig | None = None,
+) -> str:
+    """多轮对话。
+
+    没带 key 时走 `.env` 兜底（不是“未配置”）；用户 key 被 401/403 拒绝时抛
+    UserKeyInvalid，让路由层立刻告诉用户去换 key，而不是继续聊一轮假对话。
+    """
+    llm = llm or build_llm_config()
+    if not llm.configured:
         return _mock_reply(scene["id"], turn_index)
 
     system = (
@@ -48,15 +60,19 @@ def chat_reply(scene: dict, difficulty: str, history: list, turn_index: int) -> 
     try:
         with httpx.Client(timeout=30) as client:
             resp = client.post(
-                f"{settings.llm_base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {settings.llm_api_key}"},
+                f"{llm.base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {llm.api_key}"},
                 json={
-                    "model": settings.llm_model,
+                    "model": llm.model,
                     "messages": messages,
                     "temperature": 0.7,
                 },
             )
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (401, 403) and llm.from_user:
+            raise UserKeyInvalid() from exc
+        return _mock_reply(scene["id"], turn_index)
+    except Exception:  # noqa: BLE001 - 对话中断比整个请求失败更糟，降级成预设追问
         return _mock_reply(scene["id"], turn_index)

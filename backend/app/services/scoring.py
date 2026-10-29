@@ -5,11 +5,20 @@ import httpx
 
 from evaluation.bands import DIMENSIONS, report_bands, round_band
 
-from ..config import settings
+from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
 
 DEFAULT_NOTE = "分数由 AI 估算，仅供参考。"
 MOCK_NOTE = "示例报告（模型不可用） · 本次不计分"
 MAX_FIXES = 3
+
+# 降级原因，两种会落库：
+# - not_configured：finish 时没有任何可用 key（练习已结束，不拦，给示例报告）
+# - unavailable：服务不可用 / 超时
+# - invalid_key：仅指 **服务端 .env 兜底密钥** 被拒（运维问题），不用于用户自己的 key。
+#   用户请求头里的 key 被拒走 502 key_invalid，不生成报告。
+MOCK_NOT_CONFIGURED = "not_configured"
+MOCK_UNAVAILABLE = "unavailable"
+MOCK_INVALID_KEY = "invalid_key"
 
 _LETTERS_RE = re.compile(r"[A-Za-z']+")
 _JSON_RE = re.compile(r"\{.*\}", re.S)
@@ -107,10 +116,11 @@ def parse_llm_report(text: str, history):
         "comment": str(data.get("comment") or "").strip(),
         "note": str(data.get("note") or "").strip() or DEFAULT_NOTE,
         "source": "llm",
+        "mock_reason": None,
     }
 
 
-def _fallback_report(history, detail: str = ""):
+def _fallback_report(history, mock_reason: str, detail: str = ""):
     """模型不可用时的示例报告：不计分，但句子必须是用户真实说过的。"""
     sentences = []
     for turn in history:
@@ -129,7 +139,7 @@ def _fallback_report(history, detail: str = ""):
         for s in sentences[:MAX_FIXES]
     ]
     if detail:
-        print(f"[scoring] 降级为示例报告：{detail}", flush=True)
+        print(f"[scoring] 降级为示例报告（{mock_reason}）：{detail}", flush=True)
     return {
         "total_score": None,
         "dimensions": {},
@@ -143,6 +153,7 @@ def _fallback_report(history, detail: str = ""):
         ),
         "note": MOCK_NOTE,
         "source": "mock",
+        "mock_reason": mock_reason,
     }
 
 
@@ -176,13 +187,13 @@ def _prompt(scene: dict, difficulty: str, history) -> str:
     )
 
 
-def _request_report(scene: dict, difficulty: str, history) -> str:
+def _request_report(llm: LLMConfig, scene: dict, difficulty: str, history) -> str:
     with httpx.Client(timeout=60) as client:
         resp = client.post(
-            f"{settings.llm_base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {settings.llm_api_key}"},
+            f"{llm.base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {llm.api_key}"},
             json={
-                "model": settings.llm_model,
+                "model": llm.model,
                 "messages": [{"role": "user", "content": _prompt(scene, difficulty, history)}],
                 "temperature": 0.2,
             },
@@ -191,14 +202,33 @@ def _request_report(scene: dict, difficulty: str, history) -> str:
         return resp.json()["choices"][0]["message"]["content"]
 
 
-def generate_report(scene: dict, difficulty: str, history) -> dict:
-    if not settings.llm_api_key:
-        return _fallback_report(history, "未配置 LLM_API_KEY")
+def generate_report(scene: dict, difficulty: str, history, llm: LLMConfig | None = None) -> dict:
+    """生成报告。
+
+    用户自己的 key 被 401/403 拒绝时抛 UserKeyInvalid（路由层转 502 key_invalid），
+    不降级——否则用户会以为模型暂时不可用，反复重试一个永远不可能成功的密钥。
+    """
+    llm = llm or build_llm_config()
+    if not llm.configured:
+        return _fallback_report(history, MOCK_NOT_CONFIGURED, "未配置 LLM_API_KEY，也没有用户密钥")
+
     try:
-        text = _request_report(scene, difficulty, history)
-    except Exception as exc:  # noqa: BLE001 - 任何网络/协议错误都要降级，不能冒泡成 500
-        return _fallback_report(history, f"{type(exc).__name__}: {exc}")
+        text = _request_report(llm, scene, difficulty, history)
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        if code in (401, 403):
+            if llm.from_user:
+                # 用户自己的 key 被拒：路由层转 502 key_invalid，不生成报告
+                raise UserKeyInvalid() from exc
+            # .env 兜底密钥被拒：属运维问题，降级示例报告并标明 invalid_key
+            return _fallback_report(history, MOCK_INVALID_KEY, f"服务端兜底密钥被拒：HTTP {code}")
+        return _fallback_report(history, MOCK_UNAVAILABLE, f"HTTP {code}")
+    except httpx.TimeoutException:
+        return _fallback_report(history, MOCK_UNAVAILABLE, "请求超时")
+    except Exception as exc:  # noqa: BLE001 - 任何网络/协议错误都降级，不冒泡成 500
+        return _fallback_report(history, MOCK_UNAVAILABLE, f"{type(exc).__name__}: {exc}")
+
     data = parse_llm_report(text, history)
     if not data:
-        return _fallback_report(history, "模型返回无法解析")
+        return _fallback_report(history, MOCK_UNAVAILABLE, "模型返回无法解析")
     return data

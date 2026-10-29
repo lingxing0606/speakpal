@@ -26,6 +26,7 @@ def _ensure_schema():
         "band": "REAL",
         "cefr": "VARCHAR(8)",
         "source": "VARCHAR(16) DEFAULT 'llm'",
+        "mock_reason": "VARCHAR(24)",
         "scoring_json": "TEXT DEFAULT '{}'",
     }
     if "reports" in tables:

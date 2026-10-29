@@ -1,6 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
@@ -15,6 +16,7 @@ from ..schemas import (
 )
 from ..security import get_current_user
 from ..services.llm import chat_reply
+from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
 from ..services.report_view import report_out
 from ..services.rules import apply_to_report
 from ..services.scenes import get_scene
@@ -23,13 +25,35 @@ from evaluation.features import fluency_features, speech_features, tokenize
 
 router = APIRouter(prefix="/api", tags=["sessions"])
 
+KEY_INVALID_BODY = {
+    "kind": "key_invalid",
+    "detail": "模型密钥无效或被拒绝，请到「设置」更换密钥后再试",
+}
+KEY_REQUIRED_BODY = {
+    "kind": "llm_not_configured",
+    "detail": "还没有接入模型密钥",
+}
+
+
+def key_invalid_response() -> JSONResponse:
+    """用户自己的密钥被拒：502 + key_invalid，明确让人去换 key，不降级。"""
+    return JSONResponse(status_code=502, content=KEY_INVALID_BODY)
+
+
+def key_required_response() -> JSONResponse:
+    """没有任何可用密钥：没有模型就没法对话，直接拦住，不假装能练。"""
+    return JSONResponse(status_code=409, content=KEY_REQUIRED_BODY)
+
 
 @router.post("/sessions", response_model=CreateSessionOut)
 def create_session(
     body: CreateSessionIn,
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
+    llm: LLMConfig = Depends(get_llm_config),
 ):
+    if not llm.configured:
+        return key_required_response()
     scene = get_scene(body.scene_id)
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -50,12 +74,15 @@ def add_turn(
     body: TurnIn,
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
+    llm: LLMConfig = Depends(get_llm_config),
 ):
     sess = db.get(PracticeSession, session_id)
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="会话不存在")
     if sess.status != "active":
         raise HTTPException(status_code=400, detail="会话已结束")
+    if not llm.configured:
+        return key_required_response()
 
     scene = get_scene(sess.scene_id)
     audio_json = (
@@ -74,7 +101,10 @@ def add_turn(
 
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
     user_count = sum(1 for t in history if t["role"] == "user")
-    reply = chat_reply(scene, sess.difficulty, history, user_count)
+    try:
+        reply = chat_reply(scene, sess.difficulty, history, user_count, llm)
+    except UserKeyInvalid:
+        return key_invalid_response()
 
     db.add(Turn(session_id=sess.id, role="ai", content=reply))
     db.commit()
@@ -92,12 +122,16 @@ def finish_session(
     session_id: int,
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
+    llm: LLMConfig = Depends(get_llm_config),
 ):
     sess = db.get(PracticeSession, session_id)
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="会话不存在")
     if sess.report:
         return report_out(sess.report)
+    # finish 故意不拦「没有 key」：练习已经做完，key 中途被删也该给出一份报告，
+    # 走 not_configured 的示例报告（分数留空），而不是把用户卡在报告页外面。
+    # 拦只在 create_session / add_turn 两个“进入对话”的入口做。
 
     scene = get_scene(sess.scene_id)
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
@@ -110,7 +144,10 @@ def finish_session(
     features.update(
         speech_features([len(tokenize(t.content)) for t in user_turns], audio_metas)
     )
-    data = generate_report(scene, sess.difficulty, history)
+    try:
+        data = generate_report(scene, sess.difficulty, history, llm)
+    except UserKeyInvalid:
+        return key_invalid_response()
     data = apply_to_report(data, features, sess.scene_id, user_text)
     detail = data.get("scoring_detail") or {}
     scoring_json = json.dumps(
@@ -123,6 +160,7 @@ def finish_session(
         band=data.get("band"),
         cefr=data.get("cefr"),
         source=data.get("source", "llm"),
+        mock_reason=data.get("mock_reason"),
         dimensions_json=json.dumps(data.get("dimensions", {}), ensure_ascii=False),
         bands_json=json.dumps(data.get("bands", {}), ensure_ascii=False),
         fixes_json=json.dumps(data.get("sentence_fixes", []), ensure_ascii=False),

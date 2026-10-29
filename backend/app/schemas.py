@@ -76,6 +76,8 @@ class ReportOut(BaseModel):
     band: float | None = None
     cefr: str | None = None
     source: str = "llm"  # llm | mock
+    # 仅 source=mock 时会有值：not_configured | invalid_key | unavailable
+    mock_reason: str | None = None
     dimensions: Dict[str, int] = {}
     bands: Dict[str, float] = {}
     sentence_fixes: List[SentenceFix] = []

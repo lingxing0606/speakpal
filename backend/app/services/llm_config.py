@@ -1,0 +1,83 @@
+"""每个请求的模型配置：浏览器带来的 key 优先，`.env` 兜底。
+
+密钥只在内存里用一次，不落库、不打日志。base_url / model 同样支持请求头覆盖，
+这样用户可以用自己的中转或别的 OpenAI 兼容服务。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from urllib.parse import urlparse
+
+from fastapi import Header
+
+from ..config import settings
+
+
+@dataclass(frozen=True)
+class LLMConfig:
+    api_key: str
+    base_url: str
+    model: str
+    key_source: str  # user | env | none
+
+    @property
+    def from_user(self) -> bool:
+        return self.key_source == "user"
+
+    @property
+    def configured(self) -> bool:
+        return self.key_source != "none"
+
+
+def _clean(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def is_valid_base_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def build_llm_config(
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> LLMConfig:
+    user_key = _clean(api_key)
+    env_key = (settings.llm_api_key or "").strip()
+    if user_key:
+        key, source = user_key, "user"
+    elif env_key:
+        key, source = env_key, "env"
+    else:
+        key, source = "", "none"
+    return LLMConfig(
+        api_key=key,
+        base_url=_clean(base_url) or settings.llm_base_url,
+        model=_clean(model) or settings.llm_model,
+        key_source=source,
+    )
+
+
+def get_llm_config(
+    x_llm_key: str | None = Header(default=None, alias="X-LLM-Key"),
+    x_llm_base_url: str | None = Header(default=None, alias="X-LLM-Base-URL"),
+    x_llm_model: str | None = Header(default=None, alias="X-LLM-Model"),
+) -> LLMConfig:
+    return build_llm_config(x_llm_key, x_llm_base_url, x_llm_model)
+
+
+class UserKeyInvalid(Exception):
+    """用户自己配的 key 被服务端拒绝（401/403）。
+
+    这种情况必须明确告诉用户去换 key，不能降级成「示例报告」——否则用户会以为
+    模型暂时不可用，反复重试一个永远不可能成功的密钥。
+    """
+
+    def __init__(self, message: str = "模型密钥无效或被拒绝，请到「设置」更换密钥后再试"):
+        self.message = message
+        super().__init__(message)

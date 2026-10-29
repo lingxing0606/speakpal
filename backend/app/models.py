@@ -66,6 +66,8 @@ class Report(Base):
     band = Column(Float, nullable=True)  # 雅思 band（0.5 步长），见 docs/rubric-band.md
     cefr = Column(String(8), nullable=True)  # A2 / B1 / B2 / C1 / C2
     source = Column(String(16), default="llm")  # llm | mock（示例报告）
+    # 降级原因：not_configured | invalid_key | unavailable，前端据此给不同提示
+    mock_reason = Column(String(24), nullable=True)
     dimensions_json = Column(Text, default="{}")
     bands_json = Column(Text, default="{}")
     scoring_json = Column(Text, default="{}")
