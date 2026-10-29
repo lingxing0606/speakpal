@@ -86,6 +86,27 @@ TASK_CHECKS = {
         ("举例", ("for example", "for instance", "such as", "like")),
         ("延伸或对比", ("but", "while", "compared", "also", "too", "however", "although")),
     ],
+    "hotel_checkin": [
+        ("预订或证件", ("reservation", "booking", "booked", "under the name", "passport", "id")),
+        ("房型与天数", ("room", "single", "double", "twin", "suite", "nights", "stay")),
+        ("价格或付款", ("price", "cost", "how much", "pay", "card", "cash", "deposit")),
+        ("设施或早餐", ("breakfast", "wifi", "gym", "pool", "checkout", "check-out", "check in")),
+        ("礼貌收尾", ("thank you", "thanks", "please", "perfect")),
+    ],
+    "airport_checkin": [
+        ("证件或航班", ("passport", "booking", "ticket", "flight", "boarding pass")),
+        ("行李", ("bag", "bags", "luggage", "suitcase", "check in", "carry-on", "carry on")),
+        ("座位偏好", ("window", "aisle", "seat", "together", "next to")),
+        ("时间或登机口", ("boarding", "gate", "departure", "depart", "time", "delay")),
+        ("礼貌收尾", ("thank you", "thanks", "please")),
+    ],
+    "restaurant_order": [
+        ("人数或预订", ("table", "reservation", "two", "three", "people", "for one")),
+        ("菜品", ("menu", "dish", "chicken", "beef", "fish", "pasta", "salad", "soup", "rice")),
+        ("饮料", ("water", "coffee", "tea", "beer", "wine", "juice", "cola", "drink")),
+        ("忌口或要求", ("without", "no ", "allergy", "spicy", "vegetarian", "extra", "less")),
+        ("结账", ("bill", "check", "pay", "card", "cash", "how much", "thanks", "thank you")),
+    ],
 }
 
 
@@ -299,10 +320,18 @@ def fuse(model_score, rule_score, weight_rule, note=""):
     return detail
 
 
-def apply_to_report(data: dict, features: dict, scene_id: str, user_text: str) -> dict:
+def apply_to_report(
+    data: dict,
+    features: dict,
+    scene_id: str,
+    user_text: str,
+    has_voice: bool = True,
+    has_typed: bool = False,
+) -> dict:
     """把规则分与模型分融合，重算 dimensions / bands / band / cefr / total_score。
 
     只应在模型正常返回（source=llm）时调用；降级报告不允许借规则分“凑”出成绩。
+    打字轮不进发音/流利度，录音轮不进文字表达——即使模型多给了，这里也丢掉。
     """
     if data.get("source") != "llm":
         return data
@@ -311,6 +340,11 @@ def apply_to_report(data: dict, features: dict, scene_id: str, user_text: str) -
         return data
 
     model_scores = {dim: 10.0 * b + 10.0 for dim, b in model_bands.items()}
+    if not has_voice:
+        for dim in ("pronunciation", "fluency"):
+            model_scores.pop(dim, None)
+    if not has_typed:
+        model_scores.pop("written_expression", None)
 
     fluency = evaluate_fluency(features)
     complexity = evaluate_complexity(features, user_text)
@@ -356,6 +390,16 @@ def apply_to_report(data: dict, features: dict, scene_id: str, user_text: str) -
             "hit_rate": task["hit_rate"],
         }
         final_scores["task_completion"] = detail["task_completion"]["final_score"]
+
+    # 文字表达：只有打字轮时才出现，模型依文本判断，没有规则证据
+    if "written_expression" in model_scores:
+        detail["written_expression"] = fuse(
+            model_scores["written_expression"],
+            None,
+            0.0,
+            note="文字表达由模型依打字内容判断（书面组织与用词），不计发音和流利度",
+        )
+        final_scores["written_expression"] = detail["written_expression"]["final_score"]
 
     dims = {k: int(round(v)) for k, v in final_scores.items() if v is not None}
     if not dims:

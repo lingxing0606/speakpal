@@ -23,6 +23,30 @@ SCENES = [
         "role": "an IELTS speaking examiner",
         "opening": "Let's talk about where you live. Do you live in a house or an apartment?",
     },
+    {
+        "id": "hotel_checkin",
+        "name": "酒店入住",
+        "icon": "hotel",
+        "desc": "报预订、选房型、问早餐和退房时间",
+        "role": "a hotel receptionist at the front desk",
+        "opening": "Good evening! Do you have a reservation with us?",
+    },
+    {
+        "id": "airport_checkin",
+        "name": "机场值机",
+        "icon": "plane",
+        "desc": "交证件、托运行李、选座位、问登机口",
+        "role": "an airline check-in agent at the airport",
+        "opening": "Good morning! May I see your passport and booking, please?",
+    },
+    {
+        "id": "restaurant_order",
+        "name": "餐厅点餐",
+        "icon": "utensils",
+        "desc": "点菜、说忌口、加饮料、结账买单",
+        "role": "a friendly waiter at a casual restaurant",
+        "opening": "Good evening! A table for how many?",
+    },
 ]
 
 

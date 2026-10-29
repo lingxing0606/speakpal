@@ -158,28 +158,46 @@ def _fallback_report(history, mock_reason: str, detail: str = ""):
 
 
 def _prompt(scene: dict, difficulty: str, history) -> str:
-    convo = "\n".join(
-        f"{'AI' if t.get('role') == 'ai' else 'User'}: {t.get('content', '')}"
-        for t in history
-    )
+    lines = []
+    for t in history:
+        if t.get("role") == "ai":
+            lines.append(f"AI: {t.get('content', '')}")
+        else:
+            mode = "voice" if (t.get("input_mode") or "voice") == "voice" else "typed"
+            lines.append(f"User ({mode}): {t.get('content', '')}")
+    convo = "\n".join(lines)
+    modes = {
+        "voice": sum(1 for t in history if t.get("role") == "user" and (t.get("input_mode") or "voice") == "voice"),
+        "typed": sum(1 for t in history if t.get("role") == "user" and (t.get("input_mode") or "voice") == "typed"),
+    }
     return (
-        "You are an English speaking assessor. Rate the learner on four dimensions "
-        "using IELTS Speaking band descriptors, then explain the reasons.\n"
+        "You are an English assessor. Rate the learner using IELTS band descriptors, "
+        "then explain the reasons.\n"
         "Return ONLY valid JSON with this schema:\n"
         '{"bands":{"pronunciation":3.0-9.0,"fluency":3.0-9.0,'
-        '"grammar_vocab":3.0-9.0,"task_completion":3.0-9.0},'
+        '"grammar_vocab":3.0-9.0,"task_completion":3.0-9.0,"written_expression":3.0-9.0},'
         '"sentence_fixes":[{"original":"","better":"","reason":""}],'
         '"comment":"","note":"分数由 AI 估算，仅供参考。"}\n'
+        "Which dimensions to return (IMPORTANT):\n"
+        f"- This conversation has {modes['voice']} spoken (voice) turns and {modes['typed']} typed turns.\n"
+        "- pronunciation and fluency: ONLY if there is at least one voice turn. Score them from the voice turns only.\n"
+        "  If there are zero voice turns, OMIT pronunciation and fluency from `bands` completely.\n"
+        "- written_expression: ONLY if there is at least one typed turn. Score how well the learner expresses\n"
+        "  ideas in writing (sentence construction, vocabulary choice, coherence). Score it from typed turns only.\n"
+        "  If there are zero typed turns, OMIT written_expression completely.\n"
+        "- grammar_vocab and task_completion: always return, based on all turns.\n"
+        "- Never give a typed turn credit for pronunciation or fluency; never give a voice turn\n"
+        "  a written_expression score.\n"
         "Scoring rules:\n"
         "- Bands are IELTS-style, 0.5 steps only, between 3.0 and 9.0.\n"
-        "- pronunciation: estimate from the transcript only; you cannot hear the audio. \n"
+        "- pronunciation: estimate from the transcript only; you cannot hear the audio.\n"
         "  Use band descriptors for intelligibility; do not claim acoustic or phoneme analysis.\n"
         "- fluency: use coherence, length of turns, repetition, hesitation visible in wording.\n"
         "- grammar_vocab: grammar accuracy and range plus lexical resource.\n"
         "- task_completion: did the learner actually do what the scene requires, and is the register polite/appropriate.\n"
         "- Be strict but fair: an answer that is short, off-topic or mostly filler belongs to band 4-5;\n"
         "  a coherent answer with some errors belongs to band 6; accurate, flexible language is band 7+.\n"
-        "- sentence_fixes: 1-3 items. `original` MUST be copied verbatim from the learner's turn; \n"
+        "- sentence_fixes: 1-3 items. `original` MUST be copied verbatim from the learner's turn;\n"
         "  never invent a sentence the learner did not say.\n"
         "- Write `comment` and every `reason` in Simplified Chinese (简体中文).\n"
         "- Keep `original` and `better` in English: the learner's sentence and the improved version.\n\n"

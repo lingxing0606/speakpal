@@ -103,6 +103,10 @@ def add_turn(
     audio_json = (
         json.dumps(body.audio.model_dump(), ensure_ascii=False) if body.audio else "{}"
     )
+    # 打字还是录音：优先用前端显式传的，否则按有没有音频推断
+    input_mode = (body.input_mode or "").strip().lower()
+    if input_mode not in ("voice", "typed"):
+        input_mode = "voice" if body.audio else "typed"
 
     # 先把这一轮拼进内存里的 history，模型调用成功后才落库。
     # 否则 502 之后用户那句已经写进 turns，换好 key 重试会在对话里出现两遍。
@@ -121,10 +125,11 @@ def add_turn(
             session_id=sess.id,
             role="user",
             content=transcript,
+            input_mode=input_mode,
             audio_json=audio_json,
         )
     )
-    db.add(Turn(session_id=sess.id, role="ai", content=reply))
+    db.add(Turn(session_id=sess.id, role="ai", content=reply, input_mode="voice"))
     db.commit()
 
     return TurnOut(
@@ -152,24 +157,49 @@ def finish_session(
     # 拦只在 create_session / add_turn 两个“进入对话”的入口做。
 
     scene = get_scene(sess.scene_id)
-    history = [{"role": t.role, "content": t.content} for t in sess.turns]
     user_turns = [t for t in sess.turns if t.role == "user"]
     if not user_turns:
         # 一句没说就出报告，只会拿到一份“没有可展示的句子”的空报告，没有意义
         raise HTTPException(status_code=400, detail="还没有任何回答，先至少聊一轮再生成报告")
-    user_text = " ".join(t["content"] for t in history if t["role"] == "user")
-    audio_metas = [json.loads(t.audio_json or "{}") for t in user_turns]
 
-    # 先算可测特征，再打分：规则子分要拿 features 才能和模型分融合
+    voice_turns = [t for t in user_turns if (t.input_mode or "voice") == "voice"]
+    typed_turns = [t for t in user_turns if (t.input_mode or "voice") == "typed"]
+    typed_count = len(typed_turns)
+
+    history = [
+        {
+            "role": t.role,
+            "content": t.content,
+            "input_mode": t.input_mode or "voice",
+        }
+        for t in sess.turns
+    ]
+    user_text = " ".join(t.content for t in user_turns)
+    voice_text = " ".join(t.content for t in voice_turns)
+    audio_metas = [json.loads(t.audio_json or "{}") for t in voice_turns]
+
+    # 先算可测特征，再打分：规则子分要拿 features 才能和模型分融合。
+    # 语速/停顿只从录音轮算；词汇多样性等文本特征用全部发言。
     features = fluency_features(user_text)
-    features.update(
-        speech_features([len(tokenize(t.content)) for t in user_turns], audio_metas)
-    )
+    if voice_turns:
+        features.update(
+            speech_features([len(tokenize(t.content)) for t in voice_turns], audio_metas)
+        )
+        features["voice_word_count"] = len(tokenize(voice_text))
+    features["voice_turns"] = len(voice_turns)
+    features["typed_turns"] = typed_count
     try:
         data = generate_report(scene, sess.difficulty, history, llm)
     except UserKeyInvalid:
         return key_invalid_response()
-    data = apply_to_report(data, features, sess.scene_id, user_text)
+    data = apply_to_report(
+        data,
+        features,
+        sess.scene_id,
+        user_text,
+        has_voice=bool(voice_turns),
+        has_typed=typed_count > 0,
+    )
     detail = data.get("scoring_detail") or {}
     scoring_json = json.dumps(
         {"dimensions": detail, "note": data.get("scoring_note", "")}, ensure_ascii=False
@@ -219,6 +249,7 @@ def get_session_detail(
                 id=t.id,
                 role=t.role,
                 content=t.content,
+                input_mode=t.input_mode or "voice",
                 created_at=utc_iso(t.created_at),
             )
             for t in sess.turns
@@ -242,6 +273,12 @@ def list_sessions(
     out = []
     for s in rows:
         scene = get_scene(s.scene_id)
+        voice_n = sum(
+            1 for t in s.turns if t.role == "user" and (t.input_mode or "voice") == "voice"
+        )
+        typed_n = sum(
+            1 for t in s.turns if t.role == "user" and (t.input_mode or "voice") == "typed"
+        )
         out.append(
             HistoryItem(
                 id=s.id,
@@ -250,6 +287,8 @@ def list_sessions(
                 status=s.status,
                 report_id=s.report.id if s.report else None,
                 total_score=s.report.total_score if s.report else None,
+                voice_turns=voice_n,
+                typed_turns=typed_n,
                 created_at=utc_iso(s.created_at),
             )
         )

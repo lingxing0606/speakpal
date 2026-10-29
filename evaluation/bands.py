@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import math
 
-DIMENSIONS = ("pronunciation", "fluency", "grammar_vocab", "task_completion")
+# 前四个是口语维度；written_expression 只在用户「打字回答」时出现
+DIMENSIONS = (
+    "pronunciation",
+    "fluency",
+    "grammar_vocab",
+    "task_completion",
+    "written_expression",
+)
 
 BAND_MIN = 3.0
 BAND_MAX = 9.0
