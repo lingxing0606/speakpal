@@ -35,6 +35,39 @@ const SPEECH_RATES = [
   { value: 1.15, label: '快' },
 ]
 
+// 句型脚手架：卡住时给三种说法，用提示不扣分
+const frames = ref([])
+const framesOpen = ref(false)
+const framesLoading = ref(false)
+
+async function toggleFrames() {
+  if (framesOpen.value) {
+    framesOpen.value = false
+    return
+  }
+  framesOpen.value = true
+  if (frames.value.length) return
+  const sceneId = session.scene?.id
+  if (!sceneId) return
+  framesLoading.value = true
+  try {
+    const { data } = await api.get(`/scenes/${sceneId}/frames`)
+    frames.value = data?.frames || []
+  } catch (e) {
+    error.value = '拿不到句型提示：' + (e?.response?.data?.detail || e.message)
+  } finally {
+    framesLoading.value = false
+  }
+}
+
+function useFrame(f) {
+  manualText.value = f.en
+  recognizedText.value = ''
+  pendingAudio = null
+  framesOpen.value = false
+  openManual()
+}
+
 // 识别出来的这句连同录音一起暂存，用户确认发送时才带上；
 // 用户改过文字就不带录音了，免得「语速/停顿」指标和文字对不上
 const recognizedText = ref('')
@@ -49,6 +82,25 @@ const DIFFICULTY_LABELS = { easy: '简单', medium: '中等', hard: '困难' }
 const difficultyLabel = computed(() => DIFFICULTY_LABELS[session.difficulty] || session.difficulty || '—')
 const elapsedText = computed(() => `${Math.floor(elapsed.value / 60)}:${String(elapsed.value % 60).padStart(2, '0')}`)
 const hasUserTurn = computed(() => session.turns.some((t) => t.role === 'user'))
+const userTurnCount = computed(() => session.turns.filter((t) => t.role === 'user').length)
+// 常驻进度：别让人说两句就点结束，也别等到第 4 轮才知道能出报告
+const progressHint = computed(() => {
+  if (canFinish.value) return '聊得差不多了，可以出报告了'
+  const left = 3 - userTurnCount.value
+  if (left > 0) return `再说 ${left} 句就能出报告（已说 ${userTurnCount.value} 句）`
+  return '可以点「结束并出报告」看评分'
+})
+
+// 进对话前先确认有密钥：不让人听完开场白、录完一句才被拒
+const blocked = ref(false)
+const envFallback = ref(false)
+const blockReason = ref('')
+
+// 进页缺密钥 / 发送时被 502 拒，都落到同一张页内面板
+function showKeyPanel(reason = '') {
+  blockReason.value = reason
+  blocked.value = true
+}
 
 // 语音识别错误码翻成用户能懂的话，不把 not-allowed 这种英文码甩到页面上
 const SPEECH_ERRORS = {
@@ -66,8 +118,23 @@ onMounted(async () => {
     router.push('/')
     return
   }
+  const gate = await llmReady()
+  if (!gate.ok) {
+    blocked.value = true
+    blockReason.value = ''
+    try {
+      const { data } = await api.get('/config/llm')
+      envFallback.value = !!data?.env_configured
+    } catch {
+      envFallback.value = false
+    }
+    return
+  }
+  await loadSession(id)
+})
 
-  // 刷进 /practice/:id：先用服务端记录回填，刷新不丢对话
+// 刷进 /practice/:id：先用服务端记录回填，刷新不丢对话
+async function loadSession(id) {
   if (id && session.sessionId !== id) {
     loadingSession.value = true
     try {
@@ -98,7 +165,13 @@ onMounted(async () => {
 
   const last = session.turns[session.turns.length - 1]
   if (last && last.role === 'ai') speak(last.content, 'en-US', speechRate.value)
-})
+}
+
+function continueWithServer() {
+  blockReason.value = ''
+  blocked.value = false
+  loadSession(Number(route.params.id))
+}
 
 onUnmounted(() => {
   stopTimer()
@@ -223,8 +296,10 @@ async function send(text, audio = null, mode = 'typed') {
     const kind = e?.response?.data?.kind
     if (e?.response?.status === 409 && (kind === 'llm_not_configured' || detail === 'llm_key_required')) {
       error.value = KEY_REQUIRED_MESSAGE
+      showKeyPanel('还没接入模型密钥。配好之后就能继续这段对话。')
     } else if (e?.response?.status === 502 && kind === 'key_invalid') {
       error.value = '你的密钥被模型服务拒绝了，去设置里换一个再试；这句话没有计入记录。'
+      showKeyPanel('你的密钥被模型服务拒绝了，换一个再继续。这句话没有计入记录。')
     } else {
       error.value = '发送失败：' + (detail || e.message)
     }
@@ -332,11 +407,31 @@ async function finish() {
             </button>
           </div>
           <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
+          <router-link to="/settings" class="sp-btn-ghost">设置</router-link>
         </div>
       </div>
     </header>
 
-    <main ref="chatEl" class="sp-shell flex-1 space-y-3 overflow-y-auto py-6">
+    <div v-if="blocked" class="sp-shell py-10">
+      <div class="sp-card mx-auto max-w-lg p-6 ring-brand-100">
+        <div class="font-semibold text-ink">{{ blockReason || '进对话前要先接入一个模型密钥' }}</div>
+        <p v-if="blockReason" class="mt-1.5 text-sm leading-6 text-ink-soft">
+          换一个能用的密钥就能接着这段对话，刚才那句话没有计入记录。
+        </p>
+        <p v-else class="mt-1.5 text-sm leading-6 text-ink-soft">
+          练习要调用模型陪聊和评分，没有密钥会中途卡住。密钥只存在你自己的浏览器里，不上传、不写数据库。
+          <template v-if="!envFallback">服务端目前也没有兜底密钥，所以必须自己填。</template>
+        </p>
+        <div class="mt-4 flex flex-wrap items-center gap-2">
+          <button class="sp-btn-primary" @click="router.push('/settings?onboarding=1')">去设置填密钥</button>
+          <button v-if="envFallback" class="sp-btn-secondary" @click="continueWithServer">用服务端密钥继续（演示）</button>
+          <button v-if="blockReason" class="sp-btn-ghost" @click="blocked = false">返回练习</button>
+          <button v-else class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
+        </div>
+      </div>
+    </div>
+
+    <main v-if="!blocked" ref="chatEl" class="sp-shell flex-1 space-y-3 overflow-y-auto py-6">
       <div
         v-for="(t, i) in session.turns"
         :key="i"
@@ -399,8 +494,10 @@ async function finish() {
       </p>
     </main>
 
-    <footer class="border-t border-line bg-white/90 backdrop-blur">
+    <footer v-if="!blocked" class="border-t border-line bg-white/90 backdrop-blur">
       <div class="sp-shell space-y-3 py-3">
+        <p v-if="!manualOpen" class="text-center text-[11px] text-ink-mute">{{ progressHint }}</p>
+
         <p v-if="error" class="sp-alert-error">{{ error }}</p>
 
         <div
@@ -421,6 +518,28 @@ async function finish() {
             </button>
             <button class="sp-btn-ghost py-1.5" @click="confirmingFinish = false">继续聊</button>
           </div>
+        </div>
+
+        <div v-if="framesOpen" class="rounded-xl bg-canvas p-3 ring-1 ring-line">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-ink-soft">三种说法 · 用提示不扣分</span>
+            <button class="text-[11px] text-ink-mute hover:text-ink-soft" @click="framesOpen = false">收起</button>
+          </div>
+          <p v-if="framesLoading" class="mt-2 text-xs text-ink-mute">正在取…</p>
+          <div v-else class="mt-2 grid gap-2 sm:grid-cols-3">
+            <button
+              v-for="f in frames"
+              :key="f.en"
+              class="rounded-xl bg-white px-3 py-2 text-left ring-1 ring-line transition hover:ring-brand-300"
+              @click="useFrame(f)"
+            >
+              <div class="text-xs font-medium leading-5 text-ink">{{ f.en }}</div>
+              <div class="mt-0.5 text-[11px] leading-5 text-ink-mute">{{ f.zh }}</div>
+            </button>
+          </div>
+          <p v-if="!framesLoading && !frames.length" class="mt-2 text-xs text-ink-mute">
+            这个场景暂时没有句型提示。
+          </p>
         </div>
 
         <div v-if="manualOpen" class="space-y-2">
@@ -446,7 +565,12 @@ async function finish() {
         </div>
 
         <div v-else class="flex items-center justify-between gap-3">
-          <button ref="manualBtn" class="sp-btn-secondary" :disabled="sending" @click="openManual">手动输入</button>
+          <div class="flex flex-col gap-1.5">
+            <button ref="manualBtn" class="sp-btn-secondary" :disabled="sending" @click="openManual">手动输入</button>
+            <button class="sp-btn-ghost !px-2 !py-1 text-[11px]" :disabled="sending" @click="toggleFrames">
+              三种说法
+            </button>
+          </div>
 
           <div class="flex flex-col items-center gap-1">
             <button
@@ -474,7 +598,7 @@ async function finish() {
             </span>
           </div>
 
-          <button class="sp-btn-soft" :disabled="finishing || sending" @click="requestFinish">
+          <button class="sp-btn bg-brand-700 text-white shadow-soft hover:bg-brand-800" :disabled="finishing || sending" @click="requestFinish">
             {{ finishing ? '生成中…' : '结束并出报告' }}
           </button>
         </div>

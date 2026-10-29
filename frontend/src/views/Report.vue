@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
+import { createRecognizer, speak } from '../utils/speech'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,6 +15,26 @@ const report = ref(null)
 const error = ref('')
 const missing = ref(false)
 const showDetail = ref(false)
+const showFeatures = ref(false)
+const meta = ref(null)
+
+const MODE_LABELS = { typed: '打字', voice: '录音', mixed: '混合' }
+
+function when(iso) {
+  if (!iso) return ''
+  const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso)
+  const d = new Date(hasZone ? iso : `${iso}Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+// 报告首屏要知道「这是哪次练习」：场景 · 作答方式 · 时间
+const metaLine = computed(() => {
+  const m = meta.value || {}
+  const mode = MODE_LABELS[m.answer_mode] || MODE_LABELS[report.value?.answer_mode] || ''
+  return [m.scene_name, mode, when(m.created_at || m.finished_at)].filter(Boolean).join(' · ')
+})
 
 const dimLabels = {
   pronunciation: '发音清晰度',
@@ -39,6 +60,9 @@ const featureLabels = {
   pause_count: '停顿次数',
   mean_pause_sec: '平均停顿（秒）',
   pause_ratio: '停顿占比',
+  voice_turns: '录音轮数',
+  typed_turns: '打字轮数',
+  answer_mode: '作答方式',
 }
 
 const isMock = computed(() => report.value?.source === 'mock')
@@ -118,10 +142,19 @@ function dimBand(name) {
 
 const displayFeatures = computed(() => {
   const src = report.value?.features || {}
+  const wordCount = Number(src.word_count ?? 0)
   const out = {}
   for (const [k, v] of Object.entries(src)) {
     if (v === null || v === undefined) continue
-    out[k] = typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : v
+    // 没有中文标签的字段一律不渲染，后端以后新增字段也不会漏出英文键
+    if (!featureLabels[k]) continue
+    // 打字作答没有录音，填充词这类口语指标没意义
+    if (typedOnly.value && (k === 'filler_count' || k === 'filler_rate')) continue
+    // 词数太少时 TTR / MTLD 必然接近满分，会骗人
+    if ((k === 'ttr' || k === 'mtld' || k === 'diversity' || k === 'diversity_metric') && wordCount < 20) continue
+    let val = typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : v
+    if (k === 'diversity_metric' && typeof val === 'string') val = val.toUpperCase()
+    out[k] = val
   }
   return out
 })
@@ -130,6 +163,7 @@ onMounted(async () => {
   try {
     const { data } = await api.get(`/sessions/${route.params.id}/report`)
     report.value = data
+    loadDrills()
   } catch (e) {
     if (e?.response?.status === 404) {
       // 从历史点进来的会话还没生成报告（中途退出/刷新丢态），别甩英文错误
@@ -138,7 +172,133 @@ onMounted(async () => {
     }
     error.value = '加载报告失败：' + (e?.response?.data?.detail || e.message)
   }
+  try {
+    const { data } = await api.get(`/sessions/${route.params.id}`)
+    meta.value = data
+  } catch {
+    meta.value = null
+  }
 })
+
+// 下一练：按推荐难度直接开一场，不用回首页重新选
+async function nextPractice() {
+  try {
+    const rec = await api.get('/me/recommendation')
+    const sceneId = rec?.data?.last_scene_id || meta.value?.scene_id
+    const difficulty = rec?.data?.recommended_difficulty || 'medium'
+    if (!sceneId) {
+      router.push('/')
+      return
+    }
+    const { data } = await api.post('/sessions', { scene_id: sceneId, difficulty })
+    session.start(
+      data.session_id,
+      { id: sceneId, name: meta.value?.scene_name || '练习' },
+      difficulty,
+      data.opening_question
+    )
+    router.push(`/practice/${data.session_id}`)
+  } catch (e) {
+    error.value = '开始下一练失败：' + (e?.response?.data?.detail || e.message)
+  }
+}
+
+// ---- 跟读重说：把报告的「改写句」做成练-错-立刻改的闭环 ----
+const drills = ref({ items: [], pass_threshold: 0.85 })
+const drillOpen = ref(null)
+const drillListening = ref(false)
+const drillText = ref('')
+const drillResult = ref(null)
+const drillBusy = ref(false)
+let drillRecognizer = null
+
+async function loadDrills() {
+  try {
+    const { data } = await api.get(`/sessions/${route.params.id}/drills`)
+    drills.value = { items: data?.items || [], pass_threshold: data?.pass_threshold ?? 0.85 }
+  } catch {
+    // 降级报告没有改写句，接口会给空数组；拿不到就整块隐藏
+    drills.value = { items: [], pass_threshold: 0.85 }
+  }
+}
+
+const topFixes = computed(() => (drills.value.items || []).slice(0, 3).filter((it) => it.target))
+
+function stopDrillListen() {
+  if (drillRecognizer) {
+    drillRecognizer.abort?.()
+    drillRecognizer = null
+  }
+  drillListening.value = false
+}
+
+function openDrill(item) {
+  stopDrillListen()
+  drillOpen.value = item.index
+  drillText.value = ''
+  drillResult.value = null
+}
+
+function closeDrill() {
+  stopDrillListen()
+  drillOpen.value = null
+  drillResult.value = null
+  drillText.value = ''
+}
+
+function toggleDrillListen(item) {
+  if (drillListening.value) {
+    stopDrillListen()
+    return
+  }
+  drillText.value = ''
+  drillResult.value = null
+  error.value = ''
+  drillRecognizer = createRecognizer(
+    (text) => {
+      drillText.value = text
+    },
+    () => {
+      drillListening.value = false
+      if (drillText.value.trim()) submitDrill(item)
+    },
+    (event) => {
+      drillListening.value = false
+      const map = {
+        'not-allowed': '麦克风权限被拒绝了。请在地址栏左侧允许，或先听一遍原句。',
+        'no-speech': '没听到声音，再点一次麦克风试试。',
+        'audio-capture': '没找到麦克风，检查一下设备。',
+      }
+      const msg = map[event?.error]
+      if (msg) error.value = msg
+    }
+  )
+  if (!drillRecognizer) {
+    error.value = '当前浏览器不支持语音识别，请换 Chrome 再跟读。'
+    return
+  }
+  drillListening.value = true
+  drillRecognizer.start()
+}
+
+async function submitDrill(item) {
+  const text = drillText.value.trim()
+  if (!text || drillBusy.value) return
+  drillBusy.value = true
+  try {
+    const { data } = await api.post(`/sessions/${route.params.id}/drills/${item.index}/attempt`, {
+      transcript: text,
+    })
+    drillResult.value = data
+    item.attempts = data.attempts
+    item.best_similarity = data.best_similarity
+    item.passed = data.passed
+  } catch (e) {
+    error.value = '评定失败：' + (e?.response?.data?.detail || e.message)
+  } finally {
+    drillBusy.value = false
+  }
+}
 
 function again() {
   session.clear()
@@ -155,7 +315,10 @@ function again() {
             <BrandLogo :size="30" />
           </router-link>
           <span class="h-4 w-px bg-line"></span>
-          <div class="font-semibold text-ink">复盘报告</div>
+          <div>
+            <div class="font-semibold text-ink">复盘报告</div>
+            <div v-if="metaLine" class="mt-0.5 text-[11px] text-ink-mute">{{ metaLine }}</div>
+          </div>
         </div>
         <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
       </div>
@@ -232,23 +395,106 @@ function again() {
           </div>
         </div>
 
-        <div
-          v-if="Object.keys(displayFeatures).length"
-          class="sp-card mt-4 p-6"
-        >
-          <div class="font-semibold text-ink">{{ typedOnly ? '文字表达指标' : '流利度与表达指标' }}</div>
-          <div class="mt-3.5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+        <div v-if="topFixes.length" class="sp-card mt-4 p-6">
+          <div class="flex items-baseline justify-between gap-2">
+            <div class="font-semibold text-ink">最该改的 {{ topFixes.length }} 句 · 跟读重说</div>
+            <span class="text-[11px] text-ink-mute">相似度 ≥ {{ Math.round(drills.pass_threshold * 100) }}% 算过</span>
+          </div>
+          <p class="mt-1 text-xs leading-5 text-ink-soft">先听原句，再照着改写句重说一遍，立刻知道有没有靠近。</p>
+
+          <div v-for="item in topFixes" :key="item.index" class="mt-3 rounded-xl bg-canvas p-3.5 ring-1 ring-line/60">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-xs leading-5 text-ink-mute line-through decoration-rose-300">{{ item.source }}</div>
+                <div class="mt-0.5 text-sm font-medium leading-6 text-brand-700">{{ item.target }}</div>
+                <div v-if="item.focus" class="mt-1 text-[11px] leading-5 text-ink-mute">{{ item.focus }}</div>
+              </div>
+              <div class="flex shrink-0 flex-col items-end gap-1.5">
+                <span v-if="item.passed" class="sp-chip-brand">已通过</span>
+                <span v-else-if="item.best_similarity !== null && item.best_similarity !== undefined" class="sp-chip-line">
+                  最好 {{ Math.round(item.best_similarity * 100) }}%
+                </span>
+                <button class="sp-btn-secondary !px-3 !py-1.5 text-xs" @click="openDrill(item)">重说这句</button>
+              </div>
+            </div>
+
+            <div v-if="drillOpen === item.index" class="mt-3 rounded-xl bg-white p-3 ring-1 ring-brand-100">
+              <div class="flex flex-wrap items-center gap-2">
+                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="speak(item.target, 'en-US', 0.9)">先听一遍</button>
+                <button class="sp-btn-primary !px-3 !py-1.5 text-xs" :disabled="drillBusy" @click="toggleDrillListen(item)">
+                  {{ drillListening ? '正在听…点一下停' : '点一下说' }}
+                </button>
+                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="closeDrill">收起</button>
+              </div>
+              <p v-if="drillText" class="mt-2 text-xs leading-5 text-ink-soft">听到：{{ drillText }}</p>
+              <p v-else class="mt-2 text-xs text-ink-mute">点「点一下说」，照着上面那句读一遍。</p>
+
+              <div
+                v-if="drillResult"
+                class="mt-2 rounded-lg px-3 py-2 text-xs leading-5"
+                :class="drillResult.passed ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-amber-50 text-amber-800 ring-1 ring-amber-100'"
+              >
+                <div class="font-medium">
+                  {{ drillResult.passed ? '过了！' : '还不够接近' }} · 相似度
+                  {{ Math.round(drillResult.similarity * 100) }}% · 第 {{ drillResult.attempts }} 次
+                </div>
+                <div class="mt-0.5">{{ drillResult.feedback }}</div>
+              </div>
+            </div>
+          </div>
+
+          <p class="mt-3 text-[11px] leading-5 text-ink-mute">
+            跟读只比转写文字，不看声调；想练发音对比，试
+            <router-link to="/pronunciation" class="font-medium text-brand-700 underline-offset-2 hover:underline">
+              ship / sheep 小游戏
+            </router-link>
+            。
+          </p>
+        </div>
+
+        <div class="sp-card mt-4 p-6">
+          <div class="font-semibold text-ink">逐句纠错</div>
+          <p v-if="!report.sentence_fixes.length" class="mt-3 text-sm text-ink-mute">
+            本次没有可展示的句子。
+          </p>
+          <div
+            v-for="(f, i) in report.sentence_fixes"
+            :key="i"
+            class="mt-3 rounded-xl bg-canvas p-4 text-sm ring-1 ring-line/60"
+          >
+            <div class="flex items-start gap-2">
+              <span class="mt-0.5 text-[11px] font-medium text-ink-mute">原句</span>
+              <div :class="f.better ? 'text-rose-500 line-through decoration-rose-300' : 'text-ink-soft'" class="leading-6">
+                {{ f.original }}
+              </div>
+            </div>
+            <div v-if="f.better" class="mt-1.5 flex items-start gap-2">
+              <span class="mt-0.5 text-[11px] font-medium text-brand-700">改写</span>
+              <div class="leading-6 text-brand-700">{{ f.better }}</div>
+            </div>
+            <div class="mt-2 border-t border-line/70 pt-2 text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
+          </div>
+        </div>
+
+        <div v-if="Object.keys(displayFeatures).length" class="sp-card mt-4 p-6">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="font-semibold text-ink">{{ typedOnly ? '文字表达指标' : '流利度与表达指标' }}</div>
+              <div class="mt-0.5 text-xs text-ink-mute">词数、语速这些可测数字，想看再展开。</div>
+            </div>
+            <button class="sp-btn-ghost shrink-0 py-1.5" @click="showFeatures = !showFeatures">
+              {{ showFeatures ? '收起' : '展开' }}
+            </button>
+          </div>
+          <div v-if="showFeatures" class="mt-3.5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
             <div v-for="(v, k) in displayFeatures" :key="k" class="rounded-xl bg-canvas px-3.5 py-3 ring-1 ring-line/60">
-              <div class="text-[11px] text-ink-mute">{{ featureLabels[k] || k }}</div>
+              <div class="text-[11px] text-ink-mute">{{ featureLabels[k] }}</div>
               <div class="sp-num mt-1 text-[15px] font-semibold text-ink">{{ v }}</div>
             </div>
           </div>
         </div>
 
-        <div
-          v-if="hasDetail"
-          class="sp-card mt-4 p-6"
-        >
+        <div v-if="hasDetail" class="sp-card mt-4 p-6">
           <div class="flex items-start justify-between gap-3">
             <div>
               <div class="font-semibold text-ink">评分依据（可复现）</div>
@@ -279,37 +525,14 @@ function again() {
           </div>
         </div>
 
-        <div class="sp-card mt-4 p-6">
-          <div class="font-semibold text-ink">逐句纠错</div>
-          <p v-if="!report.sentence_fixes.length" class="mt-3 text-sm text-ink-mute">
-            本次没有可展示的句子。
-          </p>
-          <div
-            v-for="(f, i) in report.sentence_fixes"
-            :key="i"
-            class="mt-3 rounded-xl bg-canvas p-4 text-sm ring-1 ring-line/60"
-          >
-            <div class="flex items-start gap-2">
-              <span class="mt-0.5 text-[11px] font-medium text-ink-mute">原句</span>
-              <div :class="f.better ? 'text-rose-500 line-through decoration-rose-300' : 'text-ink-soft'" class="leading-6">
-                {{ f.original }}
-              </div>
-            </div>
-            <div v-if="f.better" class="mt-1.5 flex items-start gap-2">
-              <span class="mt-0.5 text-[11px] font-medium text-brand-700">改写</span>
-              <div class="leading-6 text-brand-700">{{ f.better }}</div>
-            </div>
-            <div class="mt-2 border-t border-line/70 pt-2 text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
-          </div>
-        </div>
-
         <div class="sp-card mt-4 p-6 text-sm leading-6 text-ink-soft">
           {{ report.comment }}
         </div>
 
-        <div class="mt-6 flex gap-3">
-          <button class="sp-btn-primary flex-1" @click="again">再来一次</button>
-          <button class="sp-btn-secondary flex-1" @click="router.push('/history')">看历史</button>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <button class="sp-btn-primary flex-1" @click="nextPractice">按推荐再练一次</button>
+          <button class="sp-btn-secondary flex-1" @click="again">再来一次</button>
+          <button class="sp-btn-ghost" @click="router.push('/history')">看历史</button>
         </div>
       </div>
     </main>

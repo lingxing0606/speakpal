@@ -354,6 +354,10 @@ function logout() {
       <p class="pb-4 text-center text-xs text-ink-mute">
         密钥只在你的浏览器里；练习数据按账号存在服务端，可以随时自己删掉。
       </p>
+
+      <div class="pb-6 text-center">
+        <button class="sp-btn-ghost text-xs" @click="router.push('/welcome?again=1')">再看一遍新手引导（30 秒）</button>
+      </div>
     </main>
   </div>
 </template>

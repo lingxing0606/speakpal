@@ -21,6 +21,10 @@ const error = ref('')
 const needKey = ref(false)
 const envFallback = ref(false)
 const pendingScene = ref(null)
+const rec = ref(null)
+const pickedDifficulty = ref(false)
+
+const DIFF_LABELS = { easy: '简单', medium: '中等', hard: '困难' }
 
 onMounted(async () => {
   try {
@@ -29,7 +33,23 @@ onMounted(async () => {
   } catch (e) {
     error.value = '加载场景失败：' + (e?.response?.data?.detail || e.message)
   }
+  // 按上次成绩推荐难度：没出过分就是中等，用户自己改过就不覆盖
+  try {
+    const { data } = await api.get('/me/recommendation')
+    rec.value = data
+    if (!pickedDifficulty.value && data?.recommended_difficulty) {
+      difficulty.value = data.recommended_difficulty
+    }
+  } catch {
+    rec.value = null
+  }
 })
+
+function pickRecommended() {
+  if (!rec.value?.recommended_difficulty) return
+  difficulty.value = rec.value.recommended_difficulty
+  pickedDifficulty.value = true
+}
 
 async function begin(scene) {
   loading.value = true
@@ -108,14 +128,26 @@ function logout() {
           </p>
         </div>
 
-        <label class="flex items-center gap-2 text-sm text-ink-soft">
-          <span class="text-xs font-medium text-ink-mute">难度</span>
-          <select v-model="difficulty" class="sp-select">
-            <option value="easy">简单</option>
-            <option value="medium">中等</option>
-            <option value="hard">困难</option>
-          </select>
-        </label>
+        <div class="flex flex-col gap-1.5">
+          <label class="flex items-center gap-2 text-sm text-ink-soft">
+            <span class="text-xs font-medium text-ink-mute">难度</span>
+            <select v-model="difficulty" class="sp-select" @change="pickedDifficulty = true">
+              <option value="easy">简单</option>
+              <option value="medium">中等</option>
+              <option value="hard">困难</option>
+            </select>
+          </label>
+          <p v-if="rec" class="text-[11px] leading-5 text-ink-mute sm:text-right">
+            推荐 {{ DIFF_LABELS[rec.recommended_difficulty] || rec.recommended_difficulty }} · {{ rec.reason }}
+            <button
+              v-if="difficulty !== rec.recommended_difficulty"
+              class="ml-1 font-medium text-brand-700 underline-offset-2 hover:underline"
+              @click="pickRecommended"
+            >
+              用推荐
+            </button>
+          </p>
+        </div>
       </div>
 
       <p v-if="error" class="sp-alert-error mt-5">{{ error }}</p>

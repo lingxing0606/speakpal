@@ -4,10 +4,17 @@ import { useRouter } from 'vue-router'
 
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
+import { useSessionStore } from '../stores/session'
+import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
 
 const router = useRouter()
+const session = useSessionStore()
 const items = ref([])
 const error = ref('')
+const rec = ref(null)
+const needKey = ref(false)
+const envFallback = ref(false)
+const pendingItem = ref(null)
 
 onMounted(async () => {
   try {
@@ -16,7 +23,63 @@ onMounted(async () => {
   } catch (e) {
     error.value = '加载失败：' + (e?.response?.data?.detail || e.message)
   }
+  try {
+    const { data } = await api.get('/me/recommendation')
+    rec.value = data
+  } catch {
+    rec.value = null
+  }
 })
+
+async function askKey(item) {
+  pendingItem.value = item
+  needKey.value = true
+  try {
+    const { data } = await api.get('/config/llm')
+    envFallback.value = !!data?.env_configured
+  } catch {
+    envFallback.value = false
+  }
+}
+
+// 继续练 / 再练一次都要先确认有密钥，别让人听完开场白、录完一句才被拒
+async function resume(item) {
+  const gate = await llmReady()
+  if (!gate.ok) {
+    askKey(item)
+    return
+  }
+  router.push(`/practice/${item.id}`)
+}
+
+async function replay(item) {
+  const gate = await llmReady()
+  if (!gate.ok) {
+    askKey(item)
+    return
+  }
+  try {
+    const { data } = await api.post('/sessions', {
+      scene_id: item.scene_id,
+      difficulty: rec.value?.recommended_difficulty || 'medium',
+    })
+    session.start(
+      data.session_id,
+      { id: item.scene_id, name: item.scene_name },
+      rec.value?.recommended_difficulty || 'medium',
+      data.opening_question
+    )
+    router.push(`/practice/${data.session_id}`)
+  } catch (e) {
+    error.value = '开始失败：' + (e?.response?.data?.detail || e.message)
+  }
+}
+
+function useServerKey() {
+  const item = pendingItem.value
+  needKey.value = false
+  if (item) resume(item)
+}
 
 // 成长曲线用可比 band（语言复杂度 + 语用得体性），打字和录音都能进同一条线；
 // total_score 只在同模式内可比，不拿来跨模式连线
@@ -33,6 +96,11 @@ const curveSessions = computed(() =>
 
 const MODE_LABELS = { voice: '录音', typed: '打字', mixed: '混合' }
 
+// 纵轴固定成雅思全量程 3–9，不按数据动态缩放：
+// 动态量程会把 5.0→5.5 的 0.5 档画成贯穿全高的陡坡，看起来像“巨大进步”，这是误导。
+const BAND_LO = 3
+const BAND_HI = 9
+
 const curve = computed(() => {
   const rows = curveSessions.value
   if (rows.length < 2) return null
@@ -40,17 +108,38 @@ const curve = computed(() => {
   const h = 80
   const pad = 6
   const vals = rows.map((r) => Number(r.comparable_band ?? r.band))
-  const lo = Math.max(0, Math.min(...vals) - 0.5)
-  const hi = Math.min(9, Math.max(...vals) + 0.5)
-  const span = hi - lo || 1
+  const span = BAND_HI - BAND_LO
+  const yOf = (v) => {
+    const band = Math.min(BAND_HI, Math.max(BAND_LO, v))
+    return h - pad - ((band - BAND_LO) / span) * (h - pad * 2)
+  }
   const points = rows.map((r, i) => {
     const x = pad + (i * (w - pad * 2)) / (rows.length - 1)
     const v = Number(r.comparable_band ?? r.band)
-    const y = h - pad - ((v - lo) / span) * (h - pad * 2)
-    return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)), band: v, mode: r.answer_mode || '' }
+    const y = yOf(v)
+    return {
+      x: Number(x.toFixed(1)),
+      y: Number(y.toFixed(1)),
+      band: v,
+      mode: r.answer_mode || '',
+      label: v.toFixed(1),
+      labelY: Number(Math.max(9, y - 6).toFixed(1)),
+    }
   })
   const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ')
-  return { points, path, w, h, first: vals[0], last: vals[vals.length - 1], count: rows.length }
+  // 整数档网格线（4–8），让“平缓的进步”和“真实的跃升”能区分开
+  const grid = [4, 5, 6, 7, 8].map((v) => Number(yOf(v).toFixed(1)))
+  return {
+    points,
+    path,
+    grid,
+    w,
+    h,
+    first: vals[0],
+    last: vals[vals.length - 1],
+    count: rows.length,
+    showLabels: rows.length <= 8,
+  }
 })
 
 function inputTag(it) {
@@ -59,6 +148,12 @@ function inputTag(it) {
   if (!it.typed_turns) return '录音'
   if (!it.voice_turns) return '打字'
   return '混合'
+}
+
+// 行内等级与曲线同一口径（可比 band），否则同一次练习会出现两个不同等级
+function rowBand(it) {
+  const v = it.comparable_band ?? it.band
+  return v === null || v === undefined ? null : Number(v)
 }
 
 // 后端给的是不带时区的 UTC 串，先补 Z 再解析，否则会当成本地时间差 8 小时
@@ -74,7 +169,7 @@ function when(iso) {
 function open(item) {
   // 按后端列表字段直接分支，不做「先跳报告页、404 再退回」的试探
   if (item.report_id) return router.push(`/report/${item.id}`)
-  if (item.status && item.status !== 'finished') return router.push(`/practice/${item.id}`)
+  if (item.status && item.status !== 'finished') return resume(item)
   // finished 却没有报告（生成失败等罕见情况）：报告页会给「还没有报告」的说明
   return router.push(`/report/${item.id}`)
 }
@@ -100,6 +195,19 @@ function open(item) {
 
     <main class="sp-shell py-8">
       <p v-if="error" class="sp-alert-error">{{ error }}</p>
+
+      <div v-if="needKey" class="sp-card mb-4 p-5 ring-brand-100">
+        <div class="font-semibold text-ink">先接入一个模型密钥</div>
+        <p class="mt-1 text-xs leading-5 text-ink-soft">
+          继续练习会调用模型陪聊和评分。密钥只存在你自己的浏览器里，不上传、不写数据库。
+          <template v-if="!envFallback">服务端目前也没有兜底密钥，所以必须自己填。</template>
+        </p>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <button class="sp-btn-primary" @click="router.push('/settings?onboarding=1')">去设置填密钥</button>
+          <button v-if="envFallback" class="sp-btn-secondary" @click="useServerKey">用服务端密钥继续（演示）</button>
+          <button class="sp-btn-ghost" @click="needKey = false">取消</button>
+        </div>
+      </div>
 
       <div class="mb-4 flex items-baseline justify-between">
         <h1 class="text-xl font-bold tracking-tight text-ink">我的练习</h1>
@@ -128,9 +236,19 @@ function open(item) {
             <div class="text-xs text-ink-mute">{{ curve.count }} 次</div>
           </div>
           <p class="mt-0.5 text-[11px] leading-5 text-ink-mute">
-            纵轴只取「语言复杂度 + 语用得体性」，打字和录音都画在这条线上，所以能直接比。
+            两种练习用同一把尺子量（只看语言复杂度 + 语用得体性），所以打字和录音能直接比；纵轴固定雅思 3–9。
           </p>
-          <svg :viewBox="`0 0 ${curve.w} ${curve.h}`" class="mt-3 h-24 w-full" role="img" aria-label="可比 band 成长曲线">
+          <svg :viewBox="`0 0 ${curve.w} ${curve.h}`" class="mt-3 h-24 w-full" role="img" aria-label="可比 band 成长曲线，纵轴固定雅思 3 到 9">
+            <line
+              v-for="(gy, i) in curve.grid"
+              :key="`g${i}`"
+              x1="0"
+              :x2="curve.w"
+              :y1="gy"
+              :y2="gy"
+              stroke="#E3EAE9"
+              stroke-width="1"
+            />
             <path :d="curve.path" fill="none" stroke="#1F9C89" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             <circle
               v-for="(p, i) in curve.points"
@@ -142,6 +260,9 @@ function open(item) {
               :stroke="p.mode === 'typed' ? '#1F9C89' : '#fff'"
               stroke-width="1.6"
             />
+            <g v-if="curve.showLabels" fill="#475467" font-size="8" text-anchor="middle">
+              <text v-for="(p, i) in curve.points" :key="`t${i}`" :x="p.x" :y="p.labelY">{{ p.label }}</text>
+            </g>
           </svg>
           <div class="mt-1 flex items-center justify-between text-[11px] text-ink-mute">
             <span>从 雅思 {{ curve.first.toFixed(1) }} 到现在</span>
@@ -166,7 +287,7 @@ function open(item) {
             </div>
             <div class="mt-1 text-xs text-ink-mute">
               {{ when(it.created_at) }}
-              <span v-if="it.band !== null && it.band !== undefined"> · 雅思 {{ Number(it.band).toFixed(1) }}</span>
+              <span v-if="rowBand(it) !== null"> · 可比 雅思 {{ rowBand(it).toFixed(1) }}</span>
             </div>
           </div>
           <div class="flex shrink-0 items-center gap-3">
@@ -176,6 +297,12 @@ function open(item) {
             </div>
             <div v-else-if="it.status && it.status !== 'finished'" class="sp-chip-brand">进行中</div>
             <div v-else class="sp-chip-line">未出分</div>
+            <button
+              class="sp-chip-line text-brand-700 ring-brand-200 transition hover:bg-brand-50"
+              @click.stop="replay(it)"
+            >
+              再练一次
+            </button>
             <span class="text-[11px] text-ink-mute">{{ it.report_id ? '看报告' : '继续练习' }}</span>
             <span class="text-line transition">→</span>
           </div>
