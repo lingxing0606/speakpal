@@ -38,6 +38,22 @@ const featureLabels = {
 }
 
 const isMock = computed(() => report.value?.source === 'mock')
+const mockReason = computed(() => report.value?.mock_reason || '')
+const mockHint = computed(() => {
+  switch (mockReason.value) {
+    case 'not_configured':
+      return '这次练习没有可用的模型密钥，所以没出分。去「设置」里填一个密钥，再练一次就能拿到完整评分。'
+    case 'invalid_key':
+      return '服务端配置的兜底密钥失效了，这是部署侧的问题，不是你操作错了。可以先自己配一个密钥，或者等运维修好。'
+    case 'unavailable':
+      return '评分服务这次没连上（网络中断或超时），所以没出分。过一会儿再练一次就行，你的发言记录已经保存。'
+    default:
+      return '这次没有拿到评分结果，因此不计分、不给等级。下面列出的句子都是你真实说过的内容，不是示例句。'
+  }
+})
+const showMockSettingsLink = computed(
+  () => mockReason.value === 'not_configured' || mockReason.value === 'invalid_key' || !mockReason.value
+)
 const hasScore = computed(() => report.value?.total_score !== null && report.value?.total_score !== undefined)
 const scoringDims = computed(() => report.value?.scoring_detail?.dimensions || {})
 const hasDetail = computed(() => Object.keys(scoringDims.value).length > 0)
@@ -116,7 +132,8 @@ function again() {
           v-if="isMock"
           class="mb-4 rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-800 ring-1 ring-amber-200"
         >
-          示例报告（模型不可用）：这次没有拿到评分结果，因此<b>不计分、不给等级</b>。下面列出的句子都是你真实说过的内容，不是示例句。
+          示例报告（本次不计分）：{{ mockHint }}
+          <router-link v-if="showMockSettingsLink" to="/settings" class="ml-1 font-medium underline">去设置</router-link>
         </div>
 
         <div
