@@ -309,7 +309,7 @@ System prompt 模板：
 
   | 情形 | 返回 | 界面 |
   |---|---|---|
-  | 用户请求头里的 key 被拒（401/403） | **502** `{"kind": "key_invalid"}`，不生成报告、会话保持 active，换 key 可重试 | 「key 无效，去设置里换」+ 重试 |
+  | 用户请求头里的 key 被拒（401/403） | **502** `{"kind": "key_invalid"}`，不生成报告、会话保持 active，换 key 可重试；**这一轮用户发言也不落库**（模型调用成功后才写 `turns`），重试不会出现两条一样的发言 | 「key 无效，去设置里换」+ 重试 |
   | `.env` 兜底密钥失效（请求头没带 key） | 200 + `source=mock` + `mock_reason=invalid_key` | 「服务端密钥失效，本次不计分」 |
   | 超时 / 不可达 / 返回无法解析 | 200 + `source=mock` + `mock_reason=unavailable` | 「模型服务暂时不可用，稍后重试」 |
   | 会话中途失去全部 key 再 finish | 200 + `source=mock` + `mock_reason=not_configured` | 「本次未接入模型，示例报告不计分」 |
