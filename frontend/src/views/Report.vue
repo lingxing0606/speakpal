@@ -139,7 +139,7 @@ const bandText = computed(() => {
 const scoreNote = computed(() => {
   const r = report.value
   if (!r) return ''
-  if (hasDetail.value) return '综合分 = 模型分与可测规则分融合；每一维的模型分 / 规则分 / 最终分在下方「评分依据」里。'
+  if (hasDetail.value) return '综合分 = 模型分与可测规则分融合；有可测证据的维度同时给出规则分。'
   return r.note || ''
 })
 
@@ -384,10 +384,6 @@ function again() {
             <div v-if="bandText" class="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3.5 py-1.5 text-sm font-medium text-brand-700">
               {{ bandText }}
             </div>
-            <div v-if="bandText" class="mt-1.5 text-[11px] leading-5 text-ink-mute">
-              本模式口径（按这次是录音还是打字换算）；历史曲线用的是跨模式可比口径。
-            </div>
-            <div class="mt-2.5 text-xs leading-5 text-ink-mute">{{ scoreNote }}</div>
           </div>
         </div>
 
@@ -397,7 +393,7 @@ function again() {
         >
           <div class="flex items-baseline justify-between">
             <div class="font-semibold text-ink">{{ Object.keys(report.dimensions).length }} 个维度</div>
-            <div class="text-xs text-ink-mute">模型分与可测指标融合</div>
+            <div class="text-xs text-ink-mute">模型分与可测规则分融合</div>
           </div>
           <div v-for="(v, k) in report.dimensions" :key="k" class="mb-4 mt-4 last:mb-0">
             <div class="flex items-baseline justify-between text-sm">
@@ -527,8 +523,12 @@ function again() {
             </button>
           </div>
           <div v-if="showDetail" class="mt-3">
-            <p class="text-xs leading-5 text-ink-soft">
-              每个维度先由模型打分，再用可测指标（词数、语速、TTR 等）校准；「最终」才是算进综合分的那一列。
+            <p v-if="scoreNote" class="text-xs leading-5 text-ink-soft">{{ scoreNote }}</p>
+            <p v-if="bandText" class="mt-1 text-xs leading-5 text-ink-mute">
+              band 是本模式口径（按这次是录音还是打字换算）；历史曲线用的是跨模式可比口径。
+            </p>
+            <p class="mt-1 text-xs leading-5 text-ink-soft">
+              每个维度先由模型打分，再用可测规则分（词数、语速、TTR 等）校准；「最终」才是算进综合分的那一列。
             </p>
             <div v-if="report.scoring_detail.note" class="mt-1 text-xs leading-5 text-ink-mute">
               {{ report.scoring_detail.note }}
@@ -543,6 +543,14 @@ function again() {
               <div v-if="d.clamped" class="mt-1.5 text-xs text-warn">{{ d.clamp_reason }}</div>
               <div class="mt-1.5 text-xs leading-5 text-ink-soft">{{ d.note }}</div>
               <div v-if="evidenceText(d)" class="mt-1 text-[11px] leading-5 text-ink-mute">{{ evidenceText(d) }}</div>
+            </div>
+
+            <div class="mt-4 rounded-xl bg-canvas p-3.5 text-[11px] leading-5 text-ink-mute ring-1 ring-line/60">
+              <div class="mb-1 font-medium text-ink-soft">综合分怎么来的（按作答模式加权）</div>
+              <div>纯录音：发音 20 · 流利度 20 · 语法词汇（语言复杂度）30 · 任务完成度（语用得体性）30</div>
+              <div>纯打字：文字表达 35 · 语法词汇（语言复杂度）35 · 任务完成度（语用得体性）30</div>
+              <div>混合：发音 15 · 流利度 15 · 文字表达 20 · 语法词汇（语言复杂度）25 · 任务完成度（语用得体性）25</div>
+              <div class="mt-1">缺的维度按剩余权重归一，不按 0 分算；跨模式只比「可比 band」（语法词汇 + 任务完成度）。</div>
             </div>
           </div>
         </div>
