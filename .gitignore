@@ -19,3 +19,4 @@ tmp-zoom-*.png
 
 # 任何 *.env 都不进仓库：临时 env 文件里可能带真 key
 *.env
+frontend/public/probe-*.html
