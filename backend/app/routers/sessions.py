@@ -17,6 +17,7 @@ from ..schemas import (
     TurnOut,
 )
 from ..security import get_current_user
+from ..timeutil import utc_iso
 from ..services.llm import chat_reply
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
 from ..services.report_view import report_out
@@ -212,13 +213,13 @@ def get_session_detail(
         scene_name=scene["name"] if scene else sess.scene_id,
         difficulty=sess.difficulty,
         status=sess.status,
-        created_at=sess.created_at.isoformat(),
+        created_at=utc_iso(sess.created_at),
         turns=[
             SessionTurnOut(
                 id=t.id,
                 role=t.role,
                 content=t.content,
-                created_at=t.created_at.isoformat(),
+                created_at=utc_iso(t.created_at),
             )
             for t in sess.turns
         ],
@@ -249,7 +250,7 @@ def list_sessions(
                 status=s.status,
                 report_id=s.report.id if s.report else None,
                 total_score=s.report.total_score if s.report else None,
-                created_at=s.created_at.isoformat(),
+                created_at=utc_iso(s.created_at),
             )
         )
     return out

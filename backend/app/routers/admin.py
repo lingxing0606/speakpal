@@ -19,6 +19,7 @@ from ..services.storage import (
     write_location,
 )
 from ..services.user_data import delete_user_data
+from ..timeutil import utc_iso
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -113,7 +114,7 @@ def recent_sessions(
                 "scene": scene["name"] if scene else s.scene_id,
                 "status": "finished" if s.report else "incomplete",
                 "score": s.report.total_score if s.report else None,
-                "created_at": s.created_at.isoformat(),
+                "created_at": utc_iso(s.created_at),
             }
         )
     return out
