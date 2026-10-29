@@ -98,6 +98,8 @@ speakpal/
 - 错误提示（账号已存在、密码错误）
 - 登录成功 → 存 token → 跳首页
 - **token 过期回跳**：`client.js` 遇 401 跳 `/login?expired=1&next=<原路径>`；`next` 只接受 `/` 开头、排除 `//` 与 `/login`（防开放重定向），登录成功后优先回 `next`
+- **被踢要说原因**：改密码导致 `token_version` 失效时，401 响应带原因码，前端拦截器把 `?reason=password_changed` 带到登录页并显示「密码已修改，请重新登录」，
+  不再一律显示「登录状态已过期」——用户分不清是自己掉线还是账号在别的设备被改。
 
 ### Home 首页 / 场景选择（需登录）
 - 顶部：昵称 + 退出登录
@@ -129,8 +131,10 @@ speakpal/
 - 直接输地址进未完成会话时给「这次练习还没有报告 + 重新练一次」，不显示「加载报告失败」
 - 维度集合**随作答方式变化**，不是固定 4 个：有录音轮才出现「发音 / 流利度」，有打字轮才出现 **`written_expression`（文字表达）**。
   纯打字只有 3 维、纯录音 4 维、混合 5 维；模型多给了也会被后端丢掉（`rules.py:343-347`）。
-- 综合分 = **参与维度的平均值**（代码现状 `rules.py:407`，等权；加权口径待功能指导师定，改前别在文档里写「加权」）。
-  因为维度数不同，**3 维的总分不能和 4 维的总分直接比**：报告顶部要写明「本次为打字作答，发音 / 流利度未计入」，历史成长曲线只画含录音的会话（口径见 §15）。
+- 综合分 = **按作答模式加权**（`evaluation/bands.py:33-52` 的 `DIMENSION_WEIGHTS`，由 `rules.py:414-415` 调用）：纯录音 20/20/30/30、纯打字 35/35/30、混合 15/15/20/25/25。
+  缺失维度按剩余权重重新归一，不当作 0 分；认不出模式时才退回等权（`bands.py:75-91`）。
+  同模式内的总分可比，**跨模式的 `total_score` 仍不可直接连线**——权重不同。
+  报告顶部写明作答方式（纯打字：「发音 / 流利度未计入」；混合：录音 N 轮、打字 M 轮各算哪一维）。
 - 一句总评
 - 按钮：再来一次 / 导出 PDF / 返回首页
 
@@ -168,9 +172,15 @@ speakpal/
 | POST | /api/sessions/{id}/turn | 用户作答一轮（body 可带 `input_mode: voice|typed`，见 §5） | 是 |
 | POST | /api/sessions/{id}/finish | 结束并生成报告 | 是 |
 | GET | /api/sessions/{id} | 单个会话完整对话，用于刷新/回填；每轮带 `input_mode`（见 §5） | 是 |
-| GET | /api/sessions | 历史会话列表（当前用户，带 `status` / `report_id` / `voice_turns` / `typed_turns`） | 是 |
-| GET | /api/sessions/{id}/report | 读取某次报告 | 是 |
+| GET | /api/sessions | 历史会话列表（当前用户，带 `status` / `report_id` / `band` / `cefr` / `comparable_band` / `answer_mode` / `voice_turns` / `typed_turns`） | 是 |
+| GET | /api/sessions/{id}/report | 读取某次报告（带 `answer_mode` / `comparable_band`） | 是 |
 | POST | /api/stt | （可选）后端兜底转写 | 是 |
+| GET | /api/sessions/{id}/drills | 跟读重说队列：报告里每条改写 → 目标句 + 通过阈值（0.85） | 是 |
+| POST | /api/sessions/{id}/drills/{index}/attempt | 提交一次跟读（转写），回相似度与是否通过 | 是 |
+| GET | /api/scenes/{id}/frames | 句型脚手架（`cafe_order` 3 条等） | 是 |
+| GET | /api/pronunciation/minimal-pairs | 最小对立对题组（`sets`，两组各 10 对） | 是 |
+| POST | /api/pronunciation/check | 判一次最小对立对（`correct` / `partner_heard` / `reason`） | 是 |
+| GET | /api/me/recommendation | 按最近报告给的难度建议 | 是 |
 | POST | /api/config/llm/test | 验证用户自带 API key（见 §13） | 是 |
 | GET | /api/config/llm | 服务端兜底 key 是否配置（不回显 key） | 是 |
 | GET | /api/system/storage | 数据目录/库文件/可写性（运维用，网页不展示，见 §13.3） | 是 |
@@ -257,7 +267,8 @@ users(id, username UNIQUE, password_hash, nickname, created_at, token_version)  
 sessions(id, user_id, scene_id, difficulty, status, created_at)                   -- status: active | finished
 turns(id, session_id, role, content, audio_json, input_mode, created_at)         -- role: ai | user；input_mode: voice | typed
 reports(id, session_id, total_score, band, cefr, bands_json, dimensions_json,
-        fixes_json, comment, source, mock_reason, scoring_json, created_at)
+        fixes_json, comment, source, mock_reason, scoring_json,
+        answer_mode, comparable_band, created_at)                        -- answer_mode: voice | typed | mixed
 ```
 
 ## 8. AI 设计
@@ -340,6 +351,9 @@ System prompt 模板：
   返回 `409 {"kind": "llm_not_configured", "detail": "还没有接入模型密钥"}`，由前端引导到 `/settings`（前端 `ab505f0` 起读 `kind`，不看 `detail`）。
   `llm_key_required`、`key_required` 两个字面值作废，验收只认 `kind=llm_not_configured`。
   **不能用 401**——前端 `client.js` 拦截器把任何 401 当登录失效并清 token 跳登录页。
+- **门禁的交互定稿（本轮）**：本浏览器没填 key 时，点场景**不出弹窗**，在场景列表上方展开页内面板「去设置填密钥 / 取消」；
+  只有 `GET /api/config/llm` 返回 `env_configured=true` 时，面板才多一个「用服务端密钥继续（演示）」。
+  没有兜底 key 就必须填，连「演练一下」都进不去——这是用户明确要的，别为了好走演示而放宽。
 - 失败分类（定稿口径），**不是所有失败都降级成示例报告**：
 
   | 情形 | 返回 | 界面 |
@@ -438,8 +452,9 @@ System prompt 模板：
 - 只改昵称不动 `token_version`，不登出。
 - 旧库启动时补列（`main.py:51-54`）；旧 token 没有 `tv` 时按 0 处理，不会把所有老用户一并踢下线。
 
-## 15. 打字报告 vs 录音报告：能不能比（v0.4 口径）
+## 15. 打字报告 vs 录音报告：能不能比（v0.4 定稿）
 
-- 维度数随作答方式变（纯打字 3 / 纯录音 4 / 混合 5），综合分是参与维度等权平均 → **不同作答方式的分数不能直接比**。
-- 报告顶部写「本次为打字作答，发音 / 流利度未计入」；打字会话在历史里打标记，但**不进 band 成长曲线**（曲线只画含录音的会话）。
-- `written_expression` 目前**没有规则分**，权重 0 : 1（只有模型判断，`rules.py:394-402`）。锚点与加权方案由功能指导师定，定之前保持等权，别偷改分数。
+- 维度数随作答方式变（纯打字 3 / 纯录音 4 / 混合 5），综合分**按模式加权**，不是等权（权重表见 §5 报告页与 `evaluation/bands.py:33-52`）。
+- 跨模式比较一律用 `comparable_band`：只取两种作答都会评的共享维度（`grammar_vocab` + `task_completion`）求平均再换 band（`bands.py:94-103`，`rules.py:426` 起写库）。
+  报告与历史接口都带这个字段；**成长曲线纵轴用它，且全部会话都画**（本轮定稿推翻「只画录音」），打字会话用空心点区分、行内标 `answer_mode`。
+- `written_expression` 没有规则分，权重 0 : 1（只有模型判断，`rules.py:394-402`）；它的 CEFR/雅思锚点仍待补，别在别处另造一套评分。
