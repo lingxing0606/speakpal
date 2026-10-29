@@ -12,8 +12,22 @@ const route = useRoute()
 const auth = useAuthStore()
 const settings = useSettingsStore()
 
-// 401 拦截器带过来的原因和原地址：登录过期被踢回来时给一句人话，登录后回到原来那一页
-const expired = route.query.expired === '1'
+// 401 拦截器带过来的原因和原地址：按原因给不同提示，登录后回到原来那一页
+const kickReason = (() => {
+  const raw = route.query.reason
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (typeof value === 'string' && value) return value
+  return route.query.expired === '1' ? 'expired' : ''
+})()
+const kicked = !!kickReason
+const KICK_TEXTS = {
+  password_changed: '密码已修改，请用新密码重新登录（其他设备已下线）。',
+  user_gone: '这个账号已注销，重新注册一个就能继续练。',
+  token_invalid: '登录凭证已失效，重新登录即可（练习记录还在）。',
+  unauthenticated: '请先登录。',
+}
+const kickText =
+  KICK_TEXTS[kickReason] || '登录状态已过期，重新登录就能接着练（练习记录还在）。'
 const nextPath = (() => {
   const raw = route.query.next
   const value = Array.isArray(raw) ? raw[0] : raw
@@ -152,8 +166,8 @@ async function submit() {
             </label>
           </div>
 
-          <p v-if="expired" class="mt-4 rounded-xl bg-brand-50 px-3.5 py-2.5 text-sm leading-6 text-brand-700 ring-1 ring-brand-100">
-            登录状态已过期，重新登录就能接着练（练习记录还在）。
+          <p v-if="kicked" class="mt-4 rounded-xl bg-brand-50 px-3.5 py-2.5 text-sm leading-6 text-brand-700 ring-1 ring-brand-100">
+            {{ kickText }}
           </p>
 
           <p v-if="error" class="sp-alert-error mt-4">{{ error }}</p>

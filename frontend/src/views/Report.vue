@@ -223,6 +223,10 @@ async function loadDrills() {
 }
 
 const topFixes = computed(() => (drills.value.items || []).slice(0, 3).filter((it) => it.target))
+const passedCount = computed(() => topFixes.value.filter((it) => it.passed).length)
+const drillByIndex = computed(() =>
+  Object.fromEntries((drills.value.items || []).map((it) => [it.index, it]))
+)
 
 function stopDrillListen() {
   if (drillRecognizer) {
@@ -395,61 +399,19 @@ function again() {
           </div>
         </div>
 
-        <div v-if="topFixes.length" class="sp-card mt-4 p-6">
-          <div class="flex items-baseline justify-between gap-2">
-            <div class="font-semibold text-ink">最该改的 {{ topFixes.length }} 句 · 跟读重说</div>
-            <span class="text-[11px] text-ink-mute">相似度 ≥ {{ Math.round(drills.pass_threshold * 100) }}% 算过</span>
+        <div v-if="topFixes.length" class="sp-card mt-4 flex flex-wrap items-center justify-between gap-3 p-5">
+          <div class="min-w-0">
+            <div class="font-semibold text-ink">最该改的 {{ topFixes.length }} 句</div>
+            <p class="mt-0.5 text-xs leading-5 text-ink-mute">
+              在下面「逐句纠错」里点「重说这句」，跟读相似度 ≥ {{ Math.round(drills.pass_threshold * 100) }}% 算过。
+            </p>
           </div>
-          <p class="mt-1 text-xs leading-5 text-ink-soft">先听原句，再照着改写句重说一遍，立刻知道有没有靠近。</p>
-
-          <div v-for="item in topFixes" :key="item.index" class="mt-3 rounded-xl bg-canvas p-3.5 ring-1 ring-line/60">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="text-xs leading-5 text-ink-mute line-through decoration-rose-300">{{ item.source }}</div>
-                <div class="mt-0.5 text-sm font-medium leading-6 text-brand-700">{{ item.target }}</div>
-                <div v-if="item.focus" class="mt-1 text-[11px] leading-5 text-ink-mute">{{ item.focus }}</div>
-              </div>
-              <div class="flex shrink-0 flex-col items-end gap-1.5">
-                <span v-if="item.passed" class="sp-chip-brand">已通过</span>
-                <span v-else-if="item.best_similarity !== null && item.best_similarity !== undefined" class="sp-chip-line">
-                  最好 {{ Math.round(item.best_similarity * 100) }}%
-                </span>
-                <button class="sp-btn-secondary !px-3 !py-1.5 text-xs" @click="openDrill(item)">重说这句</button>
-              </div>
-            </div>
-
-            <div v-if="drillOpen === item.index" class="mt-3 rounded-xl bg-white p-3 ring-1 ring-brand-100">
-              <div class="flex flex-wrap items-center gap-2">
-                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="speak(item.target, 'en-US', 0.9)">先听一遍</button>
-                <button class="sp-btn-primary !px-3 !py-1.5 text-xs" :disabled="drillBusy" @click="toggleDrillListen(item)">
-                  {{ drillListening ? '正在听…点一下停' : '点一下说' }}
-                </button>
-                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="closeDrill">收起</button>
-              </div>
-              <p v-if="drillText" class="mt-2 text-xs leading-5 text-ink-soft">听到：{{ drillText }}</p>
-              <p v-else class="mt-2 text-xs text-ink-mute">点「点一下说」，照着上面那句读一遍。</p>
-
-              <div
-                v-if="drillResult"
-                class="mt-2 rounded-lg px-3 py-2 text-xs leading-5"
-                :class="drillResult.passed ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-amber-50 text-amber-800 ring-1 ring-amber-100'"
-              >
-                <div class="font-medium">
-                  {{ drillResult.passed ? '过了！' : '还不够接近' }} · 相似度
-                  {{ Math.round(drillResult.similarity * 100) }}% · 第 {{ drillResult.attempts }} 次
-                </div>
-                <div class="mt-0.5">{{ drillResult.feedback }}</div>
-              </div>
-            </div>
-          </div>
-
-          <p class="mt-3 text-[11px] leading-5 text-ink-mute">
-            跟读只比转写文字，不看声调；想练发音对比，试
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <span class="sp-chip-brand">已通过 {{ passedCount }}/{{ topFixes.length }}</span>
             <router-link to="/pronunciation" class="font-medium text-brand-700 underline-offset-2 hover:underline">
-              ship / sheep 小游戏
+              练 ship / sheep
             </router-link>
-            。
-          </p>
+          </div>
         </div>
 
         <div class="sp-card mt-4 p-6">
@@ -472,7 +434,50 @@ function again() {
               <span class="mt-0.5 text-[11px] font-medium text-brand-700">改写</span>
               <div class="leading-6 text-brand-700">{{ f.better }}</div>
             </div>
-            <div class="mt-2 border-t border-line/70 pt-2 text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
+            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line/70 pt-2">
+              <div class="text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
+              <button
+                v-if="drillByIndex[i]"
+                class="sp-btn-secondary shrink-0 !px-3 !py-1 text-xs"
+                @click="openDrill(drillByIndex[i])"
+              >
+                {{ drillByIndex[i].passed ? '已通过 · 再练' : '重说这句' }}
+              </button>
+            </div>
+
+            <div
+              v-if="drillByIndex[i] && drillOpen === i"
+              class="mt-2 rounded-xl bg-white p-3 ring-1 ring-brand-100"
+            >
+              <p class="text-[11px] leading-5 text-ink-mute">
+                目标句：<span class="font-medium text-brand-700">{{ drillByIndex[i].target }}</span>
+              </p>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="speak(drillByIndex[i].target, 'en-US', 0.9)">
+                  先听一遍
+                </button>
+                <button
+                  class="sp-btn-primary !px-3 !py-1.5 text-xs"
+                  :disabled="drillBusy"
+                  @click="toggleDrillListen(drillByIndex[i])"
+                >
+                  {{ drillListening ? '正在听…点一下停' : '点一下说' }}
+                </button>
+                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="closeDrill">收起</button>
+              </div>
+              <p v-if="drillText" class="mt-2 text-xs leading-5 text-ink-soft">听到：{{ drillText }}</p>
+              <div
+                v-if="drillResult"
+                class="mt-2 rounded-lg px-3 py-2 text-xs leading-5"
+                :class="drillResult.passed ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-amber-50 text-amber-800 ring-1 ring-amber-100'"
+              >
+                <div class="font-medium">
+                  {{ drillResult.passed ? '过了！' : '还不够接近' }} · 相似度
+                  {{ Math.round(drillResult.similarity * 100) }}% · 第 {{ drillResult.attempts }} 次
+                </div>
+                <div class="mt-0.5">{{ drillResult.feedback }}</div>
+              </div>
+            </div>
           </div>
         </div>
 
