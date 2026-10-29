@@ -29,13 +29,12 @@ router.beforeEach((to) => {
   const auth = useAuthStore()
   if (to.path !== '/login' && !auth.token) return '/login'
   if (to.path === '/login' && auth.token) return '/'
-  // 新手引导每个账号只跑一次：记号存的是「看过引导的用户名」，
-  // 这样同一台机器换个新账号注册，仍然能看到引导；从设置点「再看一遍」带 ?again=1 放行
+  // 新手引导每个账号只跑一次：记号存的是「看过引导的用户名」；
+  // 旧版本的全局 '1' 没有用户名，当作「未知」放行一次，让老账号也能看一遍
   if (to.path === '/welcome' && to.query.again !== '1') {
     const mark = localStorage.getItem('sp_welcomed') || ''
     const current = auth.user?.username || ''
-    // '1' 是旧版浏览器的记号，没有用户名，按「看过」处理
-    if (mark === '1' || (!!mark && mark === current)) return '/'
+    if (!!mark && mark !== '1' && mark === current) return '/'
   }
 })
 

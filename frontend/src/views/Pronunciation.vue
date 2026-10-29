@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
-import { createRecognizer, speak } from '../utils/speech'
+import { createRecognizer, speakSmart } from '../utils/speech'
 
 const router = useRouter()
 
@@ -35,7 +35,7 @@ function keyOf(set, idx, side) {
 }
 
 function say(word) {
-  speak(word, 'en-US', 0.9)
+  speakSmart(word, { rate: 0.9 })
 }
 
 function stopRec() {

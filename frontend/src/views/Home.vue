@@ -102,7 +102,12 @@ function logout() {
     <header class="sp-header">
       <div class="sp-shell flex items-center justify-between py-3">
         <div class="flex items-center gap-3">
-          <BrandLogo :size="30" wordmark />
+          <span class="hidden sm:inline-flex">
+            <BrandLogo :size="30" wordmark />
+          </span>
+          <span class="inline-flex sm:hidden">
+            <BrandLogo :size="30" />
+          </span>
           <span class="hidden h-4 w-px bg-line sm:block"></span>
           <span class="hidden text-xs text-ink-mute sm:block">
             你好，{{ auth.user?.nickname || auth.user?.username }}

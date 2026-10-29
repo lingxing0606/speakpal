@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
-import { createRecognizer, speak } from '../utils/speech'
+import { createRecognizer, speakSmart } from '../utils/speech'
 
 const route = useRoute()
 const router = useRouter()
@@ -463,7 +463,7 @@ function again() {
                 目标句：<span class="font-medium text-brand-700">{{ drillByIndex[i].target }}</span>
               </p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
-                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="speak(drillByIndex[i].target, 'en-US', 0.9)">
+                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="speakSmart(drillByIndex[i].target, { rate: 0.9 })">
                   先听一遍
                 </button>
                 <button

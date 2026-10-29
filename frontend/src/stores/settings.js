@@ -17,15 +17,25 @@ export const useSettingsStore = defineStore('settings', () => {
   const baseUrl = ref(saved.base_url || '')
   const model = ref(saved.model || '')
 
-  /** 本浏览器是否已配置密钥 */
+  // 语音合成（可选）：不填就用浏览器内置朗读
+  const ttsKey = ref(saved.tts_key || '')
+  const ttsBaseUrl = ref(saved.tts_base_url || '')
+  const ttsModel = ref(saved.tts_model || '')
+  const ttsVoice = ref(saved.tts_voice || '')
+
+  /** 本浏览器是否已配置对话模型密钥 */
   const configured = computed(() => !!apiKey.value.trim())
+  /** 本浏览器是否已配置语音合成密钥（可选） */
+  const ttsConfigured = computed(() => !!ttsKey.value.trim())
 
   /** 只显示后四位，界面上不出现完整密钥 */
-  const masked = computed(() => {
-    const key = apiKey.value.trim()
-    if (!key) return ''
-    return key.length <= 4 ? '****' : `****${key.slice(-4)}`
-  })
+  function mask(key) {
+    const k = (key || '').trim()
+    if (!k) return ''
+    return k.length <= 4 ? '****' : `****${k.slice(-4)}`
+  }
+  const masked = computed(() => mask(apiKey.value))
+  const ttsMasked = computed(() => mask(ttsKey.value))
 
   function persist() {
     localStorage.setItem(
@@ -34,6 +44,10 @@ export const useSettingsStore = defineStore('settings', () => {
         api_key: apiKey.value.trim(),
         base_url: baseUrl.value.trim(),
         model: model.value.trim(),
+        tts_key: ttsKey.value.trim(),
+        tts_base_url: ttsBaseUrl.value.trim(),
+        tts_model: ttsModel.value.trim(),
+        tts_voice: ttsVoice.value.trim(),
       })
     )
   }
@@ -45,10 +59,22 @@ export const useSettingsStore = defineStore('settings', () => {
     persist()
   }
 
+  function saveTts({ key, baseUrl: base, model: name, voice }) {
+    ttsKey.value = key || ''
+    ttsBaseUrl.value = base || ''
+    ttsModel.value = name || ''
+    ttsVoice.value = voice || ''
+    persist()
+  }
+
   function clear() {
     apiKey.value = ''
     baseUrl.value = ''
     model.value = ''
+    ttsKey.value = ''
+    ttsBaseUrl.value = ''
+    ttsModel.value = ''
+    ttsVoice.value = ''
     localStorage.removeItem(STORAGE_KEY)
   }
 
@@ -58,8 +84,29 @@ export const useSettingsStore = defineStore('settings', () => {
     if (apiKey.value.trim()) out['X-LLM-Key'] = apiKey.value.trim()
     if (baseUrl.value.trim()) out['X-LLM-Base-URL'] = baseUrl.value.trim()
     if (model.value.trim()) out['X-LLM-Model'] = model.value.trim()
+    if (ttsKey.value.trim()) out['X-TTS-Key'] = ttsKey.value.trim()
+    if (ttsBaseUrl.value.trim()) out['X-TTS-Base-URL'] = ttsBaseUrl.value.trim()
+    if (ttsModel.value.trim()) out['X-TTS-Model'] = ttsModel.value.trim()
+    if (ttsVoice.value.trim()) out['X-TTS-Voice'] = ttsVoice.value.trim()
     return out
   }
 
-  return { apiKey, baseUrl, model, configured, masked, save, clear, headers, persist }
+  return {
+    apiKey,
+    baseUrl,
+    model,
+    ttsKey,
+    ttsBaseUrl,
+    ttsModel,
+    ttsVoice,
+    configured,
+    ttsConfigured,
+    masked,
+    ttsMasked,
+    save,
+    saveTts,
+    clear,
+    headers,
+    persist,
+  }
 })

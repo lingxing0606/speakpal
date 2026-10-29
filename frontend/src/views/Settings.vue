@@ -1,11 +1,12 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
+import { resetTtsProbe } from '../utils/speech'
 
 const router = useRouter()
 const route = useRoute()
@@ -20,6 +21,95 @@ const modelInput = ref(settings.model)
 const server = ref({ env_configured: null, error: '' })
 const saveTip = ref('')
 const testState = ref({ running: false, ok: null, message: '' })
+
+// 语音合成（可选）：不填就用浏览器朗读
+const ttsInput = ref({
+  key: settings.ttsKey,
+  base: settings.ttsBaseUrl,
+  model: settings.ttsModel,
+  voice: settings.ttsVoice,
+})
+const ttsTip = ref('')
+const ttsTest = ref({ running: false, ok: null, message: '' })
+
+// 留空时实际会用到的默认值：优先服务端给的，再退回硅基流动这套
+const TTS_FALLBACK = {
+  base: 'https://api.siliconflow.cn/v1',
+  model: 'FunAudioLLM/CosyVoice2-0.5B',
+  voice: 'FunAudioLLM/CosyVoice2-0.5B:alex',
+}
+
+function ttsDefaults() {
+  const s = server.value || {}
+  return {
+    base: s.default_tts_base_url || TTS_FALLBACK.base,
+    model: s.default_tts_model || TTS_FALLBACK.model,
+    voice: s.default_tts_voice || TTS_FALLBACK.voice,
+  }
+}
+
+function saveTts() {
+  const d = ttsDefaults()
+  // 把「实际会用到的值」真的写进去，而不是留空只靠 placeholder：
+  // 否则用户拿了硅基流动的 key、字段留空，请求会打到别的默认供应商，界面还显示保存成功
+  settings.saveTts({
+    key: ttsInput.value.key,
+    baseUrl: (ttsInput.value.base || '').trim() || d.base,
+    model: (ttsInput.value.model || '').trim() || d.model,
+    voice: (ttsInput.value.voice || '').trim() || d.voice,
+  })
+  // 新 key 存好了，清掉「本会话不再试服务端」的标记，让下一次朗读立刻用上
+  resetTtsProbe()
+  ttsInput.value = {
+    key: settings.ttsKey,
+    base: settings.ttsBaseUrl,
+    model: settings.ttsModel,
+    voice: settings.ttsVoice,
+  }
+  ttsTip.value = '已保存到本浏览器（Base URL / 模型 / 音色已填成实际会用的值）。'
+}
+
+async function testTts() {
+  ttsTest.value = { running: true, ok: null, message: '正在合成一句试听…' }
+  try {
+    const { data } = await api.post(
+      '/tts',
+      { text: 'Hi there! What can I get for you today?', speed: 1 },
+      { responseType: 'blob', timeout: 20000 }
+    )
+    if (!data || !data.size) throw new Error('empty audio')
+    const url = URL.createObjectURL(data)
+    const audio = new Audio(url)
+    audio.onended = () => URL.revokeObjectURL(url)
+    await audio.play()
+    ttsTest.value = { running: false, ok: true, message: '试听成功：语音合成已生效，练习里的朗读会用它。' }
+  } catch (e) {
+    const status = e?.response?.status
+    // 失败体是 blob（responseType: blob），读回来才知道是 key 被拒还是连不上
+    let kind = ''
+    const body = e?.response?.data
+    if (body && typeof body.text === 'function') {
+      try {
+        kind = JSON.parse(await body.text())?.kind || ''
+      } catch {
+        kind = ''
+      }
+    }
+    let msg = '试听失败：连不上语音合成服务，或返回的不是音频。练习里会自动用浏览器朗读。'
+    if (status === 409) msg = '试听失败：没读到你的 key，服务端也没有兜底，练习里会用浏览器朗读。'
+    else if (status === 502 && kind === 'tts_key_invalid') msg = '试听失败：key 被语音服务拒绝（401）。检查是不是复制少了字符，练习里会先用浏览器朗读。'
+    else if (status === 502 && kind === 'tts_unavailable') msg = '试听失败：Base URL 不可达或超时。检查地址和网络，练习里会先用浏览器朗读。'
+    else if (status === 400) msg = '试听失败：请求被拒（400），检查 Base URL 是否指向 OpenAI 兼容的 /audio/speech。'
+    ttsTest.value = { running: false, ok: false, message: msg }
+  }
+}
+
+function clearTts() {
+  settings.saveTts({ key: '', baseUrl: '', model: '', voice: '' })
+  ttsInput.value = { key: '', base: '', model: '', voice: '' }
+  ttsTip.value = '已删除语音合成密钥，会用浏览器朗读。'
+  ttsTest.value = { running: false, ok: null, message: '' }
+}
 
 const nicknameInput = ref(auth.user?.nickname || '')
 const profileState = ref({ running: false, tip: '', error: '' })
@@ -47,15 +137,33 @@ function errText(e) {
 async function loadServerStatus() {
   try {
     const { data } = await api.get('/config/llm')
-    server.value = { env_configured: data?.env_configured ?? null, error: '' }
+    server.value = {
+      env_configured: data?.env_configured ?? null,
+      tts_env_configured: data?.tts_env_configured ?? null,
+      default_tts_base_url: data?.default_tts_base_url || '',
+      default_tts_model: data?.default_tts_model || '',
+      default_tts_voice: data?.default_tts_voice || '',
+      error: '',
+    }
     if (!modelInput.value && data?.default_model) modelInput.value = data.default_model
     if (!baseInput.value && data?.default_base_url) baseInput.value = data.default_base_url
+    // 语音合成占位符用服务端的默认值，避免页面教的供应商和实际请求的对不上
+    if (!ttsInput.value.base) ttsInput.value.base = data?.default_tts_base_url || ''
+    if (!ttsInput.value.model) ttsInput.value.model = data?.default_tts_model || ''
+    if (!ttsInput.value.voice) ttsInput.value.voice = data?.default_tts_voice || ''
   } catch (e) {
-    server.value = { env_configured: null, error: errText(e) }
+    server.value = { env_configured: null, tts_env_configured: null, error: errText(e) }
   }
 }
 
-onMounted(loadServerStatus)
+onMounted(async () => {
+  await loadServerStatus()
+  // 从「去设置填密钥」跳进来时，直接滚到模型密钥那块，别让人对着个人资料找
+  if (onboarding.value) {
+    await nextTick()
+    document.getElementById('key')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+})
 
 function saveKey() {
   settings.save({ apiKey: keyInput.value, baseUrl: baseInput.value, model: modelInput.value })
@@ -213,7 +321,15 @@ function logout() {
         <button class="ml-2 font-medium underline" @click="router.push('/')">先跳过</button>
       </p>
 
-      <section class="sp-card p-6">
+      <nav class="flex flex-wrap items-center gap-1.5 text-[11px]" aria-label="设置分区">
+        <span class="text-ink-mute">跳到：</span>
+        <a href="#profile" class="sp-chip-line hover:bg-brand-50">个人资料</a>
+        <a href="#key" class="sp-chip-line hover:bg-brand-50">对话密钥</a>
+        <a href="#tts" class="sp-chip-line hover:bg-brand-50">语音合成</a>
+        <a href="#data" class="sp-chip-line hover:bg-brand-50">账号与数据</a>
+      </nav>
+
+      <section id="profile" class="sp-card scroll-mt-20 p-6">
         <h2 class="font-semibold text-ink">个人资料</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           昵称只影响显示，不影响登录账号<span v-if="auth.user?.username">（{{ auth.user.username }}）</span>。
@@ -255,10 +371,20 @@ function logout() {
         </div>
       </section>
 
-      <section class="sp-card p-6">
+<section id="key" class="sp-card scroll-mt-20 p-6">
         <h2 class="font-semibold text-ink">模型密钥</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           不填也能练：服务端配了兜底密钥时就用它；填了就优先用你自己的，且只存在这个浏览器里，不上传、不写数据库、不写日志。
+        </p>
+        <p class="mt-1 text-xs leading-5 text-ink-mute">
+          没有 key？
+          <a
+            href="https://platform.deepseek.com/api_keys"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="font-medium text-brand-700 underline-offset-2 hover:underline"
+          >打开 DeepSeek 控制台 → API keys</a>
+          ：注册登录后点「创建 API key」，复制以 <code>sk-</code> 开头的那串粘到上面。
         </p>
 
         <div class="mt-4 space-y-3">
@@ -311,8 +437,83 @@ function logout() {
         </div>
       </section>
 
-      <section class="sp-card p-6">
-        <h2 class="font-semibold text-ink">我的数据</h2>
+<section id="tts" class="sp-card scroll-mt-20 p-6">
+        <h2 class="font-semibold text-ink">语音合成密钥（可选）</h2>
+        <p class="mt-1 text-xs leading-5 text-ink-soft">
+          <span class="font-medium text-ink">这是朗读用的 key，和上面的对话密钥不是同一把</span>；填错不影响评分，只会让声音不自然。
+          不填就用浏览器自带的朗读，不需要任何 key；填了会走第三方语音合成，按你自己的额度计费。
+        </p>
+        <p class="mt-1 text-xs leading-5 text-ink-mute">
+          怎么拿：
+          <a
+            href="https://cloud.siliconflow.cn/account/ak"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="font-medium text-brand-700 underline-offset-2 hover:underline"
+          >硅基流动 → API 密钥</a>
+          （<a
+            href="https://docs.siliconflow.cn/docs/userguide/capabilities/text-to-speech"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="font-medium text-brand-700 underline-offset-2 hover:underline"
+          >语音合成文档</a>
+          ）。下面的 Base URL / 模型 / 音色留空就用默认值，一般只粘 key 就行。
+        </p>
+
+        <div class="mt-4 space-y-3">
+          <label class="block text-sm">
+            <span class="mb-1.5 block text-xs font-medium text-ink-mute">语音合成 API Key</span>
+            <input
+              v-model="ttsInput.key"
+              type="password"
+              autocomplete="off"
+              placeholder="sk-…（不填则用浏览器朗读）"
+              class="sp-input font-mono"
+            />
+          </label>
+
+          <div class="grid gap-3 sm:grid-cols-3">
+            <label class="block text-sm">
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">Base URL（留空用默认）</span>
+              <input v-model="ttsInput.base" :placeholder="ttsDefaults().base" class="sp-input" />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">模型（留空用默认）</span>
+              <input v-model="ttsInput.model" :placeholder="ttsDefaults().model" class="sp-input" />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">音色（留空用默认音色）</span>
+              <input v-model="ttsInput.voice" :placeholder="ttsDefaults().voice" class="sp-input" />
+            </label>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="sp-btn-primary" :disabled="!ttsInput.key.trim()" @click="saveTts">保存</button>
+            <button class="sp-btn-secondary" :disabled="ttsTest.running" @click="testTts">
+              {{ ttsTest.running ? '试听中…' : '试听一句' }}
+            </button>
+            <button v-if="settings.ttsConfigured" class="sp-btn-ghost text-danger hover:bg-rose-50" @click="clearTts">
+              删除语音合成密钥
+            </button>
+          </div>
+
+          <p v-if="ttsTip" class="text-xs text-good">{{ ttsTip }}</p>
+          <p
+            v-if="ttsTest.message"
+            class="text-xs leading-5"
+            :class="ttsTest.ok === false ? 'text-danger' : 'text-good'"
+          >
+            {{ ttsTest.message }}
+          </p>
+          <p class="text-xs leading-5 text-ink-mute">
+            当前：{{ settings.ttsConfigured ? `已配置（${settings.ttsMasked}）· 朗读走第三方语音合成` : '未配置 · 使用浏览器朗读' }}
+            <span v-if="server.tts_env_configured === true">· 服务端已配置兜底语音密钥</span>
+          </p>
+        </div>
+      </section>
+
+<section id="data" class="sp-card scroll-mt-20 p-6">
+        <h2 class="font-semibold text-ink">账号与数据 · 清除练习记录</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           只删除你自己的练习记录和报告，账号保留，别人的数据不受影响。删除后不可恢复。
         </p>
@@ -335,8 +536,8 @@ function logout() {
         <p v-if="dataState.error" class="mt-3 text-xs text-danger">{{ dataState.error }}</p>
       </section>
 
-      <section class="sp-card p-6">
-        <h2 class="font-semibold text-ink">注销账号</h2>
+<section id="account" class="sp-card scroll-mt-20 p-6">
+        <h2 class="font-semibold text-ink">账号与数据 · 注销账号</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           会删除账号本身，以及这个账号名下的全部练习记录、对话和报告，之后无法登录、无法恢复。
           只清记录不删账号的话，用上面那段。
@@ -358,6 +559,8 @@ function logout() {
           <p v-if="accountState.error" class="text-xs text-danger">{{ accountState.error }}</p>
         </div>
       </section>
+
+
 
       <p class="pb-4 text-center text-xs text-ink-mute">
         密钥只在你的浏览器里；练习数据按账号存在服务端，可以随时自己删掉。

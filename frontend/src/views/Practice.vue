@@ -7,7 +7,7 @@ import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
 import { startAudioCapture } from '../utils/audio'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
-import { createRecognizer, speak } from '../utils/speech'
+import { createRecognizer, speakSmart } from '../utils/speech'
 
 const route = useRoute()
 const router = useRouter()
@@ -164,7 +164,7 @@ async function loadSession(id) {
   }
 
   const last = session.turns[session.turns.length - 1]
-  if (last && last.role === 'ai') speak(last.content, 'en-US', speechRate.value)
+  if (last && last.role === 'ai') speakSmart(last.content, { rate: speechRate.value })
 }
 
 function continueWithServer() {
@@ -285,7 +285,7 @@ async function send(text, audio = null, mode = 'typed') {
     })
     session.turns.push({ role: 'ai', content: data.ai_reply })
     if (data.should_finish) canFinish.value = true
-    speak(data.ai_reply, 'en-US', speechRate.value)
+    speakSmart(data.ai_reply, { rate: speechRate.value })
     scrollBottom()
     return true
   } catch (e) {
@@ -464,7 +464,7 @@ async function finish() {
             v-if="t.role === 'ai'"
             class="ml-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-brand-600 transition hover:bg-brand-50"
             aria-label="朗读这句"
-            @click="speak(t.content, 'en-US', speechRate)"
+            @click="speakSmart(t.content, { rate: speechRate })"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4a.8.8 0 0 1-.8-.8v-3.4a.8.8 0 0 1 .8-.8Z" />
