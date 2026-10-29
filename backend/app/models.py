@@ -72,6 +72,9 @@ class Report(Base):
     source = Column(String(16), default="llm")  # llm | mock（示例报告）
     # 降级原因：not_configured | invalid_key | unavailable，前端据此给不同提示
     mock_reason = Column(String(24), nullable=True)
+    # 作答模式 voice/typed/mixed；comparable_band 是跨模式可比档（只含共享维度）
+    answer_mode = Column(String(8), nullable=True)
+    comparable_band = Column(Float, nullable=True)
     dimensions_json = Column(Text, default="{}")
     bands_json = Column(Text, default="{}")
     scoring_json = Column(Text, default="{}")

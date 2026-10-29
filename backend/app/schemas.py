@@ -101,6 +101,9 @@ class ReportOut(BaseModel):
     source: str = "llm"  # llm | mock
     # 仅 source=mock 时会有值：not_configured | invalid_key | unavailable
     mock_reason: str | None = None
+    # voice | typed | mixed；comparable_band 跨模式可比（只含共享维度）
+    answer_mode: str | None = None
+    comparable_band: float | None = None
     dimensions: Dict[str, int] = {}
     bands: Dict[str, float] = {}
     sentence_fixes: List[SentenceFix] = []
@@ -118,6 +121,11 @@ class HistoryItem(BaseModel):
     status: str = "active"  # active | finished
     report_id: int | None = None
     total_score: int | None = None
+    # 报告档位与跨模式可比档：成长曲线按 comparable_band 画，别拿 total 跨模式比
+    band: float | None = None
+    cefr: str | None = None
+    comparable_band: float | None = None
+    answer_mode: str | None = None
     # 这一场里录音/打字各说几句，历史卡片可以直接标「有打字」
     voice_turns: int = 0
     typed_turns: int = 0

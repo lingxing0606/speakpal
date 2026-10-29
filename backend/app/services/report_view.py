@@ -15,6 +15,8 @@ def report_out(rep: Report) -> ReportOut:
         cefr=rep.cefr,
         source=source,
         mock_reason=rep.mock_reason,
+        answer_mode=rep.answer_mode,
+        comparable_band=rep.comparable_band,
         dimensions=json.loads(rep.dimensions_json or "{}"),
         bands=json.loads(rep.bands_json or "{}"),
         sentence_fixes=json.loads(rep.fixes_json or "[]"),
