@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from ..config import database_url_locked_by_env, settings
 from ..db import get_db
-from ..models import PracticeSession, Report, Turn, User
+from ..models import DrillAttempt, PracticeSession, Report, Turn, User
 from ..schemas import AdminUserUpdateIn
 from ..security import hash_password
 from ..services.scenes import get_scene
@@ -192,6 +192,7 @@ def delete_all_data(
     if scope not in ("records", "account"):
         raise HTTPException(status_code=400, detail="scope 只能是 records 或 account")
 
+    deleted_drills = db.query(DrillAttempt).delete(synchronize_session=False)
     deleted_reports = db.query(Report).delete(synchronize_session=False)
     deleted_turns = db.query(Turn).delete(synchronize_session=False)
     deleted_sessions = db.query(PracticeSession).delete(synchronize_session=False)
@@ -204,6 +205,7 @@ def delete_all_data(
         "deleted_sessions": int(deleted_sessions or 0),
         "deleted_turns": int(deleted_turns or 0),
         "deleted_reports": int(deleted_reports or 0),
+        "deleted_drill_attempts": int(deleted_drills or 0),
         "scope": scope,
     }
 
@@ -249,7 +251,9 @@ def delete_user(
     target = db.get(User, user_id)
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
-    deleted_sessions, deleted_turns, deleted_reports = delete_user_data(db, user_id)
+    deleted_sessions, deleted_turns, deleted_reports, deleted_drills = delete_user_data(
+        db, user_id
+    )
     db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
     db.commit()
     return {
@@ -257,5 +261,6 @@ def delete_user(
         "deleted_sessions": deleted_sessions,
         "deleted_turns": deleted_turns,
         "deleted_reports": deleted_reports,
+        "deleted_drill_attempts": deleted_drills,
         "user_id": user_id,
     }

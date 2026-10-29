@@ -97,9 +97,9 @@ def add_turn(
     transcript = (body.transcript or "").strip()
     if not transcript:
         raise HTTPException(status_code=400, detail="这一轮没有听到内容，请再说一遍或手动输入")
-    if not re.search(r"[A-Za-z]", transcript):
-        # 纯标点 / 纯表情 / 纯数字都不是英语作答，不能当成一轮有效发言
-        raise HTTPException(status_code=400, detail="这一轮没有英文内容，请用英文回答或手动输入")
+    if not re.search(r"[A-Za-z0-9]", transcript):
+        # 纯标点 / 纯表情 / 纯中文都不算英语作答；但 "40" 这种数字短答是合法的（年龄、件数、房间号）
+        raise HTTPException(status_code=400, detail="这一轮没有可识别的内容，请用英文或数字回答")
     if len(transcript) > MAX_TRANSCRIPT_CHARS:
         raise HTTPException(
             status_code=400,

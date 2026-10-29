@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
@@ -23,7 +24,8 @@ def register(body: RegisterIn, db: OrmSession = Depends(get_db)):
     nickname = (body.nickname or "").strip()
     if len(nickname) > MAX_NICKNAME:
         raise HTTPException(status_code=400, detail=f"昵称最多 {MAX_NICKNAME} 个字")
-    if db.query(User).filter(User.username == username).first():
+    # 唯一性按小写归一：walkB 和 WalkB 视为同一个账号，避免近似名和「输错大小写登不进去」
+    if db.query(User).filter(func.lower(User.username) == username.lower()).first():
         raise HTTPException(status_code=400, detail="账号已存在")
     user = User(
         username=username,
@@ -39,7 +41,8 @@ def register(body: RegisterIn, db: OrmSession = Depends(get_db)):
 @router.post("/login", response_model=TokenOut)
 def login(body: LoginIn, db: OrmSession = Depends(get_db)):
     username = (body.username or "").strip()
-    user = db.query(User).filter(User.username == username).first()
+    # 登录也不区分大小写（注册时已按小写归一保证唯一）
+    user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=400, detail="账号或密码错误")
     return TokenOut(token=create_token(user.id, user.token_version), user=UserOut.model_validate(user))
