@@ -143,7 +143,7 @@ speakpal/
 | POST | /api/config/llm/test | 验证用户自带 API key（见 §13） | 是 |
 | GET | /api/config/llm | 服务端兜底 key 是否配置（不回显 key） | 是 |
 | GET | /api/system/storage | 数据目录/库文件/可写性（见 §13.3） | 是 |
-| DELETE | /api/me/data | 清除自己的练习记录（见 §13.2） | 是 |
+| DELETE | /api/me/data | 清除自己的练习记录，`scope=account` 时连账号注销（见 §13.2） | 是 |
 | DELETE | /api/admin/data | 清空全库（ADMIN_KEY） | 否（管理密钥） |
 | PUT | /api/admin/storage | 改数据目录，重启生效（ADMIN_KEY） | 否（管理密钥） |
 
@@ -300,17 +300,21 @@ System prompt 模板：
 - 不写 `.env`、不入库、不打日志。验证接口不回显 key。
 - 前端已用 `allow_headers=["*"]`（`backend/app/main.py:58`），自定义头不会触发 CORS 预检失败，无需额外放行。
 - 登录后进 `/settings` 引导页，**必须可跳过**：评委没有 key 不能卡在配置页。
-- **但跳过不等于可以免 key 开练**（用户 10-46 确认）：`POST /api/sessions` 时若浏览器与 `.env` 都没有可用 key，必须直接拒绝，
-  返回 `409 {"kind": "llm_not_configured", "hint": "先去设置里配置模型密钥"}`，由前端引导到 `/settings`。
-  **不能用 401**——前端 `client.js` 拦截器把任何 401 当登录失效并清 token 跳登录页，配错/没配 key 会被当成掉登录。
+- **但跳过不等于可以免 key 开练**（用户已确认）：浏览器与 `.env` 都没有可用 key 时，`POST /api/sessions` 直接返回
+  `409 {"kind": "key_required", "detail": "还没有可用的模型密钥，请先到「设置」配置你自己的密钥"}`
+  （`sessions.py:32/43/55-56`），由前端引导到 `/settings`。**不能用 401**——前端 `client.js` 拦截器把任何 401 当登录失效并清 token 跳登录页。
   即「引导页可跳过，练口语不行」。
-- 三种失败必须在界面上分开，不能都变成「示例报告」。`finish` 仍返回 200 + `source=mock`，但必须带原因字段，前端据此分文案：
+- 失败分类按实现（`sessions.py`、`scoring.py`），**不是所有失败都降级成示例报告**：
 
-  | 情形 | `finish` 返回 | 界面 |
+  | 情形 | 返回 | 界面 |
   |---|---|---|
-  | 用户配了 key 且校验失败（401/403） | `source=mock`、`mock_reason=invalid_key` | 「key 无效，去设置里换」——**不许显示成普通的「模型不可用」** |
-  | key 有效但超时 / 服务不可用 | `source=mock`、`mock_reason=unavailable` | 「模型服务暂时不可用，稍后重试」 |
-  | 未配置任何 key | `source=mock`、`mock_reason=not_configured` | 「去配置 key」 |
+  | 用户请求头里的 key 被拒（401/403） | **502** `{"kind": "key_invalid"}`，不生成报告、不落库（`scoring.py:216-217` → `sessions.py:38`），换 key 可重试 | 「key 无效，去设置里换」+ 重试 |
+  | `.env` 兜底密钥被拒 | 200 + `source=mock` + `mock_reason=invalid_key`（`scoring.py:218`） | 「服务端密钥失效，本次不计分」 |
+  | 超时 / 不可达 / 模型返回无法解析 | 200 + `source=mock` + `mock_reason=unavailable` | 「模型服务暂时不可用，稍后重试」 |
+  | 会话中途失去全部 key 再 finish | 200 + `source=mock` + `mock_reason=not_configured` | 「本次未接入模型，示例报告不计分」 |
+
+  **`mock_reason=invalid_key` 只代表「服务端兜底密钥被拒」，不代表「用户 key 无效」**——用户 key 无效是 502 且根本不产生报告。
+  这个枚举不能删，也不能拿来当用户 key 的验收依据。会话中途掉 key 再 finish 仍给示例报告、不拦：练习已经结束，再拦没有意义。
 
 `GET /api/config/llm`（登录）→ `{"env_configured": true, "default_base_url": "https://api.deepseek.com/v1", "default_model": "deepseek-chat"}`
 ——前端用它判断服务端有没有兜底 key，**不回显 key 本身**。
@@ -325,11 +329,12 @@ System prompt 模板：
 | `DELETE /api/me/data` | 登录用户 | 只删自己 `user_id` 的 sessions / turns / reports |
 | `DELETE /api/admin/data` | `X-Admin-Key` 头 | 清全库，演示前重置用 |
 
-- 响应：`{"deleted_sessions": 3, "deleted_reports": 3}`。
+- 响应（实际实现，`account.py:67-73`）：`{"deleted_sessions": 3, "deleted_turns": 12, "deleted_reports": 3, "deleted_account": 0, "scope": "records"}`。
 - 管理密钥走 `X-Admin-Key` 头，直接复用 `admin.py:13` 的 `require_admin`（FastAPI 由 `x_admin_key` 形参映射到该头），不塞进请求体。
-- **账号注销要做**（用户已确认）：`DELETE /api/me/data?scope=account`，默认 `scope=records`。`account` 在删记录之外再删 `users` 行，此后该用户旧 token 一律 401。
-  两条路分开，默认只清记录；注销不可恢复，前端二次确认要比清记录更重（输入用户名或「注销」，并写明「账号与全部练习记录将被删除」）。
-- 二次确认的摩擦放在前端：显示影响范围（将删除 N 次练习、M 份报告）+ 手打「删除」才可点；`scope=records` 的服务端不校验 `confirm`（别以为后端会拦）。
+- **账号注销要做**（用户已确认）：`DELETE /api/me/data`，body `{"scope": "records" | "account", "confirm": "删除"}`，默认 `records`。
+  `account` 在删记录之外再删 `users` 行（`deleted_account=1`），此后该用户旧 token 一律 401。**服务端对 `account` 分支校验 `confirm == "删除"`，不符返 400**；`records` 分支不校验。
+- 接口路径说明：先前讨论里出现过 `DELETE /api/me/account`，**实际代码是 `/api/me/data` 带 `scope`**，文档按代码；真要独立路径得另加一个端点，不要两边各写一套。
+- 注销不可恢复，前端二次确认要比清记录更重（输入用户名或「注销」，并写明「账号与全部练习记录将被删除」）。
 
 ### 13.3 数据位置：显示与更改
 
@@ -357,7 +362,8 @@ System prompt 模板：
 
 ### 13.4 验收（最容易漏的几条）
 
-1. **用户 key**：用错 key 跑 finish，报告必须带 `mock_reason=invalid_key`，界面提示「key 无效」而不是笼统的「模型不可用」；`grep` 响应体、日志、DB 三处都搜不到 key 明文。空 key 是 `not_configured`，超时是 `unavailable`——三者不能合并。另加一条之前没有的：**浏览器与服务端都没有 key 时 `POST /api/sessions` 必须 409 `llm_not_configured`，不能开一场注定 mock 的练习**；且该拒绝不能是 401（会把用户踢回登录页）。
-2. **清数据**：默认 `scope=records` 时 A 的 sessions / reports 归零、**B 的记录不受影响**，`deleted_sessions` / `deleted_reports` 与库内实际删除数一致，此分支**不要**断言旧 token 401（账号还在，token 仍有效）。单独验 `scope=account`：users 行没了、旧 token 立即 401、再登录失败。
+1. **用户 key**：用错 key 跑 `finish` 必须 **502 `key_invalid`**、不生成报告、不动会话状态；`grep` 响应体、日志、DB 三处都搜不到 key 明文。**不能用 401**（前端会当成掉登录）。
+   `mock_reason` 的三种值要分清：`invalid_key` 只在 `.env` 兜底密钥被拒时出现，`unavailable` 是超时/不可达/解析失败，`not_configured` 是会话中途丢了 key——用户 key 无效**不产生任何 `mock_reason`**。另加一条：浏览器与服务端都没有 key 时 `POST /api/sessions` 必须 409 `key_required`，不能开一场注定 mock 的练习。
+2. **清数据**：默认 `scope=records` 时 A 的 sessions / turns / reports 归零、**B 的记录不受影响**，三个 `deleted_*` 与实际删除数一致，此分支**不要**断言旧 token 401（账号还在）。单独验 `scope=account`：不带 `confirm="删除"` 必须 400；带上后 `users` 行没了、旧 token 立即 401、再登录失败。
 3. **数据位置**：设了真实 `DATABASE_URL` 时 `PUT` 返回 `409 env_override` 且不写 json → 清掉 env 后改路径、重启生效 → 旧库原位没被删 → 目标目录不存在/不可写时报错且配置没被写坏；`data_location.json` 不在 `git ls-files` 里。
 
