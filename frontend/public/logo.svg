@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" role="img" aria-label="SpeakPal">
+  <title>SpeakPal</title>
+  <!-- 主气泡 = 你在说 -->
+  <g fill="#14806F">
+    <rect x="2" y="14" width="40" height="30" rx="10" />
+    <path d="M12 43 C10.4 46.8 8.4 51.4 7.4 54.2 C6.7 56.4 8.3 57.4 10.2 56.2 L28 43.5 Z" />
+  </g>
+  <!-- 声波 = 口语；三根递增高 = 进步与评分 -->
+  <g fill="#FFFFFF">
+    <rect x="10" y="25" width="5" height="8" rx="2.5" />
+    <rect x="19.5" y="22" width="5" height="14" rx="2.5" />
+    <rect x="29" y="19" width="5" height="20" rx="2.5" />
+  </g>
+  <!-- 星标 = 陪练的回应（唯一冷色点缀） -->
+  <circle cx="53" cy="11" r="10" fill="#38BDF8" />
+  <path d="M53 4.8 Q54.1 9.9 59.2 11 Q54.1 12.1 53 17.2 Q51.9 12.1 46.8 11 Q51.9 9.9 53 4.8 Z" fill="#FFFFFF" />
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" role="img" aria-label="SpeakPal">
+  <title>SpeakPal</title>
+  <!-- 无底色标：页头、卡片内、任意浅底用这个 -->
+  <g transform="translate(10,-3.7)">
+    <g fill="#14806F">
+      <rect x="2" y="14" width="40" height="30" rx="10" />
+      <path d="M12 43 C10.4 46.8 8.4 51.4 7.4 54.2 C6.7 56.4 8.3 57.4 10.2 56.2 L28 43.5 Z" />
+    </g>
+    <g fill="#FFFFFF">
+      <rect x="10" y="25" width="5" height="8" rx="2.5" />
+      <rect x="19.5" y="22" width="5" height="14" rx="2.5" />
+      <rect x="29" y="19" width="5" height="20" rx="2.5" />
+    </g>
+  </g>
+</svg>

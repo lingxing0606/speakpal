@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none" role="img" aria-label="SpeakPal">
+  <title>SpeakPal</title>
+  <!-- 应用图标：青底白图形，收藏夹 / PPT / 头像用这个 -->
+  <rect width="512" height="512" rx="112" fill="#14806F" />
+  <g fill="#FFFFFF">
+    <rect x="136" y="160" width="240" height="180" rx="56" />
+    <path d="M196 334 C186.4 356.8 174.4 384.4 168.4 401.2 C164.2 414.4 173.8 420.4 185.2 413.2 L292 337 Z" />
+  </g>
+  <g fill="#14806F">
+    <rect x="184" y="226" width="30" height="48" rx="15" />
+    <rect x="241" y="208" width="30" height="84" rx="15" />
+    <rect x="298" y="190" width="30" height="120" rx="15" />
+  </g>
+</svg>
