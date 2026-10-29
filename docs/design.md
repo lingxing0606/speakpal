@@ -299,7 +299,11 @@ System prompt 模板：
 - key 只走请求头，**不进 body**：放 body 就多一份可能被访问日志记下的明文。
 - 不写 `.env`、不入库、不打日志。验证接口不回显 key。
 - 前端已用 `allow_headers=["*"]`（`backend/app/main.py:58`），自定义头不会触发 CORS 预检失败，无需额外放行。
-- 登录后进 `/settings` 引导页，**必须可跳过**：评委没有 key 不能卡在配置页（跳过后走服务端兜底 key，再没有就走示例报告）。
+- 登录后进 `/settings` 引导页，**必须可跳过**：评委没有 key 不能卡在配置页。
+- **但跳过不等于可以免 key 开练**（用户 10-46 确认）：`POST /api/sessions` 时若浏览器与 `.env` 都没有可用 key，必须直接拒绝，
+  返回 `409 {"kind": "llm_not_configured", "hint": "先去设置里配置模型密钥"}`，由前端引导到 `/settings`。
+  **不能用 401**——前端 `client.js` 拦截器把任何 401 当登录失效并清 token 跳登录页，配错/没配 key 会被当成掉登录。
+  即「引导页可跳过，练口语不行」。
 - 三种失败必须在界面上分开，不能都变成「示例报告」。`finish` 仍返回 200 + `source=mock`，但必须带原因字段，前端据此分文案：
 
   | 情形 | `finish` 返回 | 界面 |
@@ -323,8 +327,9 @@ System prompt 模板：
 
 - 响应：`{"deleted_sessions": 3, "deleted_reports": 3}`。
 - 管理密钥走 `X-Admin-Key` 头，直接复用 `admin.py:13` 的 `require_admin`（FastAPI 由 `x_admin_key` 形参映射到该头），不塞进请求体。
-- 「连账号一起删」（删 `users` 行、旧 token 401）**尚未实现**：这是不可恢复的破坏性操作，等用户明确点头再做，文档不预先承诺。默认只清记录，账号保留。
-- 二次确认的摩擦放在前端：显示影响范围（将删除 N 次练习、M 份报告）+ 手打「删除」才可点；接口本身没有 `confirm` 参数，服务端不校验（别以为后端会拦）。
+- **账号注销要做**（用户已确认）：`DELETE /api/me/data?scope=account`，默认 `scope=records`。`account` 在删记录之外再删 `users` 行，此后该用户旧 token 一律 401。
+  两条路分开，默认只清记录；注销不可恢复，前端二次确认要比清记录更重（输入用户名或「注销」，并写明「账号与全部练习记录将被删除」）。
+- 二次确认的摩擦放在前端：显示影响范围（将删除 N 次练习、M 份报告）+ 手打「删除」才可点；`scope=records` 的服务端不校验 `confirm`（别以为后端会拦）。
 
 ### 13.3 数据位置：显示与更改
 
@@ -352,7 +357,7 @@ System prompt 模板：
 
 ### 13.4 验收（最容易漏的几条）
 
-1. **用户 key**：用错 key 跑 finish，报告必须带 `mock_reason=invalid_key`，界面提示「key 无效」而不是笼统的「模型不可用」；`grep` 响应体、日志、DB 三处都搜不到 key 明文。空 key 是 `not_configured`，超时是 `unavailable`——三者不能合并。
-2. **清数据**：A 删完自己的 sessions / reports 归零，**另一个账号的记录不受影响**；`deleted_sessions` / `deleted_reports` 与库内实际删除条数一致。注意「连账号一起删」未实现，所以**不要**断言旧 token 401——账号没删，token 仍有效，前端回登录页靠的是清 localStorage。
+1. **用户 key**：用错 key 跑 finish，报告必须带 `mock_reason=invalid_key`，界面提示「key 无效」而不是笼统的「模型不可用」；`grep` 响应体、日志、DB 三处都搜不到 key 明文。空 key 是 `not_configured`，超时是 `unavailable`——三者不能合并。另加一条之前没有的：**浏览器与服务端都没有 key 时 `POST /api/sessions` 必须 409 `llm_not_configured`，不能开一场注定 mock 的练习**；且该拒绝不能是 401（会把用户踢回登录页）。
+2. **清数据**：默认 `scope=records` 时 A 的 sessions / reports 归零、**B 的记录不受影响**，`deleted_sessions` / `deleted_reports` 与库内实际删除数一致，此分支**不要**断言旧 token 401（账号还在，token 仍有效）。单独验 `scope=account`：users 行没了、旧 token 立即 401、再登录失败。
 3. **数据位置**：设了真实 `DATABASE_URL` 时 `PUT` 返回 `409 env_override` 且不写 json → 清掉 env 后改路径、重启生效 → 旧库原位没被删 → 目标目录不存在/不可写时报错且配置没被写坏；`data_location.json` 不在 `git ls-files` 里。
 
