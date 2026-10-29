@@ -7,16 +7,20 @@ import BrandLogo from '../components/BrandLogo.vue'
 import SceneIcon from '../components/SceneIcon.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSessionStore } from '../stores/session'
-import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
+import { useSettingsStore } from '../stores/settings'
 
 const router = useRouter()
 const auth = useAuthStore()
 const session = useSessionStore()
+const settings = useSettingsStore()
 
 const scenes = ref([])
 const difficulty = ref('medium')
 const loading = ref(false)
 const error = ref('')
+const needKey = ref(false)
+const envFallback = ref(false)
+const pendingScene = ref(null)
 
 onMounted(async () => {
   try {
@@ -27,16 +31,10 @@ onMounted(async () => {
   }
 })
 
-async function start(scene) {
+async function begin(scene) {
   loading.value = true
   error.value = ''
   try {
-    const gate = await llmReady()
-    if (!gate.ok) {
-      error.value = KEY_REQUIRED_MESSAGE
-      router.push('/settings?onboarding=1')
-      return
-    }
     const { data } = await api.post('/sessions', {
       scene_id: scene.id,
       difficulty: difficulty.value,
@@ -48,6 +46,29 @@ async function start(scene) {
   } finally {
     loading.value = false
   }
+}
+
+async function start(scene) {
+  // 用户要求：点场景开练就要先有密钥。本浏览器没填时，先停下来问清楚，
+  // 而不是拿服务端兜底 key 悄悄放行
+  if (!settings.configured) {
+    pendingScene.value = scene
+    needKey.value = true
+    try {
+      const { data } = await api.get('/config/llm')
+      envFallback.value = !!data?.env_configured
+    } catch {
+      envFallback.value = false
+    }
+    return
+  }
+  await begin(scene)
+}
+
+function useServerKey() {
+  const scene = pendingScene.value
+  needKey.value = false
+  if (scene) begin(scene)
 }
 
 function logout() {
@@ -98,6 +119,29 @@ function logout() {
       </div>
 
       <p v-if="error" class="sp-alert-error mt-5">{{ error }}</p>
+
+      <div v-if="needKey" class="sp-card mt-5 p-5 ring-brand-100">
+        <div class="flex items-start gap-3">
+          <div class="sp-icon-tile shrink-0 text-brand-700">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="8" cy="12" r="4" />
+              <path d="M12 12h9M17.5 12v3.2M20.5 12v2.2" />
+            </svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="font-semibold text-ink">先接入一个模型密钥</div>
+            <p class="mt-1 text-xs leading-5 text-ink-soft">
+              练习要靠模型陪聊和评分。密钥只存在你自己的浏览器里，不上传、不写数据库。
+              <template v-if="!envFallback">服务端目前也没有兜底密钥，所以必须自己填。</template>
+            </p>
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              <button class="sp-btn-primary" @click="router.push('/settings?onboarding=1')">去设置填密钥</button>
+              <button v-if="envFallback" class="sp-btn-secondary" @click="useServerKey">用服务端密钥继续（演示）</button>
+              <button class="sp-btn-ghost" @click="needKey = false">取消</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div class="mt-6 grid gap-4 sm:grid-cols-3">
         <button

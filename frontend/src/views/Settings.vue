@@ -124,10 +124,14 @@ async function changePassword() {
     return
   }
   try {
-    await api.patch('/me/profile', {
+    const { data } = await api.patch('/me/profile', {
       password: pwd.value.next,
       current_password: pwd.value.current,
     })
+    // 改密码会让 token_version +1，其他设备立刻掉线；响应里签发的新 token 必须存回去，
+    // 否则这台设备下一次请求也会 401
+    const { token: freshToken, ...profile } = data || {}
+    if (freshToken) auth.setAuth(freshToken, { ...(auth.user || {}), ...profile })
     pwd.value = { current: '', next: '', confirm: '' }
     pwdState.value = { running: false, tip: '密码已更新，下次登录用新密码。', error: '' }
   } catch (e) {
@@ -237,7 +241,6 @@ function logout() {
             <button class="sp-btn-secondary" :disabled="pwdState.running" @click="changePassword">
               {{ pwdState.running ? '提交中…' : '修改密码' }}
             </button>
-            <span class="text-xs text-ink-mute">改完密码，其他设备上的登录不会掉线。</span>
           </div>
           <p v-if="pwdState.tip" class="mt-2 text-xs text-good">{{ pwdState.tip }}</p>
           <p v-if="pwdState.error" class="mt-2 text-xs text-danger">{{ pwdState.error }}</p>

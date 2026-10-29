@@ -20,6 +20,7 @@ const dimLabels = {
   fluency: '流利度',
   grammar_vocab: '语法词汇',
   task_completion: '任务完成度',
+  written_expression: '文字表达',
 }
 
 const featureLabels = {
@@ -41,6 +42,28 @@ const featureLabels = {
 }
 
 const isMock = computed(() => report.value?.source === 'mock')
+// 打字作答不会给发音/流利度打分：这两个键在维度里不出现，就必须在报告顶部讲清楚，
+// 否则用户会以为系统替他打了发音分
+const typedOnly = computed(() => {
+  const dims = Object.keys(report.value?.dimensions || {})
+  if (!dims.length) return false
+  return !dims.includes('pronunciation') && !dims.includes('fluency')
+})
+const mixedInput = computed(() => {
+  const dims = Object.keys(report.value?.dimensions || {})
+  return dims.includes('pronunciation') || dims.includes('fluency')
+    ? dims.includes('written_expression')
+    : false
+})
+
+// 后端直接给 answer_mode，比查维度键更稳；老数据没有这个字段时才退回查键
+const answerMode = computed(() => report.value?.answer_mode || '')
+const showTypedBanner = computed(
+  () => !isMock.value && (answerMode.value === 'typed' || (!answerMode.value && typedOnly.value))
+)
+const showMixedBanner = computed(
+  () => !isMock.value && (answerMode.value === 'mixed' || (!answerMode.value && mixedInput.value))
+)
 const mockReason = computed(() => report.value?.mock_reason || '')
 const mockHint = computed(() => {
   switch (mockReason.value) {
@@ -160,6 +183,19 @@ function again() {
         </div>
 
         <div
+          v-if="showTypedBanner"
+          class="mb-4 rounded-xl bg-brand-50 px-3.5 py-2.5 text-sm leading-6 text-brand-700 ring-1 ring-brand-100"
+        >
+          本次为打字作答，发音 / 流利度未计入综合分。想练发音就点麦克风说几句，再练一次。
+        </div>
+        <div
+          v-else-if="showMixedBanner"
+          class="mb-4 rounded-xl bg-canvas px-3.5 py-2.5 text-sm leading-6 text-ink-soft ring-1 ring-line"
+        >
+          这次录音和打字都有：发音、流利度只统计录音的句子，「文字表达」只统计打字的句子。
+        </div>
+
+        <div
           v-if="hasScore"
           class="relative overflow-hidden rounded-card bg-white p-7 text-center shadow-card ring-1 ring-line/70"
         >
@@ -179,7 +215,7 @@ function again() {
           class="sp-card mt-4 p-6"
         >
           <div class="flex items-baseline justify-between">
-            <div class="font-semibold text-ink">四个维度</div>
+            <div class="font-semibold text-ink">{{ Object.keys(report.dimensions).length }} 个维度</div>
             <div class="text-xs text-ink-mute">模型分与可测指标融合</div>
           </div>
           <div v-for="(v, k) in report.dimensions" :key="k" class="mb-4 mt-4 last:mb-0">
@@ -200,7 +236,7 @@ function again() {
           v-if="Object.keys(displayFeatures).length"
           class="sp-card mt-4 p-6"
         >
-          <div class="font-semibold text-ink">流利度与表达指标</div>
+          <div class="font-semibold text-ink">{{ typedOnly ? '文字表达指标' : '流利度与表达指标' }}</div>
           <div class="mt-3.5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
             <div v-for="(v, k) in displayFeatures" :key="k" class="rounded-xl bg-canvas px-3.5 py-3 ring-1 ring-line/60">
               <div class="text-[11px] text-ink-mute">{{ featureLabels[k] || k }}</div>

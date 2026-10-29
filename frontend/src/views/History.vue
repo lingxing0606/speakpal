@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import api from '../api/client'
@@ -17,6 +17,49 @@ onMounted(async () => {
     error.value = '加载失败：' + (e?.response?.data?.detail || e.message)
   }
 })
+
+// 成长曲线用可比 band（语言复杂度 + 语用得体性），打字和录音都能进同一条线；
+// total_score 只在同模式内可比，不拿来跨模式连线
+const curveSessions = computed(() =>
+  items.value
+    .filter((it) => {
+      if (it.status !== 'finished') return false
+      const v = it.comparable_band ?? it.band
+      return v !== null && v !== undefined
+    })
+    .slice()
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+)
+
+const MODE_LABELS = { voice: '录音', typed: '打字', mixed: '混合' }
+
+const curve = computed(() => {
+  const rows = curveSessions.value
+  if (rows.length < 2) return null
+  const w = 320
+  const h = 80
+  const pad = 6
+  const vals = rows.map((r) => Number(r.comparable_band ?? r.band))
+  const lo = Math.max(0, Math.min(...vals) - 0.5)
+  const hi = Math.min(9, Math.max(...vals) + 0.5)
+  const span = hi - lo || 1
+  const points = rows.map((r, i) => {
+    const x = pad + (i * (w - pad * 2)) / (rows.length - 1)
+    const v = Number(r.comparable_band ?? r.band)
+    const y = h - pad - ((v - lo) / span) * (h - pad * 2)
+    return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)), band: v, mode: r.answer_mode || '' }
+  })
+  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ')
+  return { points, path, w, h, first: vals[0], last: vals[vals.length - 1], count: rows.length }
+})
+
+function inputTag(it) {
+  if (it.answer_mode) return MODE_LABELS[it.answer_mode] || ''
+  if (!it.typed_turns && !it.voice_turns) return ''
+  if (!it.typed_turns) return '录音'
+  if (!it.voice_turns) return '打字'
+  return '混合'
+}
 
 // 后端给的是不带时区的 UTC 串，先补 Z 再解析，否则会当成本地时间差 8 小时
 function when(iso) {
@@ -79,6 +122,37 @@ function open(item) {
       </div>
 
       <div v-else class="space-y-3">
+        <div v-if="curve" class="sp-card mb-4 p-5">
+          <div class="flex items-baseline justify-between">
+            <div class="font-semibold text-ink">成长曲线（可比 band）</div>
+            <div class="text-xs text-ink-mute">{{ curve.count }} 次</div>
+          </div>
+          <p class="mt-0.5 text-[11px] leading-5 text-ink-mute">
+            纵轴只取「语言复杂度 + 语用得体性」，打字和录音都画在这条线上，所以能直接比。
+          </p>
+          <svg :viewBox="`0 0 ${curve.w} ${curve.h}`" class="mt-3 h-24 w-full" role="img" aria-label="可比 band 成长曲线">
+            <path :d="curve.path" fill="none" stroke="#1F9C89" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <circle
+              v-for="(p, i) in curve.points"
+              :key="i"
+              :cx="p.x"
+              :cy="p.y"
+              r="3"
+              :fill="p.mode === 'typed' ? '#fff' : '#14806F'"
+              :stroke="p.mode === 'typed' ? '#1F9C89' : '#fff'"
+              stroke-width="1.6"
+            />
+          </svg>
+          <div class="mt-1 flex items-center justify-between text-[11px] text-ink-mute">
+            <span>从 雅思 {{ curve.first.toFixed(1) }} 到现在</span>
+            <span class="font-medium text-brand-700">雅思 {{ curve.last.toFixed(1) }}</span>
+          </div>
+          <div class="mt-1 flex items-center gap-3 text-[10px] text-ink-mute">
+            <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-brand-600"></span>录音/混合</span>
+            <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full border border-brand-500 bg-white"></span>打字</span>
+          </div>
+        </div>
+
         <div
           v-for="it in items"
           :key="it.id"
@@ -86,8 +160,14 @@ function open(item) {
           @click="open(it)"
         >
           <div class="min-w-0">
-            <div class="truncate font-medium text-ink">{{ it.scene_name }}</div>
-            <div class="mt-1 text-xs text-ink-mute">{{ when(it.created_at) }}</div>
+            <div class="flex items-center gap-2">
+              <div class="truncate font-medium text-ink">{{ it.scene_name }}</div>
+              <span v-if="inputTag(it)" class="sp-chip-line shrink-0 !px-1.5 !py-0.5 !text-[10px]">{{ inputTag(it) }}</span>
+            </div>
+            <div class="mt-1 text-xs text-ink-mute">
+              {{ when(it.created_at) }}
+              <span v-if="it.band !== null && it.band !== undefined"> · 雅思 {{ Number(it.band).toFixed(1) }}</span>
+            </div>
           </div>
           <div class="flex shrink-0 items-center gap-3">
             <div v-if="it.total_score !== null" class="text-right">
