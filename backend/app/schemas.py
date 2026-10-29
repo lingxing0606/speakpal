@@ -108,3 +108,24 @@ class HistoryItem(BaseModel):
     scene_name: str
     total_score: int | None = None
     created_at: str
+
+
+class SessionTurnOut(BaseModel):
+    id: int
+    role: str  # ai | user
+    content: str
+    created_at: str
+
+
+class SessionDetailOut(BaseModel):
+    """刷新页面 / 从历史点回来时，用它把对话和状态回填。"""
+
+    id: int
+    scene_id: str
+    scene_name: str
+    difficulty: str
+    status: str  # active | finished
+    created_at: str
+    turns: List[SessionTurnOut] = []
+    report_id: int | None = None
+    total_score: int | None = None

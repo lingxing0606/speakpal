@@ -11,6 +11,8 @@ from ..schemas import (
     CreateSessionOut,
     HistoryItem,
     ReportOut,
+    SessionDetailOut,
+    SessionTurnOut,
     TurnIn,
     TurnOut,
 )
@@ -191,6 +193,38 @@ def finish_session(
     db.commit()
     db.refresh(rep)
     return report_out(rep)
+
+
+@router.get("/sessions/{session_id}", response_model=SessionDetailOut)
+def get_session_detail(
+    session_id: int,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """单个会话的完整对话，用于刷新页面或从历史回到练习页时回填。"""
+    sess = db.get(PracticeSession, session_id)
+    if not sess or sess.user_id != user.id:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    scene = get_scene(sess.scene_id)
+    return SessionDetailOut(
+        id=sess.id,
+        scene_id=sess.scene_id,
+        scene_name=scene["name"] if scene else sess.scene_id,
+        difficulty=sess.difficulty,
+        status=sess.status,
+        created_at=sess.created_at.isoformat(),
+        turns=[
+            SessionTurnOut(
+                id=t.id,
+                role=t.role,
+                content=t.content,
+                created_at=t.created_at.isoformat(),
+            )
+            for t in sess.turns
+        ],
+        report_id=sess.report.id if sess.report else None,
+        total_score=sess.report.total_score if sess.report else None,
+    )
 
 
 @router.get("/sessions", response_model=list[HistoryItem])
