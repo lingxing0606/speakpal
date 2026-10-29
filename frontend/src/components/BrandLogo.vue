@@ -11,6 +11,7 @@ const props = defineProps({
   badge: { type: Boolean, default: true }, // 星标；< 32px 自动隐藏（会和气泡糊成一团）
   wordmark: { type: Boolean, default: false },
   subtitle: { type: String, default: '' },
+  layout: { type: String, default: 'inline' }, // inline（页头）| stacked（欢迎页、答辩封面）
 })
 
 const showBadge = computed(() => props.badge && props.size >= 32)
@@ -23,10 +24,20 @@ const wordTone = computed(() => (props.tone === 'inverse' ? 'text-white' : 'text
 const palTone = computed(() => (props.tone === 'inverse' ? 'text-brand-300' : 'text-brand-600'))
 const subtitleTone = computed(() => (props.tone === 'inverse' ? 'text-slate-400' : 'text-ink-mute'))
 const fontSize = computed(() => `${Math.round(props.size * 0.62)}px`)
+const stacked = computed(() => props.layout === 'stacked')
+// 横排：图标 + 字标同一基线（页头）。竖排：图标在上、字标居中在下（欢迎页首屏）。
+const wrapClass = computed(() =>
+  stacked.value
+    ? 'inline-flex flex-col items-center gap-3 text-center'
+    : 'inline-flex items-center gap-2.5 align-middle',
+)
+const wordClass = computed(() =>
+  stacked.value ? 'flex flex-col items-center leading-tight' : 'flex flex-col leading-tight',
+)
 </script>
 
 <template>
-  <span class="inline-flex items-center gap-2.5 align-middle">
+  <span :class="wrapClass">
     <img
       :src="src"
       :width="size"
@@ -36,7 +47,7 @@ const fontSize = computed(() => `${Math.round(props.size * 0.62)}px`)
       draggable="false"
     />
 
-    <span v-if="wordmark" class="flex flex-col leading-tight">
+    <span v-if="wordmark" :class="wordClass">
       <span class="font-bold tracking-tight" :class="wordTone" :style="{ fontSize }">
         Speak<span :class="palTone">Pal</span>
       </span>
