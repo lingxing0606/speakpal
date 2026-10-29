@@ -44,12 +44,25 @@ def create_token(user_id: int, token_version: int = 0) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
+def _unauthorized(reason: str, message: str) -> HTTPException:
+    """401 统一带原因码，前端据此决定提示文案（改密 vs 过期 vs 注销）。
+
+    放响应头而不是 body：body 的 detail 保持字符串，现有调用方不用改；
+    前端读 error.response.headers['x-auth-reason'] 即可。
+    """
+    return HTTPException(
+        status_code=401,
+        detail=message,
+        headers={"X-Auth-Reason": reason},
+    )
+
+
 def get_current_user(
     cred: HTTPAuthorizationCredentials = Depends(bearer),
     db: OrmSession = Depends(get_db),
 ) -> User:
     if cred is None:
-        raise HTTPException(status_code=401, detail="未登录")
+        raise _unauthorized("unauthenticated", "未登录")
     try:
         payload = jwt.decode(
             cred.credentials,
@@ -59,11 +72,11 @@ def get_current_user(
         user_id = int(payload.get("sub"))
         token_version = int(payload.get("tv", 0))
     except Exception:
-        raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
+        raise _unauthorized("token_invalid", "登录已失效，请重新登录")
     user = db.get(User, user_id)
     if not user:
-        raise HTTPException(status_code=401, detail="用户不存在")
+        raise _unauthorized("user_gone", "账号已注销，请重新注册")
     # 改过密码后 token_version 会 +1，旧设备上的 token 全部作废
     if token_version != int(user.token_version or 0):
-        raise HTTPException(status_code=401, detail="密码已修改，请重新登录")
+        raise _unauthorized("password_changed", "密码已修改，请重新登录")
     return user

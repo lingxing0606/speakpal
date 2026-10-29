@@ -70,6 +70,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 401 的原因码放在响应头，跨域部署时前端要能读到它
+    expose_headers=["X-Auth-Reason"],
 )
 
 app.include_router(admin.router)
