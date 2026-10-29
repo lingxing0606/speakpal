@@ -24,6 +24,84 @@ BAND_MAX = 9.0
 # 档位从低到高，验证层算“相差几档”时用
 CEFR_ORDER = ("A2", "B1", "B2", "C1", "C2")
 
+# ---- 作答模式与维度权重（口径见 docs/rubric-band.md §2.3）----
+#
+# 权重按「证据强度」给，不做平均主义：
+# - 发音在本项目没有声学证据（rules.py 注明“由模型依转写推断”），纯录音里降到 20；
+# - 纯打字压根没有发音/流利度，原本属于这两维的 40 分转给文字表达（35）与语言复杂度（35）；
+# - 混合时语音证据只覆盖录音轮、文字证据只覆盖打字轮，所以各降一档，共享维度保持 50。
+DIMENSION_WEIGHTS = {
+    "voice": {
+        "pronunciation": 20,
+        "fluency": 20,
+        "grammar_vocab": 30,
+        "task_completion": 30,
+    },
+    "typed": {
+        "written_expression": 35,
+        "grammar_vocab": 35,
+        "task_completion": 30,
+    },
+    "mixed": {
+        "pronunciation": 15,
+        "fluency": 15,
+        "written_expression": 20,
+        "grammar_vocab": 25,
+        "task_completion": 25,
+    },
+}
+
+# 只在录音轮才有的维度
+VOICE_ONLY = ("pronunciation", "fluency")
+# 只在打字轮才有的维度
+TYPED_ONLY = ("written_expression",)
+# 两种作答都会评、可用于跨模式比较的维度
+SHARED_DIMS = ("grammar_vocab", "task_completion")
+
+
+def infer_answer_mode(scores):
+    """从参与打分的维度反推作答模式：voice / typed / mixed / None。"""
+    has_voice = any(scores.get(d) is not None for d in VOICE_ONLY)
+    has_typed = any(scores.get(d) is not None for d in TYPED_ONLY)
+    if has_voice and has_typed:
+        return "mixed"
+    if has_typed:
+        return "typed"
+    if has_voice:
+        return "voice"
+    return None
+
+
+def weighted_total(scores, mode=None):
+    """按作答模式加权求综合分；缺失维度按剩余权重重新归一，缺维度不当 0 分。"""
+    if not scores:
+        return None
+    mode = mode or infer_answer_mode(scores)
+    weights = DIMENSION_WEIGHTS.get(mode) or {}
+    pairs = [
+        (float(scores[dim]), weights[dim])
+        for dim in scores
+        if scores.get(dim) is not None and dim in weights
+    ]
+    total_w = sum(w for _, w in pairs)
+    if not pairs or total_w <= 0:
+        # 认不出作答模式（只剩共享维度）时退回等权平均，总比不出分好
+        vals = [float(v) for v in scores.values() if v is not None]
+        return int(round(sum(vals) / len(vals))) if vals else None
+    return int(round(sum(s * w for s, w in pairs) / total_w))
+
+
+def comparable_score(scores):
+    """跨模式可比的子分：只用「录音/打字都会评」的两个维度。"""
+    vals = [float(scores[d]) for d in SHARED_DIMS if scores.get(d) is not None]
+    if not vals:
+        return None
+    return int(round(sum(vals) / len(vals)))
+
+
+def comparable_band(scores):
+    return score_to_band(comparable_score(scores))
+
 
 def band_to_score(band):
     """雅思 band → 0–100 展示分。"""
@@ -89,17 +167,14 @@ def cefr_distance(a, b):
 
 
 def total_from_dimension_scores(scores):
-    """四维 0–100 分 → 总分（四舍五入整数）。缺失维度直接跳过。"""
-    vals = [float(v) for v in scores.values() if v is not None]
-    if not vals:
-        return None
-    return int(round(sum(vals) / len(vals)))
+    """各维 0–100 分 → 综合分（加权，见 DIMENSION_WEIGHTS；不再做等权平均）。"""
+    return weighted_total(scores)
 
 
 def report_bands(dimension_bands):
-    """四维 band → {total_score, dimensions, bands, band, cefr}。
+    """维度 band → {total_score, dimensions, bands, band, cefr, answer_mode, comparable_*}。
 
-    dimension_bands 里允许有 None（模型没给该维），逐维跳过。
+    dimension_bands 里允许有 None（模型没给该维），逐维跳过；作答模式由出现的维度反推。
     """
     bands = {}
     scores = {}
@@ -112,7 +187,8 @@ def report_bands(dimension_bands):
             continue
         bands[name] = b
         scores[name] = int(round(band_to_score(b)))
-    total = total_from_dimension_scores(scores)
+    mode = infer_answer_mode(scores)
+    total = weighted_total(scores, mode)
     band = score_to_band(total) if total is not None else None
     return {
         "total_score": total,
@@ -120,4 +196,7 @@ def report_bands(dimension_bands):
         "bands": bands,
         "band": band,
         "cefr": band_to_cefr(band),
+        "answer_mode": mode,
+        "comparable_score": comparable_score(scores),
+        "comparable_band": comparable_band(scores),
     }

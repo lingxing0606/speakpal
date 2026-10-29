@@ -202,7 +202,16 @@ def finish_session(
     )
     detail = data.get("scoring_detail") or {}
     scoring_json = json.dumps(
-        {"dimensions": detail, "note": data.get("scoring_note", "")}, ensure_ascii=False
+        {
+            "dimensions": detail,
+            "note": data.get("scoring_note", ""),
+            # 作答模式与跨模式可比子分：打字/录音报告的综合分口径不同，
+            # 报告页和历史曲线要用 comparable_*，不能拿 total_score 跨模式比。
+            "answer_mode": data.get("answer_mode"),
+            "comparable_score": data.get("comparable_score"),
+            "comparable_band": data.get("comparable_band"),
+        },
+        ensure_ascii=False,
     )
 
     rep = Report(

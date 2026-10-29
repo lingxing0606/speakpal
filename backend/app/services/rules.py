@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import re
 
-from evaluation.bands import band_to_cefr, score_to_band
+from evaluation.bands import (
+    band_to_cefr,
+    comparable_band,
+    comparable_score,
+    infer_answer_mode,
+    score_to_band,
+    weighted_total,
+)
 
 # ---- 规则常量（全部【自定】，改这里要同步 docs/rubric-band.md §6.5）----
 
@@ -404,7 +411,8 @@ def apply_to_report(
     dims = {k: int(round(v)) for k, v in final_scores.items() if v is not None}
     if not dims:
         return data
-    total = int(round(sum(dims.values()) / len(dims)))
+    answer_mode = infer_answer_mode(dims)
+    total = weighted_total(dims, answer_mode)
     band = score_to_band(total)
     used_rules = [k for k, d in detail.items() if d.get("rule_score") is not None]
 
@@ -414,6 +422,11 @@ def apply_to_report(
     out["total_score"] = total
     out["band"] = band
     out["cefr"] = band_to_cefr(band)
+    # 作答模式 + 跨模式可比子分：打字报告和录音报告的综合分口径不同，
+    # 历史曲线和「比上次进步」只能拿 comparable_* 比，不能拿 total 比。
+    out["answer_mode"] = answer_mode
+    out["comparable_score"] = comparable_score(dims)
+    out["comparable_band"] = comparable_band(dims)
     out["scoring_detail"] = detail
     out["scoring_note"] = (
         "分数由模型分与可测指标融合得出"
