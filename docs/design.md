@@ -140,6 +140,11 @@ speakpal/
 | GET | /api/sessions | 历史会话列表（当前用户） | 是 |
 | GET | /api/sessions/{id}/report | 读取某次报告 | 是 |
 | POST | /api/stt | （可选）后端兜底转写 | 是 |
+| POST | /api/config/llm/test | 验证用户自带 API key（见 §13） | 是 |
+| GET | /api/system/storage | 数据目录/库文件/可写性（见 §13.3） | 是 |
+| DELETE | /api/me/data | 清除自己的练习记录（见 §13.2） | 是 |
+| DELETE | /api/admin/data | 清空全库（ADMIN_KEY） | 否（管理密钥） |
+| PUT | /api/admin/storage | 改数据目录，重启生效（ADMIN_KEY） | 否（管理密钥） |
 
 除 `/api/auth/register`、`/api/auth/login` 外，其余接口都要带 `Authorization: Bearer <token>`，并按 token 里的 user_id 隔离数据。
 
@@ -279,3 +284,64 @@ System prompt 模板：
 4. AI 追问一个项目问题，用户再答一句。
 5. 点结束，报告页滑出：综合分 + 4 维 + 逐句改写。
 6. 收尾一句：这套流程可复用到雅思、旅行、商务谈判等场景。
+
+## 13. 配置与数据管理（v0.3 新增）
+
+三件事：用户自带 API key、清除数据、显示/更改数据位置。三条都不进评分链，可独立实现与验收。
+
+### 13.1 用户自带 API key
+
+- 存储位置：**只存浏览器 localStorage**，随请求走 `X-LLM-Key` 头；后端 `settings.llm_api_key` 为兜底。
+- 不写 `.env`、不入库、不打日志。验证接口不回显 key，只回后四位。
+- 前端已用 `allow_headers=["*"]`（`backend/app/main.py:58`），自定义头不会触发 CORS 预检失败，无需额外放行。
+- 登录后进 `/settings` 引导页，**必须可跳过**：评委没有 key 不能卡在配置页。
+- 三种失败必须在报告里分开，不能都变成「示例报告」：
+  | 情形 | 行为 |
+  |---|---|
+  | 用户配了 key 且校验失败（401/403） | 返回 `502 {kind: "key_invalid"}`，提示去换 key，**不降级** |
+  | key 有效但服务不可用/超时 | 降级「示例报告（模型不可用）」，`source=mock`，不计分 |
+  | 未配置任何 key | 降级，文案提示「去配置」 |
+
+`POST /api/config/llm/test` req `{"api_key": "sk-..."}` → resp `{"ok": true, "model": "deepseek-chat", "latency_ms": 812, "key_tail": "…a1b2"}`；失败 `{"ok": false, "kind": "key_invalid"|"timeout"|"unreachable"}`。
+
+### 13.2 清除数据
+
+| 接口 | 权限 | 范围 |
+|---|---|---|
+| `DELETE /api/me/data` | 登录用户 | 只删自己 `user_id` 的 sessions/turns/reports，返回删除条数 |
+| `DELETE /api/admin/data` | ADMIN_KEY | 清全库，演示前重置用 |
+
+- req `{"scope": "records" | "account", "confirm": "删除"}`；`confirm` 不等于这两个字直接 400。
+- `scope=account` 额外删 `users` 行，此后旧 token 一律 401。
+- 前端二次确认要**显示影响范围**（将删除 N 次练习、M 份报告），并要求手动输入「删除」；清完同时清 localStorage（token、key、偏好）再回登录页。
+
+### 13.3 数据位置：显示与更改
+
+`GET /api/system/storage`（登录即可，方便排错）→
+```json
+{"data_dir": "D:\\...\\backend", "db_path": "D:\\...\\backend\\speakpal.db",
+ "size_bytes": 61440, "writable": true, "source": "default", "restart_required": false}
+```
+
+`PUT /api/admin/storage` req `{"data_dir": "D:\\data\\speakpal", "copy_existing": true}` → `{"ok": true, "restart_required": true}`。
+
+- 只写 `backend/data_location.json`，**不热切换**（SQLite engine 在 import 时绑定）。响应固定带 `restart_required: true`。
+- 「把现有数据复制过去」是复制不是移动，失败可回滚；旧库原位不删。
+
+**优先级（唯一权威，按此实现）**：
+
+1. 真实进程环境变量 `DATABASE_URL`（部署级覆盖，最高）
+2. `backend/data_location.json`
+3. `backend/.env` 里的 `DATABASE_URL`
+4. 默认 `backend/speakpal.db`
+
+为什么要把 1 和 3 分开：`config.py:5` 在 import 时 `load_dotenv()`，而 `.env.example:3` 写着 `DATABASE_URL=sqlite:///./speakpal.db`。若按「环境变量 > data_location.json」的字面意思实现，`.env` 里这一行会让 `PUT /api/admin/storage` **永远不生效**，界面却提示「重启后生效」——静默失效，而且很难排查。
+
+实现要点：在 `load_dotenv()` **之前**取一份 `os.environ` 快照，只有出现在快照里的 `DATABASE_URL` 才算第 1 级。若第 1 级已生效，`PUT /api/admin/storage` 返回 `409 {"kind": "env_override", "hint": "DATABASE_URL 由环境变量指定，配置文件不会生效"}`，不写 json。
+
+### 13.4 验收（三条最容易被漏）
+
+1. 用错 key 跑 finish → 必须是「key 无效」，不能降级成示例报告；`grep` 响应体、日志、DB 均无 key 明文。
+2. 清数据后：自己的 sessions/reports 归零，**另一个账号记录不受影响**，旧 token 401，刷新停在登录页。
+3. 改目录后重启：新库生效、旧库原位未删；设了真实 `DATABASE_URL` 时以 env 为准且 `PUT` 返回 409。
+
