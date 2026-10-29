@@ -334,15 +334,18 @@ System prompt 模板：
 |---|---|---|
 | `DELETE /api/me/data` | 登录用户 | 只删自己 `user_id` 的 sessions / turns / reports（只接受 `scope=records`） |
 | `DELETE /api/me/account` | 登录用户 | 删记录 + 删 `users` 行，注销账号 |
-| `DELETE /api/admin/data` | `X-Admin-Key` 头 | 清全库，演示前重置用 |
+| `DELETE /api/admin/data` | `X-Admin-Key` 头（错密钥 → **403**） | 清全库，演示前重置用 |
 
 - `/api/me/data` 响应：`{"deleted_sessions": 3, "deleted_turns": 12, "deleted_reports": 3, "deleted_account": 0, "scope": "records"}`。
   传 `scope=account` 要回 **400** 并指向 `/api/me/account`——**注销只有一个入口**，不要两条路各做一套。
 - 账号注销（用户已确认）：`DELETE /api/me/account`，body `{"confirm": "注销"}`。
-  前端 `Settings.vue:164` 已经按这条路调、确认词是「注销」（`Settings.vue:158`），所以服务端校验 `confirm == "注销"`，不符返 400。
+  服务端校验 `confirm == "注销"`（`account.py:68`），不符返 400——**「删除」也放行的那版已收紧（`5fdbbdd`），现在只认「注销」**。
   删完后 `users` 行没了，该用户旧 token 一律 401。级联顺序：报告 → 对话轮次 → 会话 → 用户，同一事务提交，不留孤儿行。
-- 管理密钥走 `X-Admin-Key` 头，直接复用 `admin.py:13` 的 `require_admin`（FastAPI 由 `x_admin_key` 形参映射到该头），不塞进请求体。
-- 两个确认词别串：清记录是「删除」（`Settings.vue:112`），注销是「注销」（`Settings.vue:158`）。
+- 管理密钥走 `X-Admin-Key` 头（FastAPI 由 `x_admin_key` 形参映射到该头），不塞进请求体。
+- **管理端点错密钥返 403，不是 401**：`/admin/storage`、`/admin/data` 用 `require_admin_ui`（`admin.py:29-36`）。
+  理由和 key 那边同一条——前端拦截器把 401 当登录失效，输错管理密钥不该把人踢回登录页。
+  旧的 `/admin/stats`、`/admin/users`、`/admin/sessions` 仍用 `require_admin`（`admin.py:23-25`，401），两者别混。
+- 两个确认词别串：清记录是「删除」（`Settings.vue:112`，也用于 `/admin/data`），注销是「注销」（`Settings.vue:158`）。
 - 注销不可恢复，前端二次确认要显示账号名与影响范围（`Settings.vue:320` 已做）。
 
 ### 13.3 数据位置：显示与更改
@@ -352,8 +355,9 @@ System prompt 模板：
 {"path": "D:\\...\\backend\\speakpal.db", "exists": true, "size_bytes": 61440, "writable": true}
 ```
 
-`PUT /api/admin/storage`（`X-Admin-Key` 头）req `{"path": "D:\\data\\speakpal", "copy_existing": true}` → `{"path": "D:\\data\\speakpal\\speakpal.db", "copied_bytes": 61440, "restart_required": true}`。
+`PUT /api/admin/storage`（`X-Admin-Key` 头，错密钥返 **403**）req `{"path": "D:\\data\\speakpal", "copy_existing": true}` → `{"path": "D:\\data\\speakpal\\speakpal.db", "copied_bytes": 61440, "restart_required": true}`。
 
+- 403 不是 401：前端拦截器把 401 当登录失效，管理密钥输错不该把用户踢回登录页（与 `key_invalid` 用 502 同一个道理）。
 - `path` 收目录或 `.db` 文件都行，由后端归一化成库文件路径（不要求前端自己拼）。
 - 只写 `backend/data_location.json`，**不热切换**（SQLite engine 在 import 时绑定，`db.py` 建 engine 前就要解析完优先级）。响应固定带 `restart_required: true`。
 - 「把现有数据复制过去」是复制不是移动，失败可回滚；旧库原位不删。目标目录不存在或不可写时报错，**不写坏配置**。
@@ -375,6 +379,7 @@ System prompt 模板：
    `mock_reason` 三个值各自对应一条路：`invalid_key`=服务端 `.env` 兜底密钥失效（请求头不带 key 时才会出现），`unavailable`=超时/不可达/解析失败，`not_configured`=中途丢 key 后 finish。用户 key 无效是 502、**不产生任何 `mock_reason`**。
    无密钥时 `POST /api/sessions` 与 `/turn` 必须 409 `kind=llm_not_configured`；`finish` **不拦**，拿到的应是 `not_configured` 示例报告——这是预期，别报成 bug。
 2. **清数据与注销**：`/api/me/data` 只清 records 时 A 的 sessions/turns/reports 归零、**B 不受影响**、三个 `deleted_*` 与实际一致、旧 token 仍有效（账号还在）；传 `scope=account` 必须 400。
-   注销单独验 `/api/me/account`：`confirm` 不是「注销」→ 400；正确后 `users` 行没了、旧 token 立即 401、再登录失败、其 sessions/reports 全无。
-3. **数据位置**：设了真实 `DATABASE_URL` 时 `PUT` 返回 `409 env_override` 且不写 json → 清掉 env 后改路径、重启生效 → 旧库原位没被删 → 目标目录不存在/不可写时报错且配置没被写坏；`data_location.json` 不在 `git ls-files` 里。
+   注销单独验 `/api/me/account`：`confirm` 缺省、或值为「删除」，都必须 400（只认「注销」）；正确后 `users` 行没了、旧 token 立即 401、再登录失败、其 sessions/reports 全无。
+3. **管理密钥**：`DELETE /api/admin/data`、`PUT /api/admin/storage` 用错 `X-Admin-Key` 必须 **403**；缺 header 也是 403。这两条要单独断言，因为前端把 401 当登录失效。
+4. **数据位置**：设了真实 `DATABASE_URL` 时 `PUT` 返回 `409 env_override` 且不写 json；管理密钥错时必须是 **403**（不是 401，否则前端会把人踢回登录页）→ 清掉 env 后改路径、重启生效 → 旧库原位没被删 → 目标目录不存在/不可写时报错且配置没被写坏；`data_location.json` 不在 `git ls-files` 里。
 
