@@ -28,6 +28,21 @@ class TokenOut(BaseModel):
     user: UserOut
 
 
+class ProfileUpdateIn(BaseModel):
+    """自己改资料：昵称直接改；改密码必须给出旧密码。"""
+
+    nickname: str | None = Field(default=None, max_length=32)
+    password: str | None = Field(default=None, min_length=4, max_length=64)
+    current_password: str | None = None
+
+
+class AdminUserUpdateIn(BaseModel):
+    """管理员改用户：不需要旧密码，但不能把昵称/密码同时留空。"""
+
+    nickname: str | None = Field(default=None, max_length=32)
+    password: str | None = Field(default=None, min_length=4, max_length=64)
+
+
 class SceneOut(BaseModel):
     id: str
     name: str

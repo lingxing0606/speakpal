@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session as OrmSession
 from ..config import database_url_locked_by_env, settings
 from ..db import get_db
 from ..models import PracticeSession, Report, Turn, User
+from ..schemas import AdminUserUpdateIn
+from ..security import hash_password
 from ..services.scenes import get_scene
 from ..services.storage import (
     copy_current_to,
@@ -16,6 +18,7 @@ from ..services.storage import (
     storage_info,
     write_location,
 )
+from ..services.user_data import delete_user_data
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -201,4 +204,55 @@ def delete_all_data(
         "deleted_turns": int(deleted_turns or 0),
         "deleted_reports": int(deleted_reports or 0),
         "scope": scope,
+    }
+
+
+@router.patch("/users/{user_id}")
+def update_user(
+    user_id: int,
+    body: AdminUserUpdateIn,
+    _=Depends(require_admin_ui),
+    db: OrmSession = Depends(get_db),
+):
+    """管理员改某个用户：昵称 / 密码（不需要旧密码）。"""
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    nickname = (body.nickname or "").strip()
+    password = body.password or ""
+    if not nickname and not password:
+        raise HTTPException(status_code=400, detail="昵称和密码至少改一项")
+    if nickname:
+        target.nickname = nickname
+    if password:
+        target.password_hash = hash_password(password)
+    db.commit()
+    db.refresh(target)
+    return {
+        "id": target.id,
+        "username": target.username,
+        "nickname": target.nickname or target.username,
+        "password_changed": bool(password),
+    }
+
+
+@router.delete("/users/{user_id}")
+def delete_user(
+    user_id: int,
+    _=Depends(require_admin_ui),
+    db: OrmSession = Depends(get_db),
+):
+    """管理员删某个用户及其全部练习数据（不可恢复）。"""
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    deleted_sessions, deleted_turns, deleted_reports = delete_user_data(db, user_id)
+    db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
+    db.commit()
+    return {
+        "deleted_account": 1,
+        "deleted_sessions": deleted_sessions,
+        "deleted_turns": deleted_turns,
+        "deleted_reports": deleted_reports,
+        "user_id": user_id,
     }

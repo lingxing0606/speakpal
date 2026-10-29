@@ -1,8 +1,8 @@
-"""当前用户自己的数据操作。
+"""当前用户自己的资料与数据。
 
-两个入口，不重叠：
-- `DELETE /api/me/account`：注销账号（连数据带用户行），前端手打「注销」确认。
+- `PATCH /api/me/profile`：改昵称 / 改密码（改密码要旧密码）。
 - `DELETE /api/me/data`：只清练习记录，账号保留。
+- `DELETE /api/me/account`：注销账号（连数据带用户行），前端手打「注销」确认。
 """
 
 from __future__ import annotations
@@ -12,8 +12,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
-from ..models import PracticeSession, Report, Turn, User
-from ..security import get_current_user
+from ..models import User
+from ..schemas import ProfileUpdateIn, UserOut
+from ..security import get_current_user, hash_password, verify_password
+from ..services.user_data import delete_user_data
 
 router = APIRouter(prefix="/api/me", tags=["me"])
 
@@ -27,30 +29,30 @@ class DeleteAccountIn(BaseModel):
     confirm: str | None = None
 
 
-def _delete_user_data(db: OrmSession, user_id: int) -> tuple[int, int, int]:
-    """报告 → 轮次 → 会话，同一事务里删干净，返回 (sessions, turns, reports)。"""
-    session_ids = [
-        row[0] for row in db.query(PracticeSession.id).filter(PracticeSession.user_id == user_id)
-    ]
-    deleted_reports = 0
-    deleted_turns = 0
-    if session_ids:
-        deleted_reports = (
-            db.query(Report)
-            .filter(Report.session_id.in_(session_ids))
-            .delete(synchronize_session=False)
-        )
-        deleted_turns = (
-            db.query(Turn)
-            .filter(Turn.session_id.in_(session_ids))
-            .delete(synchronize_session=False)
-        )
-    deleted_sessions = (
-        db.query(PracticeSession)
-        .filter(PracticeSession.user_id == user_id)
-        .delete(synchronize_session=False)
-    )
-    return int(deleted_sessions or 0), int(deleted_turns or 0), int(deleted_reports or 0)
+@router.patch("/profile", response_model=UserOut)
+def update_my_profile(
+    body: ProfileUpdateIn,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """改昵称或密码。改密码必须带当前密码，防止拿着别人电脑直接改。"""
+    nickname = (body.nickname or "").strip()
+    password = body.password or ""
+    if not nickname and not password:
+        raise HTTPException(status_code=400, detail="昵称和密码至少改一项")
+
+    if password:
+        if not body.current_password:
+            raise HTTPException(status_code=400, detail="改密码需要提供当前密码")
+        if not verify_password(body.current_password, user.password_hash):
+            raise HTTPException(status_code=400, detail="当前密码不正确")
+        user.password_hash = hash_password(password)
+    if nickname:
+        user.nickname = nickname
+
+    db.commit()
+    db.refresh(user)
+    return UserOut.model_validate(user)
 
 
 @router.delete("/account")
@@ -68,7 +70,7 @@ def delete_my_account(
     if confirm != "注销":
         raise HTTPException(status_code=400, detail="注销不可恢复，请输入「注销」确认")
 
-    deleted_sessions, deleted_turns, deleted_reports = _delete_user_data(db, user.id)
+    deleted_sessions, deleted_turns, deleted_reports = delete_user_data(db, user.id)
     deleted_account = db.query(User).filter(User.id == user.id).delete(synchronize_session=False)
     db.commit()
     return {
@@ -96,7 +98,7 @@ def delete_my_data(
     if scope != "records":
         raise HTTPException(status_code=400, detail="scope 只能是 records")
 
-    deleted_sessions, deleted_turns, deleted_reports = _delete_user_data(db, user.id)
+    deleted_sessions, deleted_turns, deleted_reports = delete_user_data(db, user.id)
     db.commit()
     return {
         "deleted_sessions": deleted_sessions,
