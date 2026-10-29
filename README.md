@@ -23,8 +23,12 @@
 ├── evaluation/         # 评估与验证（人评一致性统计、特征提取）
 ├── tools/node/         # 便携版 Node（免系统安装）
 ├── docs/
-│   ├── design.md       # 设计文档
-│   └── validation.md   # 评估与验证说明
+│   ├── 技术文档.md     # 完整技术文档（架构/接口/评分/部署，提交用）
+│   ├── design.md       # 设计与接口口径（改动先改这里）
+│   ├── rubric-band.md  # 评分量表与 CEFR/雅思换算
+│   ├── validation.md   # 评估与验证说明
+│   ├── demo-script.md  # 5 分钟录屏脚本 + 兜底
+│   └── ui-visual.md    # 视觉规范
 ├── start-all.bat       # 双击一键启动（推荐）
 ├── start-backend.bat
 ├── start-frontend.bat
