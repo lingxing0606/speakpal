@@ -13,6 +13,7 @@ const session = useSessionStore()
 
 const report = ref(null)
 const error = ref('')
+const drillError = ref('')
 const missing = ref(false)
 const showDetail = ref(false)
 const showFeatures = ref(false)
@@ -134,6 +135,14 @@ const bandText = computed(() => {
   return r.cefr ? `${r.cefr} · 雅思 ${band}` : `雅思 ${band}`
 })
 
+// 综合分怎么来的：有评分依据时说明是融合分，别再说「AI 估算」，否则和下方的融合说明互相打架
+const scoreNote = computed(() => {
+  const r = report.value
+  if (!r) return ''
+  if (hasDetail.value) return '综合分 = 模型分与可测规则分融合；每一维的模型分 / 规则分 / 最终分在下方「评分依据」里。'
+  return r.note || ''
+})
+
 function dimBand(name) {
   const b = report.value?.bands?.[name]
   if (b === null || b === undefined) return ''
@@ -238,6 +247,7 @@ function stopDrillListen() {
 
 function openDrill(item) {
   stopDrillListen()
+  drillError.value = ''
   drillOpen.value = item.index
   drillText.value = ''
   drillResult.value = null
@@ -245,6 +255,7 @@ function openDrill(item) {
 
 function closeDrill() {
   stopDrillListen()
+  drillError.value = ''
   drillOpen.value = null
   drillResult.value = null
   drillText.value = ''
@@ -257,7 +268,7 @@ function toggleDrillListen(item) {
   }
   drillText.value = ''
   drillResult.value = null
-  error.value = ''
+  drillError.value = ''
   drillRecognizer = createRecognizer(
     (text) => {
       drillText.value = text
@@ -274,11 +285,11 @@ function toggleDrillListen(item) {
         'audio-capture': '没找到麦克风，检查一下设备。',
       }
       const msg = map[event?.error]
-      if (msg) error.value = msg
+      if (msg) drillError.value = msg
     }
   )
   if (!drillRecognizer) {
-    error.value = '当前浏览器不支持语音识别，请换 Chrome 再跟读。'
+    drillError.value = '当前浏览器不支持语音识别，请换 Chrome 再跟读。'
     return
   }
   drillListening.value = true
@@ -298,7 +309,7 @@ async function submitDrill(item) {
     item.best_similarity = data.best_similarity
     item.passed = data.passed
   } catch (e) {
-    error.value = '评定失败：' + (e?.response?.data?.detail || e.message)
+    drillError.value = '评定失败：' + (e?.response?.data?.detail || e.message)
   } finally {
     drillBusy.value = false
   }
@@ -373,7 +384,10 @@ function again() {
             <div v-if="bandText" class="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3.5 py-1.5 text-sm font-medium text-brand-700">
               {{ bandText }}
             </div>
-            <div class="mt-2.5 text-xs leading-5 text-ink-mute">{{ report.note }}</div>
+            <div v-if="bandText" class="mt-1.5 text-[11px] leading-5 text-ink-mute">
+              本模式口径（按这次是录音还是打字换算）；历史曲线用的是跨模式可比口径。
+            </div>
+            <div class="mt-2.5 text-xs leading-5 text-ink-mute">{{ scoreNote }}</div>
           </div>
         </div>
 
@@ -466,6 +480,9 @@ function again() {
                 <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="closeDrill">收起</button>
               </div>
               <p v-if="drillText" class="mt-2 text-xs leading-5 text-ink-soft">听到：{{ drillText }}</p>
+              <p v-if="drillError" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 ring-1 ring-amber-100">
+                {{ drillError }}
+              </p>
               <div
                 v-if="drillResult"
                 class="mt-2 rounded-lg px-3 py-2 text-xs leading-5"
@@ -543,3 +560,4 @@ function again() {
     </main>
   </div>
 </template>
+
