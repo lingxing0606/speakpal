@@ -7,7 +7,9 @@ from evaluation.bands import DIMENSIONS, report_bands, round_band
 
 from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
 
-DEFAULT_NOTE = "分数由 AI 估算，仅供参考。"
+# 报告卡上的注脚：必须是真实口径。之前写「分数由 AI 估算」，
+# 与同一张卡上的「模型分与可测指标融合」「评分依据」自相矛盾，评委一看就穿。
+DEFAULT_NOTE = "分数由模型分与可测指标融合得出，仅供参考。"
 MOCK_NOTE = "示例报告（模型不可用） · 本次不计分"
 MAX_FIXES = 3
 
