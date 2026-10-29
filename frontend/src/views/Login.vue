@@ -78,10 +78,12 @@ async function submit() {
       router.push(nextPath)
       return
     }
-    // 新注册的账号、或者这台机器上还没看过引导的账号，先走一遍引导
+    // 新注册的账号、或者这台机器上还没看过引导的账号，先走一遍引导；
+    // 旧版全局标记 '1' 没有用户名，当「未知」处理，让老账号也能看一次
     const welcomedFor = localStorage.getItem('sp_welcomed') || ''
     const isNewUser = mode.value === 'register'
-    const seenHere = welcomedFor === '1' || (!!welcomedFor && welcomedFor === (data.user?.username || ''))
+    const seenHere =
+      !!welcomedFor && welcomedFor !== '1' && welcomedFor === (data.user?.username || '')
     if (isNewUser || !seenHere) {
       router.push('/welcome')
       return
