@@ -103,7 +103,7 @@
   /* 输入 */
   .sp-input {
     @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none
-      transition duration-150 placeholder:text-ink-mute/80
+      transition duration-150 placeholder:text-ink-mute
       focus:border-brand-400 focus:ring-2 focus:ring-brand-200;
   }
 

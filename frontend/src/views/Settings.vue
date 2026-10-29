@@ -204,7 +204,7 @@ function logout() {
       <section class="sp-card p-6">
         <h2 class="font-semibold text-ink">个人资料</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
-          昵称只影响显示，不影响登录账号（{{ auth.user?.username }}）。
+          昵称只影响显示，不影响登录账号<span v-if="auth.user?.username">（{{ auth.user.username }}）</span>。
         </p>
 
         <div class="mt-4 flex flex-wrap items-end gap-2">
@@ -335,7 +335,7 @@ function logout() {
             注销我的账号
           </button>
           <template v-else>
-            <p class="text-ink-soft">确认注销「{{ auth.user?.username }}」？输入「注销」两个字再点确认。</p>
+            <p class="text-ink-soft">确认注销「{{ auth.user?.username || '当前账号' }}」？输入「注销」两个字再点确认。</p>
             <div class="flex flex-wrap items-center gap-2">
               <input v-model="accountWord" placeholder="注销" class="sp-input w-24" />
               <button class="sp-btn bg-danger text-white hover:bg-rose-700" :disabled="accountState.running" @click="deleteAccount">

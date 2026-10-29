@@ -329,11 +329,14 @@ async function finish() {
           {{ t.content }}
           <button
             v-if="t.role === 'ai'"
-            class="ml-1.5 rounded-md px-1 text-xs text-brand-600 transition hover:bg-brand-50"
+            class="ml-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-brand-600 transition hover:bg-brand-50"
             aria-label="朗读这句"
             @click="speak(t.content)"
           >
-            🔊
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4a.8.8 0 0 1-.8-.8v-3.4a.8.8 0 0 1 .8-.8Z" />
+              <path d="M16 9.2a4 4 0 0 1 0 5.6" />
+            </svg>
           </button>
         </div>
       </div>
@@ -419,7 +422,14 @@ async function finish() {
               :aria-label="listening ? '停止录音' : '开始录音'"
               @click="toggleListening"
             >
-              {{ listening ? '■' : '🎤' }}
+              <svg v-if="!listening" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="9" y="2.8" width="6" height="11" rx="3" />
+                <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0" />
+                <path d="M12 17.8v3.4" />
+              </svg>
+              <svg v-else width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="7" y="7" width="10" height="10" rx="2.4" fill="currentColor" />
+              </svg>
             </button>
             <span class="h-4 text-[11px]" :class="listening ? 'font-medium text-ink-soft' : 'text-ink-mute'">
               {{ listening ? `录音中 ${elapsedText}` : sending ? '正在回复…' : '点一下说话' }}

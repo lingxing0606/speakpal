@@ -24,6 +24,7 @@ const nextPath = (() => {
 })()
 
 const mode = ref('login')
+const showPwd = ref(false)
 const username = ref('')
 const password = ref('')
 const nickname = ref('')
@@ -98,19 +99,43 @@ async function submit() {
           <div class="space-y-3">
             <label class="block">
               <span class="mb-1.5 block text-xs font-medium text-ink-soft">账号</span>
-              <input v-model="username" class="sp-input" placeholder="账号" autocomplete="username" />
-            </label>
-            <label class="block">
-              <span class="mb-1.5 block text-xs font-medium text-ink-soft">密码</span>
               <input
-                v-model="password"
-                type="password"
+                v-model="username"
                 class="sp-input"
-                placeholder="密码"
-                autocomplete="current-password"
-                @keyup.enter="submit"
+                placeholder="登录用户名"
+                autocomplete="username"
               />
             </label>
+            <div class="block">
+              <label class="mb-1.5 block text-xs font-medium text-ink-soft" for="sp-password">密码</label>
+              <div class="relative">
+                <input
+                  id="sp-password"
+                  v-model="password"
+                  :type="showPwd ? 'text' : 'password'"
+                  class="sp-input pr-11"
+                  placeholder="至少 4 位"
+                  autocomplete="current-password"
+                  @keyup.enter="submit"
+                />
+                <button
+                  type="button"
+                  class="absolute inset-y-0 right-1 my-auto flex h-8 w-8 items-center justify-center rounded-lg text-ink-mute transition hover:bg-canvas hover:text-ink-soft"
+                  :aria-label="showPwd ? '隐藏密码' : '显示密码'"
+                  :aria-pressed="showPwd"
+                  @click="showPwd = !showPwd"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+                    <circle cx="12" cy="12" r="3" />
+                    <path v-if="showPwd" d="M4 20 20 4" />
+                  </svg>
+                </button>
+              </div>
+              <p v-if="mode === 'login'" class="mt-1 text-[11px] text-ink-mute">
+                忘记密码？可以让管理员在后台重置。
+              </p>
+            </div>
             <label v-if="mode === 'register'" class="block">
               <span class="mb-1.5 block text-xs font-medium text-ink-soft">昵称</span>
               <input
@@ -122,7 +147,9 @@ async function submit() {
             </label>
           </div>
 
-          <p v-if="expired" class="sp-alert-warn mt-4">登录状态已过期，重新登录就能接着练（练习记录还在）。</p>
+          <p v-if="expired" class="mt-4 rounded-xl bg-brand-50 px-3.5 py-2.5 text-sm leading-6 text-brand-700 ring-1 ring-brand-100">
+            登录状态已过期，重新登录就能接着练（练习记录还在）。
+          </p>
 
           <p v-if="error" class="sp-alert-error mt-4">{{ error }}</p>
 

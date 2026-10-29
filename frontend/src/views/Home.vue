@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
+import SceneIcon from '../components/SceneIcon.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSessionStore } from '../stores/session'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
@@ -16,8 +17,6 @@ const scenes = ref([])
 const difficulty = ref('medium')
 const loading = ref(false)
 const error = ref('')
-
-const icons = { briefcase: '💼', coffee: '☕', book: '📘' }
 
 onMounted(async () => {
   try {
@@ -109,7 +108,9 @@ function logout() {
           @click="start(s)"
         >
           <div class="flex items-center justify-between">
-            <div class="sp-icon-tile">{{ icons[s.icon] || '🎯' }}</div>
+            <div class="sp-icon-tile text-brand-700">
+              <SceneIcon :name="s.icon" :size="22" />
+            </div>
             <span class="text-lg text-line transition group-hover:text-brand-400">→</span>
           </div>
           <div class="mt-3.5 font-semibold text-ink">{{ s.name }}</div>

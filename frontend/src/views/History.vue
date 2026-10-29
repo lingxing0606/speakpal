@@ -18,6 +18,16 @@ onMounted(async () => {
   }
 })
 
+// 后端给的是不带时区的 UTC 串，先补 Z 再解析，否则会当成本地时间差 8 小时
+function when(iso) {
+  if (!iso) return ''
+  const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso)
+  const d = new Date(hasZone ? iso : `${iso}Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function open(item) {
   // 按后端列表字段直接分支，不做「先跳报告页、404 再退回」的试探
   if (item.report_id) return router.push(`/report/${item.id}`)
@@ -54,8 +64,12 @@ function open(item) {
       </div>
 
       <div v-if="items.length === 0 && !error" class="sp-card flex flex-col items-center px-6 py-14 text-center">
-        <div class="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-2xl ring-1 ring-brand-100">
-          🎤
+        <div class="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-brand-100">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="2.8" width="6" height="11" rx="3" />
+            <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0" />
+            <path d="M12 17.8v3.4" />
+          </svg>
         </div>
         <div class="mt-4 font-semibold text-ink">还没有练习记录。</div>
         <p class="mt-1 max-w-xs text-sm leading-6 text-ink-soft">
@@ -73,7 +87,7 @@ function open(item) {
         >
           <div class="min-w-0">
             <div class="truncate font-medium text-ink">{{ it.scene_name }}</div>
-            <div class="mt-1 text-xs text-ink-mute">{{ it.created_at }}</div>
+            <div class="mt-1 text-xs text-ink-mute">{{ when(it.created_at) }}</div>
           </div>
           <div class="flex shrink-0 items-center gap-3">
             <div v-if="it.total_score !== null" class="text-right">
