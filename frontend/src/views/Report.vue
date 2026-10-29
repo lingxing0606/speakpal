@@ -12,6 +12,8 @@ const session = useSessionStore()
 
 const report = ref(null)
 const error = ref('')
+const missing = ref(false)
+const showDetail = ref(false)
 
 const dimLabels = {
   pronunciation: '发音清晰度',
@@ -106,6 +108,11 @@ onMounted(async () => {
     const { data } = await api.get(`/sessions/${route.params.id}/report`)
     report.value = data
   } catch (e) {
+    if (e?.response?.status === 404) {
+      // 从历史点进来的会话还没生成报告（中途退出/刷新丢态），别甩英文错误
+      missing.value = true
+      return
+    }
     error.value = '加载报告失败：' + (e?.response?.data?.detail || e.message)
   }
 })
@@ -133,6 +140,15 @@ function again() {
 
     <main class="sp-shell py-8">
       <p v-if="error" class="sp-alert-error">{{ error }}</p>
+
+      <div v-if="missing" class="sp-card flex flex-col items-center px-6 py-14 text-center">
+        <div class="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-2xl ring-1 ring-brand-100">📄</div>
+        <div class="mt-4 font-semibold text-ink">这次练习还没有报告</div>
+        <p class="mt-1 max-w-sm text-sm leading-6 text-ink-soft">
+          它可能是中途退出或刷新时丢掉的对话，还没有走到生成报告这一步。重新练一次，说几句再点「结束并出报告」，就能看到分数和纠错。
+        </p>
+        <button class="sp-btn-primary mt-5" @click="again">重新练一次</button>
+      </div>
 
       <div v-if="report">
         <div
@@ -197,20 +213,33 @@ function again() {
           v-if="hasDetail"
           class="sp-card mt-4 p-6"
         >
-          <div class="font-semibold text-ink">评分依据（可复现）</div>
-          <div v-if="report.scoring_detail.note" class="mt-1 text-xs leading-5 text-ink-mute">
-            {{ report.scoring_detail.note }}
-          </div>
-          <div v-for="(d, k) in scoringDims" :key="k" class="mt-3 rounded-xl bg-canvas p-3.5 text-sm ring-1 ring-line/60">
-            <div class="flex flex-wrap items-baseline justify-between gap-1">
-              <span class="font-medium text-ink-soft">{{ dimLabels[k] || k }}</span>
-              <span class="text-[11px] text-ink-mute">
-                模型 {{ d.model_score ?? '—' }} · 规则 {{ d.rule_score ?? '—' }} · 最终 {{ d.final_score ?? '—' }}
-              </span>
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="font-semibold text-ink">评分依据（可复现）</div>
+              <div class="mt-0.5 text-xs text-ink-mute">想核对分数怎么来的再展开，学习者只看分数和等级就行。</div>
             </div>
-            <div v-if="d.clamped" class="mt-1.5 text-xs text-warn">{{ d.clamp_reason }}</div>
-            <div class="mt-1.5 text-xs leading-5 text-ink-soft">{{ d.note }}</div>
-            <div v-if="evidenceText(d)" class="mt-1 text-[11px] leading-5 text-ink-mute">{{ evidenceText(d) }}</div>
+            <button class="sp-btn-ghost shrink-0 py-1.5" @click="showDetail = !showDetail">
+              {{ showDetail ? '收起' : '展开' }}
+            </button>
+          </div>
+          <div v-if="showDetail" class="mt-3">
+            <p class="text-xs leading-5 text-ink-soft">
+              每个维度先由模型打分，再用可测指标（词数、语速、TTR 等）校准；「最终」才是算进综合分的那一列。
+            </p>
+            <div v-if="report.scoring_detail.note" class="mt-1 text-xs leading-5 text-ink-mute">
+              {{ report.scoring_detail.note }}
+            </div>
+            <div v-for="(d, k) in scoringDims" :key="k" class="mt-3 rounded-xl bg-canvas p-3.5 text-sm ring-1 ring-line/60">
+              <div class="flex flex-wrap items-baseline justify-between gap-1">
+                <span class="font-medium text-ink-soft">{{ dimLabels[k] || k }}</span>
+                <span class="text-[11px] text-ink-mute">
+                  模型 {{ d.model_score ?? '—' }} · 规则 {{ d.rule_score ?? '—' }} · 最终 {{ d.final_score ?? '—' }}
+                </span>
+              </div>
+              <div v-if="d.clamped" class="mt-1.5 text-xs text-warn">{{ d.clamp_reason }}</div>
+              <div class="mt-1.5 text-xs leading-5 text-ink-soft">{{ d.note }}</div>
+              <div v-if="evidenceText(d)" class="mt-1 text-[11px] leading-5 text-ink-mute">{{ evidenceText(d) }}</div>
+            </div>
           </div>
         </div>
 

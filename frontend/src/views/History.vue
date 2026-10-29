@@ -19,9 +19,11 @@ onMounted(async () => {
 })
 
 function open(item) {
-  if (item.total_score !== null) {
-    router.push(`/report/${item.id}`)
-  }
+  // 按后端列表字段直接分支，不做「先跳报告页、404 再退回」的试探
+  if (item.report_id) return router.push(`/report/${item.id}`)
+  if (item.status && item.status !== 'finished') return router.push(`/practice/${item.id}`)
+  // finished 却没有报告（生成失败等罕见情况）：报告页会给「还没有报告」的说明
+  return router.push(`/report/${item.id}`)
 }
 </script>
 
@@ -66,8 +68,7 @@ function open(item) {
         <div
           v-for="it in items"
           :key="it.id"
-          :class="it.total_score !== null ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lift hover:ring-brand-200' : ''"
-          class="sp-card-flat flex items-center justify-between gap-4 p-4 transition duration-200 ease-out"
+          class="sp-card-flat flex cursor-pointer items-center justify-between gap-4 p-4 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lift hover:ring-brand-200"
           @click="open(it)"
         >
           <div class="min-w-0">
@@ -79,16 +80,10 @@ function open(item) {
               <div class="sp-num text-2xl font-semibold leading-none text-ink">{{ it.total_score }}</div>
               <div class="mt-1 text-[11px] text-ink-mute">综合分</div>
             </div>
-            <div
-              v-else
-              class="sp-chip-line"
-            >
-              未出分
-            </div>
-            <span
-              class="text-line transition"
-              :class="it.total_score !== null ? 'group-hover:text-brand-400' : 'opacity-0'"
-            >→</span>
+            <div v-else-if="it.status && it.status !== 'finished'" class="sp-chip-brand">进行中</div>
+            <div v-else class="sp-chip-line">未出分</div>
+            <span class="text-[11px] text-ink-mute">{{ it.report_id ? '看报告' : '继续练习' }}</span>
+            <span class="text-line transition">→</span>
           </div>
         </div>
       </div>
