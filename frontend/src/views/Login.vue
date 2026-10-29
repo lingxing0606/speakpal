@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
@@ -8,8 +8,20 @@ import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const settings = useSettingsStore()
+
+// 401 拦截器带过来的原因和原地址：登录过期被踢回来时给一句人话，登录后回到原来那一页
+const expired = route.query.expired === '1'
+const nextPath = (() => {
+  const raw = route.query.next
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (typeof value !== 'string') return ''
+  if (!value.startsWith('/') || value.startsWith('//')) return ''
+  if (value.startsWith('/login')) return ''
+  return value
+})()
 
 const mode = ref('login')
 const username = ref('')
@@ -47,6 +59,10 @@ async function submit() {
           }
     const { data } = await api.post(path, body)
     auth.setAuth(data.token, data.user)
+    if (nextPath) {
+      router.push(nextPath)
+      return
+    }
     router.push(settings.configured ? '/' : await firstStop())
   } catch (e) {
     error.value = e?.response?.data?.detail || '请求失败，请稍后重试'
@@ -105,6 +121,8 @@ async function submit() {
               />
             </label>
           </div>
+
+          <p v-if="expired" class="sp-alert-warn mt-4">登录状态已过期，重新登录就能接着练（练习记录还在）。</p>
 
           <p v-if="error" class="sp-alert-error mt-4">{{ error }}</p>
 

@@ -22,8 +22,10 @@ api.interceptors.response.use(
     if (error?.response?.status === 401) {
       const auth = useAuthStore()
       auth.logout()
+      const here = `${window.location.pathname}${window.location.search}`
       if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
+        // 带上原因和原地址：登录后能回到刚才那一页，而不是把「接着练」变成空话
+        window.location.href = `/login?expired=1&next=${encodeURIComponent(here)}`
       }
     }
     return Promise.reject(error)

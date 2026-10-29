@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
+import BrandLogo from '../components/BrandLogo.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
 
@@ -20,12 +21,10 @@ const server = ref({ env_configured: null, error: '' })
 const saveTip = ref('')
 const testState = ref({ running: false, ok: null, message: '' })
 
-const storage = ref({ path: '', exists: null, size_bytes: null, writable: null, error: '' })
-const newPath = ref('')
-const adminKey = ref('')
-const copyExisting = ref(true)
-const migrating = ref(false)
-const migrateTip = ref({ ok: null, message: '' })
+const nicknameInput = ref(auth.user?.nickname || '')
+const profileState = ref({ running: false, tip: '', error: '' })
+const pwd = ref({ current: '', next: '', confirm: '' })
+const pwdState = ref({ running: false, tip: '', error: '' })
 
 const confirming = ref(false)
 const confirmWord = ref('')
@@ -35,16 +34,14 @@ const accountOpen = ref(false)
 const accountWord = ref('')
 const accountState = ref({ running: false, error: '' })
 
-const sizeText = computed(() => {
-  const bytes = storage.value.size_bytes
-  if (bytes === null || bytes === undefined) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
-})
-
 function errText(e) {
-  return e?.response?.data?.detail || e.message || '未知错误'
+  const detail = e?.response?.data?.detail
+  // FastAPI 校验错误是数组，别把整段英文 JSON 甩给用户
+  if (Array.isArray(detail)) {
+    const first = detail[0]
+    return first?.msg ? `输入格式不对：${first.msg}` : '输入格式不对，检查一下再提交'
+  }
+  return detail || e?.message || '未知错误'
 }
 
 async function loadServerStatus() {
@@ -58,20 +55,7 @@ async function loadServerStatus() {
   }
 }
 
-async function loadStorage() {
-  try {
-    const { data } = await api.get('/system/storage')
-    storage.value = { ...data, error: '' }
-    if (!newPath.value) newPath.value = data.path || ''
-  } catch (e) {
-    storage.value = { ...storage.value, error: errText(e) }
-  }
-}
-
-onMounted(() => {
-  loadServerStatus()
-  loadStorage()
-})
+onMounted(loadServerStatus)
 
 function saveKey() {
   settings.save({ apiKey: keyInput.value, baseUrl: baseInput.value, model: modelInput.value })
@@ -108,6 +92,49 @@ function clearKey() {
   saveTip.value = '已从本浏览器删除。'
 }
 
+async function saveNickname() {
+  const nickname = nicknameInput.value.trim()
+  profileState.value = { running: true, tip: '', error: '' }
+  if (!nickname) {
+    profileState.value = { running: false, tip: '', error: '昵称不能为空' }
+    return
+  }
+  try {
+    const { data } = await api.patch('/me/profile', { nickname })
+    auth.setAuth(auth.token, { ...(auth.user || {}), ...data })
+    nicknameInput.value = data?.nickname || nickname
+    profileState.value = { running: false, tip: '昵称已更新。', error: '' }
+  } catch (e) {
+    profileState.value = { running: false, tip: '', error: errText(e) }
+  }
+}
+
+async function changePassword() {
+  pwdState.value = { running: true, tip: '', error: '' }
+  if (!pwd.value.current) {
+    pwdState.value = { running: false, tip: '', error: '请先填当前密码' }
+    return
+  }
+  if (pwd.value.next.length < 4 || pwd.value.next.length > 64) {
+    pwdState.value = { running: false, tip: '', error: '新密码要 4–64 位' }
+    return
+  }
+  if (pwd.value.next !== pwd.value.confirm) {
+    pwdState.value = { running: false, tip: '', error: '两次输入的新密码不一致' }
+    return
+  }
+  try {
+    await api.patch('/me/profile', {
+      password: pwd.value.next,
+      current_password: pwd.value.current,
+    })
+    pwd.value = { current: '', next: '', confirm: '' }
+    pwdState.value = { running: false, tip: '密码已更新，下次登录用新密码。', error: '' }
+  } catch (e) {
+    pwdState.value = { running: false, tip: '', error: errText(e) }
+  }
+}
+
 async function clearData() {
   if (confirmWord.value.trim() !== '删除') {
     dataState.value = { running: false, tip: '', error: '请先输入「删除」两个字' }
@@ -125,32 +152,6 @@ async function clearData() {
     confirmWord.value = ''
   } catch (e) {
     dataState.value = { running: false, tip: '', error: errText(e) }
-  }
-}
-
-async function migrateStorage() {
-  if (!adminKey.value.trim()) {
-    migrateTip.value = { ok: false, message: '改数据目录需要管理密钥，请先填写' }
-    return
-  }
-  migrating.value = true
-  migrateTip.value = { ok: null, message: '正在处理…' }
-  try {
-    const { data } = await api.put(
-      '/admin/storage',
-      { path: newPath.value.trim(), copy_existing: copyExisting.value },
-      { headers: { 'X-Admin-Key': adminKey.value.trim() } }
-    )
-    migrateTip.value = {
-      ok: true,
-      message: `已写入 ${data.path || newPath.value}${data.copied_bytes ? `（复制了 ${Math.round(data.copied_bytes / 1024)} KB）` : ''}，重启后端后生效。`,
-    }
-    await loadStorage()
-  } catch (e) {
-    migrateTip.value = { ok: false, message: errText(e) }
-    await loadStorage()
-  } finally {
-    migrating.value = false
   }
 }
 
@@ -177,86 +178,120 @@ function logout() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50">
-    <header class="border-b border-slate-200 bg-white">
-      <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-        <div class="text-lg font-bold">设置</div>
-        <div class="flex items-center gap-3 text-sm">
-          <router-link to="/" class="text-indigo-600 hover:underline">返回首页</router-link>
-          <button class="text-slate-500 hover:text-slate-800" @click="logout">退出</button>
+  <div class="min-h-screen bg-canvas">
+    <header class="sp-header">
+      <div class="sp-shell flex items-center justify-between py-3">
+        <div class="flex items-center gap-3">
+          <router-link to="/" aria-label="返回首页">
+            <BrandLogo :size="30" />
+          </router-link>
+          <span class="h-4 w-px bg-line"></span>
+          <div class="font-semibold text-ink">设置</div>
+        </div>
+        <div class="flex items-center gap-1">
+          <router-link to="/" class="sp-btn-ghost">返回首页</router-link>
+          <button class="sp-btn-ghost" @click="logout">退出</button>
         </div>
       </div>
     </header>
 
-    <main class="mx-auto max-w-3xl space-y-5 px-4 py-8">
-      <p v-if="onboarding" class="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 ring-1 ring-amber-200">
+    <main class="sp-shell space-y-5 py-8">
+      <p v-if="onboarding" class="sp-alert-warn">
         配一下你自己的模型密钥，之后每次练习都用它调用评分模型。没有密钥也可以先跳过，用服务端的兜底密钥。
         <button class="ml-2 font-medium underline" @click="router.push('/')">先跳过</button>
       </p>
 
-      <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-        <h2 class="font-semibold text-slate-900">模型密钥</h2>
-        <p class="mt-1 text-xs leading-5 text-slate-500">
-          密钥只存在本浏览器（localStorage），每次请求随请求头发送，服务端不写数据库、不写日志。
-          服务端 <code>backend/.env</code> 的密钥作为兜底，优先级「本浏览器 &gt; .env」。
+      <section class="sp-card p-6">
+        <h2 class="font-semibold text-ink">个人资料</h2>
+        <p class="mt-1 text-xs leading-5 text-ink-soft">
+          昵称只影响显示，不影响登录账号（{{ auth.user?.username }}）。
+        </p>
+
+        <div class="mt-4 flex flex-wrap items-end gap-2">
+          <label class="min-w-0 flex-1 text-sm">
+            <span class="mb-1.5 block text-xs font-medium text-ink-mute">昵称</span>
+            <input v-model="nicknameInput" class="sp-input" placeholder="昵称" maxlength="32" />
+          </label>
+          <button class="sp-btn-primary" :disabled="profileState.running" @click="saveNickname">保存昵称</button>
+        </div>
+        <p v-if="profileState.tip" class="mt-2 text-xs text-good">{{ profileState.tip }}</p>
+        <p v-if="profileState.error" class="mt-2 text-xs text-danger">{{ profileState.error }}</p>
+
+        <div class="mt-6 border-t border-line pt-5">
+          <div class="text-sm font-medium text-ink">修改密码</div>
+          <div class="mt-3 grid gap-3 sm:grid-cols-3">
+            <label class="block text-sm">
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">当前密码</span>
+              <input v-model="pwd.current" type="password" autocomplete="current-password" class="sp-input" />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">新密码</span>
+              <input v-model="pwd.next" type="password" autocomplete="new-password" class="sp-input" placeholder="4–64 位" />
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">再输一次</span>
+              <input v-model="pwd.confirm" type="password" autocomplete="new-password" class="sp-input" />
+            </label>
+          </div>
+          <div class="mt-3 flex items-center gap-3">
+            <button class="sp-btn-secondary" :disabled="pwdState.running" @click="changePassword">
+              {{ pwdState.running ? '提交中…' : '修改密码' }}
+            </button>
+            <span class="text-xs text-ink-mute">改完密码，其他设备上的登录不会掉线。</span>
+          </div>
+          <p v-if="pwdState.tip" class="mt-2 text-xs text-good">{{ pwdState.tip }}</p>
+          <p v-if="pwdState.error" class="mt-2 text-xs text-danger">{{ pwdState.error }}</p>
+        </div>
+      </section>
+
+      <section class="sp-card p-6">
+        <h2 class="font-semibold text-ink">模型密钥</h2>
+        <p class="mt-1 text-xs leading-5 text-ink-soft">
+          不填也能练：服务端配了兜底密钥时就用它；填了就优先用你自己的，且只存在这个浏览器里，不上传、不写数据库、不写日志。
         </p>
 
         <div class="mt-4 space-y-3">
           <label class="block text-sm">
-            <span class="text-slate-600">API Key</span>
+            <span class="mb-1.5 block text-xs font-medium text-ink-mute">API Key</span>
             <input
               v-model="keyInput"
               type="password"
               autocomplete="off"
               placeholder="sk-…（DeepSeek 控制台获取）"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm"
+              class="sp-input font-mono"
             />
           </label>
 
           <div class="grid gap-3 sm:grid-cols-2">
             <label class="block text-sm">
-              <span class="text-slate-600">Base URL（可留空用默认）</span>
-              <input
-                v-model="baseInput"
-                placeholder="https://api.deepseek.com/v1"
-                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">Base URL（可留空用默认）</span>
+              <input v-model="baseInput" placeholder="https://api.deepseek.com/v1" class="sp-input" />
             </label>
             <label class="block text-sm">
-              <span class="text-slate-600">模型（可留空用默认）</span>
-              <input
-                v-model="modelInput"
-                placeholder="deepseek-chat"
-                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">模型（可留空用默认）</span>
+              <input v-model="modelInput" placeholder="deepseek-chat" class="sp-input" />
             </label>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 text-sm">
-            <button
-              class="rounded-lg bg-indigo-600 px-3 py-1.5 text-white disabled:opacity-60"
-              :disabled="!keyInput.trim()"
-              @click="saveKey"
-            >
-              保存
-            </button>
-            <button
-              class="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700 disabled:opacity-60"
-              :disabled="testState.running || !keyInput.trim()"
-              @click="testKey"
-            >
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="sp-btn-primary" :disabled="!keyInput.trim()" @click="saveKey">保存</button>
+            <button class="sp-btn-secondary" :disabled="testState.running || !keyInput.trim()" @click="testKey">
               {{ testState.running ? '测试中…' : '测试连接' }}
             </button>
-            <button v-if="settings.configured" class="text-slate-500 hover:text-rose-600" @click="clearKey">
+            <button v-if="settings.configured" class="sp-btn-ghost text-danger hover:bg-rose-50" @click="clearKey">
               删除本浏览器密钥
             </button>
           </div>
 
-          <p v-if="saveTip" class="text-xs text-emerald-600">{{ saveTip }}</p>
-          <p v-if="testState.message" :class="testState.ok === false ? 'text-xs text-rose-600' : 'text-xs text-slate-600'">
+          <p v-if="saveTip" class="text-xs text-good">{{ saveTip }}</p>
+          <p
+            v-if="testState.message"
+            class="text-xs"
+            :class="testState.ok === false ? 'text-danger' : 'text-ink-soft'"
+          >
             {{ testState.message }}
           </p>
-          <p class="text-xs text-slate-400">
+          <p class="text-xs leading-5 text-ink-mute">
             当前：{{ settings.configured ? `已配置（${settings.masked}）` : '本浏览器未配置' }}
             <span v-if="server.env_configured === true">· 服务端已配置兜底密钥</span>
             <span v-else-if="server.env_configured === false">· 服务端未配置兜底密钥</span>
@@ -265,139 +300,57 @@ function logout() {
         </div>
       </section>
 
-      <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-        <h2 class="font-semibold text-slate-900">我的数据</h2>
-        <p class="mt-1 text-xs leading-5 text-slate-500">
+      <section class="sp-card p-6">
+        <h2 class="font-semibold text-ink">我的数据</h2>
+        <p class="mt-1 text-xs leading-5 text-ink-soft">
           只删除你自己的练习记录和报告，账号保留，别人的数据不受影响。删除后不可恢复。
         </p>
         <div class="mt-4 space-y-2 text-sm">
-          <button
-            v-if="!confirming"
-            class="rounded-lg border border-rose-300 px-3 py-1.5 text-rose-600 disabled:opacity-60"
-            :disabled="dataState.running"
-            @click="confirming = true"
-          >
+          <button v-if="!confirming" class="sp-btn-secondary text-danger hover:ring-rose-300" :disabled="dataState.running" @click="confirming = true">
             清除我的练习数据
           </button>
           <template v-else>
-            <p class="text-slate-600">确认删除你的全部练习记录与报告？输入「删除」两个字再点确认。</p>
+            <p class="text-ink-soft">确认删除你的全部练习记录与报告？输入「删除」两个字再点确认。</p>
             <div class="flex flex-wrap items-center gap-2">
-              <input
-                v-model="confirmWord"
-                placeholder="删除"
-                class="w-24 rounded-lg border border-slate-200 px-3 py-1.5"
-              />
-              <button
-                class="rounded-lg bg-rose-600 px-3 py-1.5 text-white disabled:opacity-60"
-                :disabled="dataState.running"
-                @click="clearData"
-              >
+              <input v-model="confirmWord" placeholder="删除" class="sp-input w-24" />
+              <button class="sp-btn bg-danger text-white hover:bg-rose-700" :disabled="dataState.running" @click="clearData">
                 {{ dataState.running ? '删除中…' : '确认删除' }}
               </button>
-              <button class="text-slate-500 hover:text-slate-800" @click="confirming = false; confirmWord = ''">取消</button>
+              <button class="sp-btn-ghost" @click="confirming = false; confirmWord = ''">取消</button>
             </div>
           </template>
         </div>
-        <p v-if="dataState.tip" class="mt-3 text-xs text-emerald-600">{{ dataState.tip }}</p>
-        <p v-if="dataState.error" class="mt-3 text-xs text-rose-600">{{ dataState.error }}</p>
+        <p v-if="dataState.tip" class="mt-3 text-xs text-good">{{ dataState.tip }}</p>
+        <p v-if="dataState.error" class="mt-3 text-xs text-danger">{{ dataState.error }}</p>
       </section>
 
-      <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-        <h2 class="font-semibold text-slate-900">注销账号</h2>
-        <p class="mt-1 text-xs leading-5 text-slate-500">
+      <section class="sp-card p-6">
+        <h2 class="font-semibold text-ink">注销账号</h2>
+        <p class="mt-1 text-xs leading-5 text-ink-soft">
           会删除账号本身，以及这个账号名下的全部练习记录、对话和报告，之后无法登录、无法恢复。
           只清记录不删账号的话，用上面那段。
         </p>
         <div class="mt-4 space-y-2 text-sm">
-          <button
-            v-if="!accountOpen"
-            class="rounded-lg border border-rose-400 px-3 py-1.5 text-rose-700"
-            @click="accountOpen = true"
-          >
+          <button v-if="!accountOpen" class="sp-btn-secondary text-danger hover:ring-rose-300" @click="accountOpen = true">
             注销我的账号
           </button>
           <template v-else>
-            <p class="text-slate-600">确认注销「{{ auth.user?.username }}」？输入「注销」两个字再点确认。</p>
+            <p class="text-ink-soft">确认注销「{{ auth.user?.username }}」？输入「注销」两个字再点确认。</p>
             <div class="flex flex-wrap items-center gap-2">
-              <input
-                v-model="accountWord"
-                placeholder="注销"
-                class="w-24 rounded-lg border border-slate-200 px-3 py-1.5"
-              />
-              <button
-                class="rounded-lg bg-rose-700 px-3 py-1.5 text-white disabled:opacity-60"
-                :disabled="accountState.running"
-                @click="deleteAccount"
-              >
+              <input v-model="accountWord" placeholder="注销" class="sp-input w-24" />
+              <button class="sp-btn bg-danger text-white hover:bg-rose-700" :disabled="accountState.running" @click="deleteAccount">
                 {{ accountState.running ? '注销中…' : '确认注销' }}
               </button>
-              <button class="text-slate-500 hover:text-slate-800" @click="accountOpen = false; accountWord = ''">取消</button>
+              <button class="sp-btn-ghost" @click="accountOpen = false; accountWord = ''">取消</button>
             </div>
           </template>
-          <p v-if="accountState.error" class="text-xs text-rose-600">{{ accountState.error }}</p>
+          <p v-if="accountState.error" class="text-xs text-danger">{{ accountState.error }}</p>
         </div>
       </section>
 
-      <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-        <h2 class="font-semibold text-slate-900">数据存储位置</h2>
-        <p class="mt-1 text-xs leading-5 text-slate-500">
-          练习记录、报告、账号都在这一个 SQLite 文件里。改位置需要管理密钥，写入后<b>重启后端生效</b>，
-          原库文件不会被删除。
-        </p>
-
-        <dl class="mt-4 space-y-2 text-sm">
-          <div class="flex gap-2">
-            <dt class="w-20 shrink-0 text-slate-500">当前路径</dt>
-            <dd class="break-all font-mono text-xs text-slate-800">{{ storage.path || '—' }}</dd>
-          </div>
-          <div class="flex gap-2">
-            <dt class="w-20 shrink-0 text-slate-500">文件大小</dt>
-            <dd class="text-slate-800">{{ sizeText }}</dd>
-          </div>
-          <div class="flex gap-2">
-            <dt class="w-20 shrink-0 text-slate-500">状态</dt>
-            <dd class="text-slate-800">
-              {{ storage.exists === true ? '存在' : storage.exists === false ? '不存在（首次启动时创建）' : '—' }}
-              <span v-if="storage.writable === false" class="text-rose-600">· 目录不可写</span>
-            </dd>
-          </div>
-        </dl>
-
-        <div class="mt-4 space-y-2">
-          <label class="block text-sm">
-            <span class="text-slate-600">迁移到（目录或 .db 文件路径）</span>
-            <input
-              v-model="newPath"
-              placeholder="D:\SpeakPalData\speakpal.db"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs"
-            />
-          </label>
-          <label class="block text-sm">
-            <span class="text-slate-600">管理密钥（ADMIN_KEY）</span>
-            <input
-              v-model="adminKey"
-              type="password"
-              autocomplete="off"
-              class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm"
-            />
-          </label>
-          <label class="flex items-center gap-2 text-xs text-slate-600">
-            <input v-model="copyExisting" type="checkbox" />
-            把现有数据复制到新位置（推荐；失败可回滚）
-          </label>
-          <button
-            class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
-            :disabled="migrating || !newPath.trim()"
-            @click="migrateStorage"
-          >
-            {{ migrating ? '处理中…' : '写入新位置（重启后生效）' }}
-          </button>
-          <p v-if="migrateTip.message" :class="migrateTip.ok === false ? 'text-xs text-rose-600' : 'text-xs text-emerald-600'">
-            {{ migrateTip.message }}
-          </p>
-          <p v-if="storage.error" class="text-xs text-rose-600">读取存储信息失败：{{ storage.error }}</p>
-        </div>
-      </section>
+      <p class="pb-4 text-center text-xs text-ink-mute">
+        密钥只在你的浏览器里；练习数据按账号存在服务端，可以随时自己删掉。
+      </p>
     </main>
   </div>
 </template>
