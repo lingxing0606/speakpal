@@ -186,13 +186,21 @@ def finish_session(
     audio_metas = [json.loads(t.audio_json or "{}") for t in voice_turns]
 
     # 先算可测特征，再打分：规则子分要拿 features 才能和模型分融合。
-    # 语速/停顿只从录音轮算；词汇多样性等文本特征用全部发言。
+    # 词汇多样性、句长这类文本特征用全部发言；填充词、语速、停顿只从录音轮算——
+    # 打字里写的 like / well 不是口头填充，不能拉低流利度（否则和「打字不计流利度」矛盾）。
     features = fluency_features(user_text)
     if voice_turns:
+        voice_features = fluency_features(voice_text)
+        features["filler_count"] = voice_features.get("filler_count", 0)
+        features["filler_rate"] = voice_features.get("filler_rate", 0.0)
         features.update(
             speech_features([len(tokenize(t.content)) for t in voice_turns], audio_metas)
         )
         features["voice_word_count"] = len(tokenize(voice_text))
+    else:
+        # 纯打字：填充词/停顿是口头指标，不产出，报告页也就不会显示
+        for key in ("filler_count", "filler_rate", "pause_count", "mean_pause_sec"):
+            features.pop(key, None)
     features["voice_turns"] = len(voice_turns)
     features["typed_turns"] = typed_count
     try:
