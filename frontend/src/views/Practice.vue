@@ -27,6 +27,13 @@ const manualOpen = ref(false)
 const manualText = ref('')
 const manualInput = ref(null)
 const loadingSession = ref(false)
+// AI 朗读语速：A2 听不懂时能降速重听
+const speechRate = ref(1)
+const SPEECH_RATES = [
+  { value: 0.85, label: '慢' },
+  { value: 1, label: '正常' },
+  { value: 1.15, label: '快' },
+]
 
 // 识别出来的这句连同录音一起暂存，用户确认发送时才带上；
 // 用户改过文字就不带录音了，免得「语速/停顿」指标和文字对不上
@@ -73,7 +80,7 @@ onMounted(async () => {
         id,
         { id: data.scene_id, name: data.scene_name },
         data.difficulty,
-        (data.turns || []).map((t) => ({ role: t.role, content: t.content }))
+        (data.turns || []).map((t) => ({ role: t.role, content: t.content, mode: t.input_mode }))
       )
       scrollBottom()
       // 回填时不重播开场白，否则刷新一次就念一遍
@@ -90,7 +97,7 @@ onMounted(async () => {
   }
 
   const last = session.turns[session.turns.length - 1]
-  if (last && last.role === 'ai') speak(last.content)
+  if (last && last.role === 'ai') speak(last.content, 'en-US', speechRate.value)
 })
 
 onUnmounted(() => {
@@ -185,7 +192,7 @@ function toggleListening() {
   else startListening()
 }
 
-async function send(text, audio = null) {
+async function send(text, audio = null, mode = 'typed') {
   if (!text || sending.value) return false
   const gate = await llmReady()
   if (!gate.ok) {
@@ -194,17 +201,18 @@ async function send(text, audio = null) {
   }
   sending.value = true
   error.value = ''
-  const mine = { role: 'user', content: text }
+  const mine = { role: 'user', content: text, mode }
   session.turns.push(mine)
   scrollBottom()
   try {
     const { data } = await api.post(`/sessions/${session.sessionId}/turn`, {
       transcript: text,
       audio,
+      input_mode: mode,
     })
     session.turns.push({ role: 'ai', content: data.ai_reply })
     if (data.should_finish) canFinish.value = true
-    speak(data.ai_reply)
+    speak(data.ai_reply, 'en-US', speechRate.value)
     scrollBottom()
     return true
   } catch (e) {
@@ -251,7 +259,8 @@ async function submitManual() {
   const text = manualText.value.trim()
   if (!text || sending.value) return
   const audio = text === recognizedText.value ? pendingAudio : null
-  const ok = await send(text, audio)
+  const mode = audio ? 'voice' : 'typed'
+  const ok = await send(text, audio, mode)
   if (!ok) return
   manualText.value = ''
   recognizedText.value = ''
@@ -299,7 +308,7 @@ async function finish() {
       <div class="sp-shell flex items-center justify-between py-2.5">
         <div class="flex min-w-0 items-center gap-2.5">
           <router-link to="/" aria-label="返回首页">
-            <BrandLogo :size="28" />
+            <BrandLogo :size="30" />
           </router-link>
           <div class="min-w-0">
             <div class="truncate text-sm font-semibold text-ink">{{ session.scene?.name || '练习' }}</div>
@@ -308,7 +317,22 @@ async function finish() {
             </div>
           </div>
         </div>
-        <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
+        <div class="flex items-center gap-1">
+          <div class="mr-1 hidden items-center gap-0.5 rounded-lg bg-canvas p-0.5 ring-1 ring-line sm:flex" role="group" aria-label="AI 朗读语速">
+            <span class="px-1.5 text-[11px] text-ink-mute">语速</span>
+            <button
+              v-for="r in SPEECH_RATES"
+              :key="r.value"
+              class="rounded-md px-2 py-1 text-[11px] font-medium transition"
+              :class="speechRate === r.value ? 'bg-white text-brand-700 shadow-sm' : 'text-ink-mute hover:text-ink-soft'"
+              :aria-pressed="speechRate === r.value"
+              @click="speechRate = r.value"
+            >
+              {{ r.label }}
+            </button>
+          </div>
+          <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
+        </div>
       </div>
     </header>
 
@@ -326,12 +350,26 @@ async function finish() {
           "
           class="max-w-[80%] px-4 py-2.5 text-sm leading-6 shadow-sm"
         >
+          <span
+            v-if="t.role === 'user'"
+            class="mb-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white/90"
+          >
+            <svg v-if="t.mode === 'voice'" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+              <rect x="9" y="2.8" width="6" height="11" rx="3" />
+              <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0" />
+              <path d="M12 17.8v3.4" />
+            </svg>
+            <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+              <path d="M4 6h16M4 12h16M4 18h10" />
+            </svg>
+            {{ t.mode === 'voice' ? '录音' : '打字' }}
+          </span>
           {{ t.content }}
           <button
             v-if="t.role === 'ai'"
             class="ml-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-brand-600 transition hover:bg-brand-50"
             aria-label="朗读这句"
-            @click="speak(t.content)"
+            @click="speak(t.content, 'en-US', speechRate)"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4a.8.8 0 0 1-.8-.8v-3.4a.8.8 0 0 1 .8-.8Z" />
