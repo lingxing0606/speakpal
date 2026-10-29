@@ -117,7 +117,7 @@ const { renderToString } = await import('vue/server-renderer')
 const { createPinia } = await import('pinia')
 const { createRouter, createMemoryHistory } = await import('vue-router')
 
-const views = ['Login', 'Home', 'Practice', 'Report', 'History', 'Settings']
+const views = ['Login', 'Welcome', 'Home', 'Practice', 'Report', 'History', 'Settings', 'Pronunciation']
 const routes = [
   { path: '/login', component: { template: '<div />' } },
   { path: '/', component: { template: '<div />' } },
@@ -157,3 +157,4 @@ for (const name of views) {
 
 console.log(`\n${views.length - failed}/${views.length} views rendered without runtime errors`)
 process.exit(failed ? 1 : 0)
+
