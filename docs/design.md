@@ -141,6 +141,7 @@ speakpal/
 | GET | /api/sessions/{id}/report | 读取某次报告 | 是 |
 | POST | /api/stt | （可选）后端兜底转写 | 是 |
 | POST | /api/config/llm/test | 验证用户自带 API key（见 §13） | 是 |
+| GET | /api/config/llm | 服务端兜底 key 是否配置（不回显 key） | 是 |
 | GET | /api/system/storage | 数据目录/库文件/可写性（见 §13.3） | 是 |
 | DELETE | /api/me/data | 清除自己的练习记录（见 §13.2） | 是 |
 | DELETE | /api/admin/data | 清空全库（ADMIN_KEY） | 否（管理密钥） |
@@ -289,44 +290,54 @@ System prompt 模板：
 
 三件事：用户自带 API key、清除数据、显示/更改数据位置。三条都不进评分链，可独立实现与验收。
 
+状态：前端已在 `86fc0bd` 落地（`/settings` 三段 + 请求头拦截器 + 可跳过的引导）；后端接口按本节契约实现中。
+本节按「代码优先」定稿过一轮：key 与管理密钥都走请求头，迁移参数是 `{path, copy_existing}`，原因字段是 `error_kind` / `mock_reason`。
+
 ### 13.1 用户自带 API key
 
-- 存储位置：**只存浏览器 localStorage**，随请求走 `X-LLM-Key` 头；后端 `settings.llm_api_key` 为兜底。
-- 不写 `.env`、不入库、不打日志。验证接口不回显 key，只回后四位。
+- 存储位置：**只存浏览器 localStorage**，随请求走 `X-LLM-Key`（另有 `X-LLM-Base-URL` / `X-LLM-Model`）头；后端 `settings.llm_api_key` 为兜底，优先级「浏览器 > `.env`」。
+- key 只走请求头，**不进 body**：放 body 就多一份可能被访问日志记下的明文。
+- 不写 `.env`、不入库、不打日志。验证接口不回显 key。
 - 前端已用 `allow_headers=["*"]`（`backend/app/main.py:58`），自定义头不会触发 CORS 预检失败，无需额外放行。
-- 登录后进 `/settings` 引导页，**必须可跳过**：评委没有 key 不能卡在配置页。
-- 三种失败必须在报告里分开，不能都变成「示例报告」：
-  | 情形 | 行为 |
-  |---|---|
-  | 用户配了 key 且校验失败（401/403） | 返回 `502 {kind: "key_invalid"}`，提示去换 key，**不降级** |
-  | key 有效但服务不可用/超时 | 降级「示例报告（模型不可用）」，`source=mock`，不计分 |
-  | 未配置任何 key | 降级，文案提示「去配置」 |
+- 登录后进 `/settings` 引导页，**必须可跳过**：评委没有 key 不能卡在配置页（跳过后走服务端兜底 key，再没有就走示例报告）。
+- 三种失败必须在界面上分开，不能都变成「示例报告」。`finish` 仍返回 200 + `source=mock`，但必须带原因字段，前端据此分文案：
 
-`POST /api/config/llm/test` req `{"api_key": "sk-..."}` → resp `{"ok": true, "model": "deepseek-chat", "latency_ms": 812, "key_tail": "…a1b2"}`；失败 `{"ok": false, "kind": "key_invalid"|"timeout"|"unreachable"}`。
+  | 情形 | `finish` 返回 | 界面 |
+  |---|---|---|
+  | 用户配了 key 且校验失败（401/403） | `source=mock`、`mock_reason=invalid_key` | 「key 无效，去设置里换」——**不许显示成普通的「模型不可用」** |
+  | key 有效但超时 / 服务不可用 | `source=mock`、`mock_reason=unavailable` | 「模型服务暂时不可用，稍后重试」 |
+  | 未配置任何 key | `source=mock`、`mock_reason=not_configured` | 「去配置 key」 |
+
+`GET /api/config/llm`（登录）→ `{"env_configured": true, "default_base_url": "https://api.deepseek.com/v1", "default_model": "deepseek-chat"}`
+——前端用它判断服务端有没有兜底 key，**不回显 key 本身**。
+
+`POST /api/config/llm/test`（登录，key 取自 `X-LLM-Key` 头）→ `{"ok": true, "model": "deepseek-chat", "latency_ms": 812}`；
+失败 `{"ok": false, "error_kind": "invalid_key" | "timeout" | "unreachable", "error": "..."}`。
 
 ### 13.2 清除数据
 
 | 接口 | 权限 | 范围 |
 |---|---|---|
-| `DELETE /api/me/data` | 登录用户 | 只删自己 `user_id` 的 sessions/turns/reports，返回删除条数 |
-| `DELETE /api/admin/data` | ADMIN_KEY | 清全库，演示前重置用 |
+| `DELETE /api/me/data` | 登录用户 | 只删自己 `user_id` 的 sessions / turns / reports |
+| `DELETE /api/admin/data` | `X-Admin-Key` 头 | 清全库，演示前重置用 |
 
-- req `{"scope": "records" | "account", "confirm": "删除"}`；`confirm` 不等于这两个字直接 400。
-- `scope=account` 额外删 `users` 行，此后旧 token 一律 401。
-- 前端二次确认要**显示影响范围**（将删除 N 次练习、M 份报告），并要求手动输入「删除」；清完同时清 localStorage（token、key、偏好）再回登录页。
+- 响应：`{"deleted_sessions": 3, "deleted_reports": 3}`。
+- 管理密钥走 `X-Admin-Key` 头，直接复用 `admin.py:13` 的 `require_admin`（FastAPI 由 `x_admin_key` 形参映射到该头），不塞进请求体。
+- 「连账号一起删」（删 `users` 行、旧 token 401）**尚未实现**：这是不可恢复的破坏性操作，等用户明确点头再做，文档不预先承诺。默认只清记录，账号保留。
+- 二次确认的摩擦放在前端：显示影响范围（将删除 N 次练习、M 份报告）+ 手打「删除」才可点；接口本身没有 `confirm` 参数，服务端不校验（别以为后端会拦）。
 
 ### 13.3 数据位置：显示与更改
 
 `GET /api/system/storage`（登录即可，方便排错）→
 ```json
-{"data_dir": "D:\\...\\backend", "db_path": "D:\\...\\backend\\speakpal.db",
- "size_bytes": 61440, "writable": true, "source": "default", "restart_required": false}
+{"path": "D:\\...\\backend\\speakpal.db", "exists": true, "size_bytes": 61440, "writable": true}
 ```
 
-`PUT /api/admin/storage` req `{"data_dir": "D:\\data\\speakpal", "copy_existing": true}` → `{"ok": true, "restart_required": true}`。
+`PUT /api/admin/storage`（`X-Admin-Key` 头）req `{"path": "D:\\data\\speakpal", "copy_existing": true}` → `{"path": "D:\\data\\speakpal\\speakpal.db", "copied_bytes": 61440, "restart_required": true}`。
 
-- 只写 `backend/data_location.json`，**不热切换**（SQLite engine 在 import 时绑定）。响应固定带 `restart_required: true`。
-- 「把现有数据复制过去」是复制不是移动，失败可回滚；旧库原位不删。
+- `path` 收目录或 `.db` 文件都行，由后端归一化成库文件路径（不要求前端自己拼）。
+- 只写 `backend/data_location.json`，**不热切换**（SQLite engine 在 import 时绑定，`db.py` 建 engine 前就要解析完优先级）。响应固定带 `restart_required: true`。
+- 「把现有数据复制过去」是复制不是移动，失败可回滚；旧库原位不删。目标目录不存在或不可写时报错，**不写坏配置**。
 
 **优先级（唯一权威，按此实现）**：
 
@@ -339,9 +350,9 @@ System prompt 模板：
 
 实现要点：在 `load_dotenv()` **之前**取一份 `os.environ` 快照，只有出现在快照里的 `DATABASE_URL` 才算第 1 级。若第 1 级已生效，`PUT /api/admin/storage` 返回 `409 {"kind": "env_override", "hint": "DATABASE_URL 由环境变量指定，配置文件不会生效"}`，不写 json。
 
-### 13.4 验收（三条最容易被漏）
+### 13.4 验收（最容易漏的几条）
 
-1. 用错 key 跑 finish → 必须是「key 无效」，不能降级成示例报告；`grep` 响应体、日志、DB 均无 key 明文。
-2. 清数据后：自己的 sessions/reports 归零，**另一个账号记录不受影响**，旧 token 401，刷新停在登录页。
-3. 改目录后重启：新库生效、旧库原位未删；设了真实 `DATABASE_URL` 时以 env 为准且 `PUT` 返回 409。
+1. **用户 key**：用错 key 跑 finish，报告必须带 `mock_reason=invalid_key`，界面提示「key 无效」而不是笼统的「模型不可用」；`grep` 响应体、日志、DB 三处都搜不到 key 明文。空 key 是 `not_configured`，超时是 `unavailable`——三者不能合并。
+2. **清数据**：A 删完自己的 sessions / reports 归零，**另一个账号的记录不受影响**；`deleted_sessions` / `deleted_reports` 与库内实际删除条数一致。注意「连账号一起删」未实现，所以**不要**断言旧 token 401——账号没删，token 仍有效，前端回登录页靠的是清 localStorage。
+3. **数据位置**：设了真实 `DATABASE_URL` 时 `PUT` 返回 `409 env_override` 且不写 json → 清掉 env 后改路径、重启生效 → 旧库原位没被删 → 目标目录不存在/不可写时报错且配置没被写坏；`data_location.json` 不在 `git ls-files` 里。
 

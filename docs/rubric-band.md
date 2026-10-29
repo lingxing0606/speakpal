@@ -56,6 +56,8 @@ IELTS 官方不认证 4.0 以下的等级，所以 A2 那一行是【自定】�
 **过渡带**（61–64、76–79、91–94）不是 bug：雅思 band 是 0.5 台阶，两个档位之间本来就有空隙。
 落在过渡带的原始分，按 §4 的取整规则落到最近的 0.5 档，**不允许出现 5.25 这种不存在的 band**。
 
+区间上界不含：50.0 分对应 B=4.0，按 §4.2 归 **B1**，不归 A2；40.0 分是 A2 下缘，39 分起不给 band。
+
 ---
 
 ## 2. 四个维度 × 四个等级的锚点
@@ -186,7 +188,9 @@ S = 45 + 45×0.26 = 56.7  →  B = 4.7 → 取整 4.5  →  B1
 ```
 f_mtld = clamp((mtld − 30) / 60, 0, 1)                  # 30 → 0，90 → 1
 f_msl  = clamp((mean_sentence_len − 6) / 10, 0, 1)      # 6 → 0，16 → 1
-f_cx   = clamp(complex_markers / max(sentence_count, 1), 0, 1)   # 每句 ≥1 个从句标记即满分
+f_cx   = clamp(complex_markers / N, 0, 1)               # 每句 ≥1 个从句标记即满分
+         # N = 可用句数：标点句数 ≥2 时直接用；否则用 1 + pause_count 估（上限 word_count/4）；
+         # 两条路都拿不到句数时 f_cx 不计入（不是把分母当 1，那样一个标记就顶格）
 S_complexity_rule = 45 + 45·(0.45·f_mtld + 0.35·f_msl + 0.20·f_cx)
 ```
 
@@ -277,6 +281,9 @@ S_task_final = 0.6·S_task_rule + 0.4·S_pragmatic_llm     # 40% 来自语用得
 和参与计算的输入（wpm、停顿占比、填充词占比、MTLD、清单命中）一起写进 `scoring_json` 落库，
 报告页「评分依据（可复现）」逐维展示。压分之后模型原分不会丢，答辩时能当场说明哪一维被压、压了多少。
 
+> 字段名注意：**落库列是 `reports.scoring_json`，接口出参字段是 `scoring_detail`**（`report_view.py` 反序列化时改名）。
+> 按 `scoring_json` 去查响应体、或按 `scoring_detail` 去查数据库列，都会扑空。
+
 ### 4.2 取整规则（给 `validate.py` 用）
 
 ```
@@ -349,7 +356,7 @@ n ≥ 20 才在报告里写一致性数字（对齐 `docs/validation.md` 的采�
 |---|---|---|
 | `llm` | 正常 | 正常分数 + band |
 | `mock` | 模型不可用（未配置 key / 超时 / 返回无法解析） | **不给 band、不给总分**，标「示例报告（模型不可用）· 本次不计分」，`sentence_fixes` 只列用户真实说过的句子 |
-| `llm_rules_fallback` | 规则层做好后再加 | 只给规则分和 band，标「模型不可用，本报告仅含可测指标」 |
+| `llm_rules_fallback` | **未实现**（规则层已就绪，`rules.py` 已上线） | 计划：只给规则分和 band，标「模型不可用，本报告仅含可测指标」。当前代码不允许：`rules.apply_to_report()` 对非 `source=llm` 直接原样返回（`rules.py:307`），降级报告不借规则分凑成绩 |
 
 两条硬约束，都在代码里做了校验，不只靠 prompt：
 

@@ -61,6 +61,10 @@ Windows 控制台默认代码页不是 UTF-8 时中文会乱码（脚本输出�
 
 阈值来自 Shrout & Fleiss (1979)、Landis & Koch (1977)、Koo & Li (2016) 的常见解释区间。
 
+`system_band_agreement` 的边界行为：有效配对样本少于 3 条时，只回 `n`、`skipped`、`columns` 和一条 `warning`，
+**不输出** `exact_rate` / kappa——缺字段是因为没算，不是算出来是 0，别按 0 汇报。
+`columns` 会回显这次实际用的是哪一列系统档位、哪几列人评档位，写论文/答辩时直接照抄，避免记错列名。
+
 ## 诚实声明
 
 `evaluation/demo_data.csv` 是 `make_demo.py` 用固定随机种子生成的**合成数据**，只用来验证脚本能跑通，**不构成任何真实结论**。真实证据必须来自真人评分（见上）。
