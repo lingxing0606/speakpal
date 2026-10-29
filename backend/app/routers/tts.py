@@ -19,6 +19,21 @@ MAX_TTS_CHARS = 500
 class TTSIn(BaseModel):
     text: str
     voice: str | None = None
+    # 语速倍数：前端「慢 / 正常 / 快」= 0.85 / 1.0 / 1.15，OpenAI 兼容接口支持 0.25–4.0
+    speed: float | None = None
+
+
+SPEED_MIN, SPEED_MAX = 0.25, 4.0
+
+
+def _clamp_speed(value: float | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        speed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(SPEED_MIN, min(SPEED_MAX, speed))
 
 
 def _error(status: int, kind: str, detail: str) -> JSONResponse:
@@ -51,12 +66,16 @@ def synthesize(
         return _error(502, "tts_unavailable", "语音合成地址不是 http(s) 地址")
 
     voice = (body.voice or "").strip() or tts.voice
+    speed = _clamp_speed(body.speed)
+    payload = {"model": tts.model, "input": text, "voice": voice}
+    if speed is not None:
+        payload["speed"] = speed
     try:
         with httpx.Client(timeout=30) as client:
             resp = client.post(
                 f"{tts.base_url.rstrip('/')}/audio/speech",
                 headers={"Authorization": f"Bearer {tts.api_key}"},
-                json={"model": tts.model, "input": text, "voice": voice},
+                json=payload,
             )
     except httpx.TimeoutException:
         return _error(502, "tts_unavailable", "语音合成超时，先用浏览器朗读")

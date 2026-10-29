@@ -23,6 +23,11 @@ def get_llm_settings(user: User = Depends(get_current_user)):
         "env_configured": bool((settings.llm_api_key or "").strip()),
         "default_base_url": settings.llm_base_url,
         "default_model": settings.llm_model,
+        # 服务端有没有兜底 TTS key：前端据此决定要不要试 /api/tts
+        "tts_env_configured": bool((settings.tts_api_key or "").strip()),
+        "default_tts_base_url": settings.tts_base_url,
+        "default_tts_model": settings.tts_model,
+        "default_tts_voice": settings.tts_voice,
     }
 
 
