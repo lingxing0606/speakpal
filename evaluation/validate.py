@@ -3,17 +3,23 @@
 用法（在项目根目录）：
     python -m evaluation.validate --csv evaluation/demo_data.csv \
         --raters human1,human2 --system system \
-        --bands human1_band,human2_band
+        --bands human1_band,human2_band \
+        --system-band system_band
 
 输出：文本报告 + 可选 JSON。
+
+注意 Windows 控制台默认代码页不是 UTF-8 时中文会乱码，脚本会把输出流强制切成 UTF-8；
+若仍看到乱码，用 `python -X utf8 -m evaluation.validate ...` 或先 `chcp 65001`。
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import sys
 
 from . import agreement
+from .bands import CEFR_ORDER, cefr_distance
 
 
 def _to_float(v):
@@ -23,7 +29,62 @@ def _to_float(v):
         return None
 
 
-def build_report(rows, rater_cols, system_col=None, band_cols=None):
+def _majority_cefr(values):
+    """多人评档位取多数票；平票取较低档（保守）。"""
+    counts = {}
+    for v in values:
+        counts[v] = counts.get(v, 0) + 1
+    best = max(counts.values())
+    cands = [v for v, c in counts.items() if c == best]
+    if len(cands) == 1:
+        return cands[0]
+    return min(cands, key=lambda v: CEFR_ORDER.index(v) if v in CEFR_ORDER else 99)
+
+
+def _system_band_block(rows, system_col, band_cols):
+    """系统档位 vs 人评档位：一致率、相差档数、Cohen kappa。"""
+    pairs = []
+    skipped = 0
+    for r in rows:
+        s = (r.get(system_col) or "").strip()
+        humans = [(r.get(c) or "").strip() for c in band_cols]
+        humans = [h for h in humans if h]
+        if not s or not humans:
+            skipped += 1
+            continue
+        if s not in CEFR_ORDER:
+            skipped += 1
+            continue
+        pairs.append((s, _majority_cefr(humans), humans))
+
+    out = {"n": len(pairs), "skipped": skipped, "columns": {"system": system_col, "human": band_cols}}
+    if len(pairs) < 3:
+        out["warning"] = "有效样本少于 3 条，无法计算系统档位一致性"
+        return out
+
+    system = [p[0] for p in pairs]
+    human = [p[1] for p in pairs]
+    dists = [cefr_distance(s, h) for s, h in zip(system, human)]
+    dists = [d for d in dists if d is not None]
+    out["exact_rate"] = sum(1 for d in dists if d == 0) / len(dists)
+    out["adjacent_rate"] = sum(1 for d in dists if d <= 1) / len(dists)
+    out["mean_abs_cefr_distance"] = sum(dists) / len(dists)
+    out["kappa_vs_human_majority"] = agreement.cohens_kappa(system, human)
+    out["kappa_vs_human_majority_interpret"] = agreement.interpret_kappa(
+        out["kappa_vs_human_majority"]
+    )
+
+    per_human = {}
+    for i, col in enumerate(band_cols):
+        vals = [p[2][i] if i < len(p[2]) else None for p in pairs]
+        if any(v is None for v in vals):
+            continue
+        per_human[col] = agreement.cohens_kappa(system, vals)
+    out["kappa_per_human"] = per_human
+    return out
+
+
+def build_report(rows, rater_cols, system_col=None, band_cols=None, system_band_col=None):
     data = []
     for r in rows:
         scores = [_to_float(r.get(c)) for c in rater_cols]
@@ -86,15 +147,34 @@ def build_report(rows, rater_cols, system_col=None, band_cols=None):
                     [r[0] for r in band_rows], [r[1] for r in band_rows]
                 )
                 report["cohens_kappa_interpret"] = agreement.interpret_kappa(report["cohens_kappa"])
+
+    if system_band_col:
+        if band_cols:
+            report["system_band_agreement"] = _system_band_block(rows, system_band_col, band_cols)
+        else:
+            report["system_band_agreement"] = {
+                "warning": "比较系统档位需要同时给出人评档位列（--bands）"
+            }
     return report
 
 
 def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
     parser = argparse.ArgumentParser(description="人评一致性验证")
     parser.add_argument("--csv", required=True)
     parser.add_argument("--raters", required=True, help="人评分列，逗号分隔，如 human1,human2")
     parser.add_argument("--system", default=None, help="系统分列名，如 system")
     parser.add_argument("--bands", default=None, help="类别列，逗号分隔，如 human1_band,human2_band")
+    parser.add_argument(
+        "--system-band",
+        default=None,
+        help="系统档位列名（CEFR 字母 A2/B1/B2/C1），需与 --bands 同档位",
+    )
     parser.add_argument("--out", default=None, help="可选：输出 JSON 路径")
     args = parser.parse_args(argv)
 
@@ -104,7 +184,7 @@ def main(argv=None):
     rater_cols = [c.strip() for c in args.raters.split(",") if c.strip()]
     band_cols = [c.strip() for c in args.bands.split(",")] if args.bands else None
 
-    report = build_report(rows, rater_cols, args.system, band_cols)
+    report = build_report(rows, rater_cols, args.system, band_cols, args.system_band)
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

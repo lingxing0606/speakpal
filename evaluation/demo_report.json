@@ -29,8 +29,28 @@
       "within_loa_ratio": 1.0
     }
   },
-  "fleiss_kappa": 0.3873085339168491,
-  "fleiss_kappa_interpret": "一般（0.21–0.4）",
-  "cohens_kappa": 0.41908713692946054,
-  "cohens_kappa_interpret": "中等（0.41–0.6）"
+  "fleiss_kappa": 0.5010395010395009,
+  "fleiss_kappa_interpret": "中等（0.41–0.6）",
+  "cohens_kappa": 0.5020746887966805,
+  "cohens_kappa_interpret": "中等（0.41–0.6）",
+  "system_band_agreement": {
+    "n": 20,
+    "skipped": 0,
+    "columns": {
+      "system": "system_band",
+      "human": [
+        "human1_band",
+        "human2_band"
+      ]
+    },
+    "exact_rate": 0.7,
+    "adjacent_rate": 1.0,
+    "mean_abs_cefr_distance": 0.3,
+    "kappa_vs_human_majority": 0.49367088607594933,
+    "kappa_vs_human_majority_interpret": "中等（0.41–0.6）",
+    "kappa_per_human": {
+      "human1_band": 0.3360995850622407,
+      "human2_band": 0.48717948717948706
+    }
+  }
 }

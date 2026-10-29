@@ -8,13 +8,15 @@ import csv
 import os
 import random
 
+from .bands import cefr_of_score
+
 
 def band(score: int) -> str:
-    if score >= 80:
-        return "A"
-    if score >= 65:
-        return "B"
-    return "C"
+    """档位统一用 CEFR 字母（A2/B1/B2/C1），不再用 A/B/C 粗档。
+
+    依据：validate.py 要对 system_band 和人评 band 算 kappa，类别必须同档位、同命名。
+    """
+    return cefr_of_score(score) or "A2"
 
 
 def main():

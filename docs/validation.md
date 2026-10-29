@@ -19,23 +19,31 @@
 
 ```csv
 id,human1,human2,system,human1_band,human2_band,system_band
-s001,72,75,70,B,B,B
-s002,85,83,88,A,A,A
+s001,72,75,70,B1,B1,B1
+s002,85,83,88,C1,C1,B2
 ```
 
 - `human1/human2`：教师连续分（0–100）
 - `system`：系统分
-- `*_band`：可选，类别档位（A/B/C），用于 kappa
+- `*_band`：类别档位，统一用 **CEFR 字母**（A2/B1/B2/C1）。不要混用 A/B/C 粗档，
+  否则系统档位和人评档位不在同一套类别里，kappa 没有意义。
+- 系统档位由 `evaluation.bands.score_to_band()` 从系统分取整得到（0.5 步长，见 `docs/rubric-band.md` §4.2）。
 
 ## 运行
 
 ```powershell
 # 生成合成演示数据（仅演示脚本，不是真实证据）
-python -m evaluation.make_demo
+D:\python\python.exe -m evaluation.make_demo
 
-# 跑一致性验证
-python -m evaluation.validate --csv evaluation/demo_data.csv --raters human1,human2 --system system --bands human1_band,human2_band --out evaluation/demo_report.json
+# 跑一致性验证（含系统档位 vs 人评档位）
+D:\python\python.exe -m evaluation.validate --csv evaluation/demo_data.csv `
+  --raters human1,human2 --system system `
+  --bands human1_band,human2_band --system-band system_band `
+  --out evaluation/demo_report.json
 ```
+
+Windows 控制台默认代码页不是 UTF-8 时中文会乱码（脚本输出流已强制切 UTF-8，`--out` 写的文件也是 UTF-8）；
+若终端里仍看到乱码，用 `python -X utf8 -m evaluation.validate ...` 或先执行 `chcp 65001`。
 
 ## 指标怎么看
 
@@ -46,7 +54,10 @@ python -m evaluation.validate --csv evaluation/demo_data.csv --raters human1,hum
 | Pearson / Spearman | 系统与人评的相关 | 越高越好；排名一致性看 Spearman |
 | MAE / RMSE | 绝对误差 | 越小越好 |
 | Bland-Altman | 系统性偏差与一致性界限 | 均值差接近 0、落在界限内比例高 |
-| Cohen / Fleiss kappa | 类别一致性（A/B/C 档） | <0.2 轻微；0.21–0.4 一般；0.41–0.6 中等；0.61–0.8 较强；>0.8 几乎一致 |
+| Cohen / Fleiss kappa | 类别一致性（CEFR 档） | <0.2 轻微；0.21–0.4 一般；0.41–0.6 中等；0.61–0.8 较强；>0.8 几乎一致 |
+| `system_band_agreement.exact_rate` | 系统档位与人评多数票完全一致的比例 | 越高越好（本作品验收线 ≥0.6，【自定】） |
+| `system_band_agreement.adjacent_rate` | 相差 ≤1 档的比例 | 口语评测常用「相邻档可接受」，验收线 ≥0.9（【自定】） |
+| `system_band_agreement.kappa_vs_human_majority` | 系统档位与人评多数票的 Cohen kappa | ≥0.61（较强，Landis & Koch 1977） |
 
 阈值来自 Shrout & Fleiss (1979)、Landis & Koch (1977)、Koo & Li (2016) 的常见解释区间。
 
