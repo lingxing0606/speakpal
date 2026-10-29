@@ -64,6 +64,11 @@ async function submit() {
       router.push(nextPath)
       return
     }
+    // 第一次登录先走一遍引导（只跑一次），之后按密钥状态决定去首页还是设置页
+    if (mode.value === 'register' || localStorage.getItem('sp_welcomed') !== '1') {
+      router.push('/welcome')
+      return
+    }
     router.push(settings.configured ? '/' : await firstStop())
   } catch (e) {
     error.value = e?.response?.data?.detail || '请求失败，请稍后重试'
