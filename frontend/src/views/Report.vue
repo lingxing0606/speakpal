@@ -25,6 +25,8 @@ const featureLabels = {
   filler_rate: '填充词占比',
   ttr: '词汇多样性 TTR',
   mtld: '词汇多样性 MTLD',
+  diversity_metric: '多样性口径',
+  diversity: '多样性取值',
   sentence_count: '句子数',
   mean_sentence_len: '平均句长',
   audio_duration_sec: '录音时长（秒）',
@@ -33,6 +35,22 @@ const featureLabels = {
   pause_count: '停顿次数',
   mean_pause_sec: '平均停顿（秒）',
   pause_ratio: '停顿占比',
+}
+
+const isMock = computed(() => report.value?.source === 'mock')
+const hasScore = computed(() => report.value?.total_score !== null && report.value?.total_score !== undefined)
+
+const bandText = computed(() => {
+  const r = report.value
+  if (!r || r.band === null || r.band === undefined) return ''
+  const band = typeof r.band === 'number' ? r.band.toFixed(1) : r.band
+  return r.cefr ? `${r.cefr} · 雅思 ${band}` : `雅思 ${band}`
+})
+
+function dimBand(name) {
+  const b = report.value?.bands?.[name]
+  if (b === null || b === undefined) return ''
+  return typeof b === 'number' ? b.toFixed(1) : b
 }
 
 const displayFeatures = computed(() => {
@@ -73,17 +91,37 @@ function again() {
       <p v-if="error" class="text-rose-500">{{ error }}</p>
 
       <div v-if="report">
-        <div class="rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">
-          <div class="text-sm text-slate-500">综合得分</div>
-          <div class="text-5xl font-bold text-indigo-600">{{ report.total_score }}</div>
-          <div class="mt-1 text-xs text-slate-400">{{ report.note }}</div>
+        <div
+          v-if="isMock"
+          class="mb-4 rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-800 ring-1 ring-amber-200"
+        >
+          示例报告（模型不可用）：这次没有拿到评分结果，因此<b>不计分、不给等级</b>。下面列出的句子都是你真实说过的内容，不是示例句。
         </div>
 
-        <div class="mt-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-          <div v-for="(v, k) in report.dimensions" :key="k" class="mb-3">
+        <div
+          v-if="hasScore"
+          class="rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200"
+        >
+          <div class="text-sm text-slate-500">综合得分</div>
+          <div class="text-5xl font-bold text-indigo-600">{{ report.total_score }}</div>
+          <div v-if="bandText" class="mt-2 inline-flex rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
+            {{ bandText }}
+          </div>
+          <div class="mt-2 text-xs text-slate-400">{{ report.note }}</div>
+        </div>
+
+        <div
+          v-if="Object.keys(report.dimensions || {}).length"
+          class="mt-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
+        >
+          <div class="font-semibold">四个维度</div>
+          <div v-for="(v, k) in report.dimensions" :key="k" class="mb-3 mt-3">
             <div class="flex justify-between text-sm">
               <span>{{ dimLabels[k] || k }}</span>
-              <span class="font-medium">{{ v }}</span>
+              <span class="font-medium">
+                {{ v }}
+                <span v-if="dimBand(k)" class="ml-1 text-xs font-normal text-slate-400">雅思 {{ dimBand(k) }}</span>
+              </span>
             </div>
             <div class="mt-1 h-2 rounded bg-slate-100">
               <div class="h-2 rounded bg-indigo-500" :style="{ width: v + '%' }"></div>
@@ -106,9 +144,16 @@ function again() {
 
         <div class="mt-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
           <div class="font-semibold">逐句纠错</div>
-          <div v-for="(f, i) in report.sentence_fixes" :key="i" class="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-            <div class="text-rose-500 line-through">{{ f.original }}</div>
-            <div class="text-emerald-600">{{ f.better }}</div>
+          <p v-if="!report.sentence_fixes.length" class="mt-3 text-sm text-slate-400">
+            本次没有可展示的句子。
+          </p>
+          <div
+            v-for="(f, i) in report.sentence_fixes"
+            :key="i"
+            class="mt-3 rounded-xl bg-slate-50 p-3 text-sm"
+          >
+            <div :class="f.better ? 'text-rose-500 line-through' : 'text-slate-600'">{{ f.original }}</div>
+            <div v-if="f.better" class="text-emerald-600">{{ f.better }}</div>
             <div class="mt-1 text-xs text-slate-500">{{ f.reason }}</div>
           </div>
         </div>

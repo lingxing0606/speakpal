@@ -91,19 +91,27 @@ LLM_MODEL=deepseek-chat
 
 ## 评分说明
 
-分数由大模型按 rubric 估算，发音维度基于转写文本推断，报告中已标注「AI 估算」，不是专业声学测评。
+分数由大模型按雅思 Speaking 描述语打分（0.5 步长），再换算成 0–100 展示分并落到 CEFR 档位（A2–C1）。
+量表、换算与取整规则见 [docs/rubric-band.md](docs/rubric-band.md)。发音维度基于转写文本推断，
+报告中已标注「AI 估算」，不是专业声学测评。
+
+模型不可用时**不再编造分数**：报告会标成「示例报告（模型不可用）· 本次不计分」，
+分数与档位留空，只列出用户真实说过的句子；`original` 字段必须能在用户转写里找到，否则这条改写不会显示。
 
 ## 评估与验证（“可验证”的落点）
 
 `evaluation/` 是一个纯标准库的验证层，回答“这个分准不准”：
 
 - `agreement.py`：ICC(2,1) / ICC(2,k)、Cohen / Fleiss kappa、Pearson / Spearman、Bland-Altman、MAE / RMSE。
+- `bands.py`：0–100 ↔ 雅思 band ↔ CEFR 的唯一换算入口。
 - `features.py`：从转写（可选词级时间戳）提取流利度与词汇多样性特征。
-- `validate.py`：读 CSV，算出人评内部一致性和系统分与人评的一致性。
+- `validate.py`：读 CSV，算出人评内部一致性和系统分、系统档位与人评的一致性。
 
 ```powershell
-python -m evaluation.make_demo
-python -m evaluation.validate --csv evaluation/demo_data.csv --raters human1,human2 --system system --bands human1_band,human2_band
+D:\python\python.exe -m evaluation.make_demo
+D:\python\python.exe -m evaluation.validate --csv evaluation/demo_data.csv `
+  --raters human1,human2 --system system `
+  --bands human1_band,human2_band --system-band system_band
 ```
 
 注意：`demo_data.csv` 是合成数据，只演示脚本；真实结论必须来自真人评分。详见 [docs/validation.md](docs/validation.md)。

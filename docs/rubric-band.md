@@ -288,25 +288,37 @@ def to_cefr(B):
 
 举例：S=56.7 → B=4.67 → 4.5 → B1；S=63 → B=5.3 → 5.5 → B2；S=90 → 8.0 → C1。
 
-`validate.py` 需要两个新列（**契约，尚未实现**）：
+档位统一用 **CEFR 字母**（A2/B1/B2/C1），不再用 A/B/C 粗档：`validate.py` 要对系统档位和人评档位算 kappa，
+类别必须同档位、同命名。`make_demo.py` 已跟着改成输出 CEFR 字母（`system_band` 列名不变，值改了）。
+
+`validate.py` 的接线（**已实现**）：一个列、一个开关。
 
 | 列名 | 例 | 用途 |
 |---|---|---|
-| `system_band` | `6.5` | 与人评 band 做距离/一致率 |
-| `system_cefr` | `B2` | 与人评 CEFR 做 Cohen kappa |
+| `system_band` | `B2` | 与人评 CEFR 做一致率 / 档位距离 / Cohen kappa |
+| `human1_band`、`human2_band` | `B1`、`B2` | 人评档位，`--bands` 传入 |
 
-CLI 增加 `--system-band system_band --system-cefr system_cefr`，输出新增：
+```powershell
+D:\python\python.exe -m evaluation.validate --csv evaluation/demo_data.csv `
+  --raters human1,human2 --system system `
+  --bands human1_band,human2_band --system-band system_band
+```
 
-> 顺带一个便宜的发现：`evaluation/make_demo.py` 生成的 `demo_data.csv` **本来就有 `system_band` 列**（A/B/C 三档），
-> 只是 `validate.py` 从没读过它。所以契约的前一半已经躺在那儿了，缺的只是 CLI 接线。
-> 但那一列是 A/B/C，不是 CEFR 字母——档位命名必须统一成 CEFR（A2/B1/B2/C1），
-> 否则人评 A/B/C、系统 A2/B1 混在一张表里，kappa 的类别根本对不上。
+输出里的 `system_band_agreement`：
 
-- `system_band_agreement`: `{n, exact_rate, adjacent_rate}` — 完全一致的比例、相差 ≤1 档的比例（`adjacent_rate` 口径【自定】）；
-- `system_vs_human_cefr_kappa`: 用 `system_cefr` 与「各人评 CEFR 的多数票」做 Cohen kappa（平票取较低档，保守）；
-- 人评之间的 Fleiss kappa 保持现状不变。
+| 字段 | 含义 |
+|---|---|
+| `n` / `skipped` | 参与比较的样本数 / 缺字段被跳过的数 |
+| `exact_rate` | 系统档位与人评多数票完全一致的比例 |
+| `adjacent_rate` | 相差 ≤1 档的比例（口径【自定】，口语评测常用“相邻档可接受”） |
+| `mean_abs_cefr_distance` | 平均相差几档 |
+| `kappa_vs_human_majority` | 系统 vs 人评多数票的 Cohen kappa（平票取较低档，保守） |
+| `kappa_per_human` | 系统分别与每位评分者的 kappa |
 
 **不要**把 `system_band` 塞进 `--bands`：Fleiss kappa 要求所有列都是评分者，把系统当第三个人算出来的数没有解释力。
+
+**合成数据上的实测**（`demo_data.csv`，n=20，仅证明脚本通路，不是真实结论）：
+exact_rate 0.70、adjacent_rate 1.00、平均差 0.30 档、kappa 0.49（中等）。真实结论必须换成真人标注。
 
 ### 4.3 样本量与结论
 
@@ -317,18 +329,23 @@ n ≥ 20 才在报告里写一致性数字（对齐 `docs/validation.md` 的采�
 
 ## 5. 降级路径必须诚实（对应 P0-3）
 
-现状：`scoring.py` 在 key 为空、超时、解析失败三种情况下都静默返回 `_mock_report`，
+原状（已修）：`scoring.py` 在 key 为空、超时、解析失败三种情况下都静默返回 `_mock_report`，
 里面是写死的分数和一句用户没说过的话（`I am very interest in this job.`）。演示时网络抖一下就是事故。
 
-报告必须带 `source` 字段：
+报告必须带 `source` 字段（**已实现**）：
 
 | `source` | 触发 | 报告展示 |
 |---|---|---|
 | `llm` | 正常 | 正常分数 + band |
-| `llm_rules_fallback` | 模型失败但规则分可用 | 只给规则分和 band，标「模型不可用，本报告仅含可测指标」 |
-| `mock` | 两者都不可用 | **不给 band、不给总分作为水平依据**，标「示例报告」，`sentence_fixes` 必须来自用户真实发言（或留空） |
+| `mock` | 模型不可用（未配置 key / 超时 / 返回无法解析） | **不给 band、不给总分**，标「示例报告（模型不可用）· 本次不计分」，`sentence_fixes` 只列用户真实说过的句子 |
+| `llm_rules_fallback` | 规则层做好后再加 | 只给规则分和 band，标「模型不可用，本报告仅含可测指标」 |
 
-`original` 字段的来源只能是用户自己的转写。这条是硬约束：**报告不能虚构用户说过的话**。
+两条硬约束，都在代码里做了校验，不只靠 prompt：
+
+1. `original` 必须能在用户转写里找到（归一化后比对：忽略大小写和标点），找不到就丢弃这条改写。
+   模型如果编了一句用户没说过的话，这条不会出现在报告里。
+2. 降级报告 `total_score / band / cefr` 全部写 `NULL`，DB 里也是 `NULL`，历史页显示「—」而不是 0，
+   避免把「没测」显示成「得了 0 分」。
 
 ---
 
@@ -364,13 +381,13 @@ n ≥ 20，2–3 名英语教师独立盲评（不给系统分），用同一份
 | Bland-Altman 平均差 | \|bias\| ≤ 5 分 | 【自定】 |
 | CEFR 档 Cohen kappa（system vs 人评多数票） | ≥ 0.61（较强） | Landis & Koch (1977)【文献】 |
 
-跑法（`--system-band/--system-cefr` 为 §4.2 的待实现契约）：
+跑法（`--system-band` 为 §4.2 已实现的开关，列里放 CEFR 字母）：
 
 ```powershell
 D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
   --raters human1,human2 --system system `
   --bands human1_band,human2_band `
-  --system-band system_band --system-cefr system_cefr `
+  --system-band system_band `
   --out evaluation/real_report.json
 ```
 
@@ -388,22 +405,28 @@ D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
 
 ---
 
-## 7. 实现映射（下一步改哪里，本文档不改代码）
+## 7. 实现映射（进度）
 
-| 位置 | 改动 | 依赖 |
+| 位置 | 改动 | 状态 |
 |---|---|---|
-| `evaluation/features.py`（**已完成**） | `find_fillers()` 位置判定；`lexical_diversity()` 短文本回退 TTR；`mtld` 不足 50 词输出 `None`；新增 `diversity_metric / diversity` 字段 | §3.2、§3.3 |
-| `evaluation/bands.py`（新建，纯标准库） | `score_to_band / band_to_score / band_to_cefr / cefr_of_score / round_half_step`，后端与 validate 共用 | §1、§4.2 |
-| `backend/app/services/rules.py`（新建） | 按 §3 计算 `rule_dimensions(features, scene, history)`，返回每维规则分 + 依据 | `evaluation/features.py` |
-| `backend/app/services/scoring.py` | LLM 直接输出 **band**（0–9，0.5 步）而非 0–100；加 `source`；去掉写死的 mock 句子；模型失败改走 `llm_rules_fallback` | §2、§5 |
-| `backend/app/routers/sessions.py` | **先算 features，再打分**；把 `llm_dim / rule_dim / band / source` 存进报告；做 §4.1 融合与钳制 | §4 |
-| `backend/app/schemas.py` | `ReportOut` 增加 `band`、`cefr`、`scoring_detail`（每维模型分/规则分/依据）、`source` | §4、§5 |
-| `frontend/src/views/Report.vue` | 综合分旁显示「B1 · 雅思 5.0」；每维展开「依据」（wpm、停顿、命中清单）；降级报告显示横幅 | §2、§5 |
-| `evaluation/validate.py` | 新增 `--system-band / --system-cefr` 与 §4.2 的输出字段 | §4.2 |
-| `docs/validation.md` | 补一句 CEFR 档 kappa 的口径与 0.61 验收线 | §6.4 |
+| `evaluation/features.py` | `find_fillers()` 位置判定；`lexical_diversity()` 短文本回退 TTR；`mtld` 不足 50 词输出 `None`；新增 `diversity_metric / diversity` 字段 | ✅ 已完成 |
+| `evaluation/bands.py` | `score_to_band / band_to_score / band_to_cefr / cefr_of_score / cefr_distance / report_bands`（纯标准库，全项目唯一换算入口） | ✅ 已完成 |
+| `evaluation/make_demo.py` | 档位改 CEFR 字母；重新生成 `demo_data.csv`（ICC 未变：0.9022 / 0.9486） | ✅ 已完成 |
+| `evaluation/validate.py` | `--system-band` 接线：一致率、档位距离、Cohen kappa（多数票 + 分人）；stdout 强制 UTF-8 | ✅ 已完成 |
+| `backend/app/services/scoring.py` | 模型直接输出 band；`original` 必须来自用户转写（否则丢弃）；降级报告不计分、不虚构句子 | ✅ 已完成 |
+| `backend/app/models.py` + `main.py` | `reports` 新增 `band / cefr / source / bands_json`，启动时按列补齐（旧库只加列不改数据） | ✅ 已完成 |
+| `backend/app/services/report_view.py` | `report_out()` 统一报告出参，`sessions` 与 `reports` 两个路由共用 | ✅ 已完成 |
+| `backend/app/schemas.py` | `ReportOut` 增加 `band / cefr / source / bands`，`total_score` 可空 | ✅ 已完成 |
+| `frontend/src/views/Report.vue` | 显示「B1 · 雅思 5.0」；每维显示 band；降级横幅；空改写不显示删除线 | ✅ 已完成 |
+| `backend/app/services/rules.py` | 按 §3 计算规则子分 + 依据，与模型分融合、钳制 | ⏳ 待做（P0-1 的下一半） |
+| `frontend/src/views/Report.vue` 每维「依据」 | wpm / 停顿 / 清单命中的展开说明 | ⏳ 依赖 rules.py |
+| `docs/validation.md` | 补 CEFR 档 kappa 口径与 0.61 验收线 | ✅ 已完成 |
 
-改动顺序建议：`bands.py` + `validate.py` 契约为第一步（不动线上路径，纯加法、可单测），
-再做 `rules.py` + `sessions.py` 的融合，最后改前端展示。每一步都要能单独 git revert。
+**已完成部分的实测**（可复跑）：
+
+- `bands.py`：39 例换算全过（含 5.25→5.5、9.5→9.0、39 分→无 band）。
+- 后端三模式：mock（12 项断言）、真实模型（17 项断言）、旧库迁移（补 4 列、旧报告仍可读）。
+- 真实模型那一次：总分 62、band 5.0、B1，四维 band 都落在 0.5 步长上，改写原句确实是用户说过的话。
 
 ---
 
