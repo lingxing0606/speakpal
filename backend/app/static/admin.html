@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpeakPal · 后端控制台</title>
   <style>
-    :root { --ink: #0f172a; --muted: #64748b; --line: #e2e8f0; --card: #ffffff; --accent: #4f46e5; }
+    :root { --ink: #1b2430; --muted: #5f6b78; --line: #e3eae9; --card: #ffffff; --accent: #14806f; --danger: #b42318; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f8fafc; color: var(--ink); }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f5f8f8; color: var(--ink); }
     header { background: #fff; border-bottom: 1px solid var(--line); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
     header h1 { font-size: 18px; margin: 0; }
     header a { color: var(--accent); text-decoration: none; font-size: 14px; }
@@ -16,18 +16,27 @@
     .hidden { display: none; }
     input { width: 100%; max-width: 320px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
     button { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 10px 18px; font-size: 14px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
     button.ghost { background: #fff; color: var(--muted); border: 1px solid var(--line); }
+    button.mini { padding: 5px 10px; font-size: 12px; border-radius: 8px; margin-right: 6px; background: #fff; color: var(--accent); border: 1px solid var(--line); }
+    button.mini.danger { color: var(--danger); border-color: #f3c6c1; }
     .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
     .stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
     .stat .label { color: var(--muted); font-size: 12px; }
     .stat .value { font-size: 26px; font-weight: 700; margin-top: 6px; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
     th { color: var(--muted); font-weight: 500; font-size: 12px; }
-    .err { color: #e11d48; font-size: 14px; margin-top: 10px; }
+    .err { color: var(--danger); font-size: 14px; margin-top: 10px; }
+    .ok { color: var(--accent); font-size: 13px; margin-top: 10px; }
     .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .footer { margin-top: 18px; }
+    .mini-hint { font-size: 12px; color: var(--muted); margin-right: 6px; }
+    .confirm-box { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .confirm-box input { max-width: 150px; padding: 5px 8px; font-size: 12px; }
+    .danger-card { border-color: #f3c6c1; margin-top: 20px; }
+    .danger-card h2 { color: var(--danger); }
   </style>
 </head>
 <body>
@@ -39,7 +48,7 @@
   <main>
     <section id="login" class="card">
       <h2 style="margin-top:0;font-size:16px;">管理员登录</h2>
-      <p class="hint" style="margin-top:0;">输入管理密钥后查看数据。默认 <code>admin123</code>，可在 backend/.env 的 <code>ADMIN_KEY</code> 修改。</p>
+      <p class="hint" style="margin-top:0;">管理密钥见 <code>backend/.env</code> 的 <code>ADMIN_KEY</code>，不要写进页面或截图。</p>
       <div class="row">
         <input id="key" type="password" placeholder="管理密钥" />
         <button onclick="enter()">进入</button>
@@ -59,10 +68,12 @@
         <h2 style="margin:0 0 12px;font-size:16px;">用户概览</h2>
         <table>
           <thead>
-            <tr><th>用户</th><th>账号</th><th>会话数</th><th>已出报告</th><th>平均分</th></tr>
+            <tr><th>用户</th><th>账号</th><th>会话数</th><th>已出报告</th><th>平均分</th><th>操作</th></tr>
           </thead>
           <tbody id="user-rows"></tbody>
         </table>
+        <p id="opResult" class="ok hidden"></p>
+        <p id="opErr" class="err hidden"></p>
       </div>
 
       <div class="card">
@@ -79,6 +90,20 @@
         <div class="footer">
           <button class="ghost" onclick="logout()">退出</button>
         </div>
+      </div>
+
+      <div class="card danger-card">
+        <h2 style="margin:0 0 8px;font-size:16px;">清空全库（不可恢复）</h2>
+        <p class="hint" style="margin-top:0;">删除后无法找回。只清练习记录时账号保留；连账号一起清会删掉所有用户，包括你自己的账号。</p>
+        <div class="row">
+          <label><input type="radio" name="scope" value="records" checked /> 只清练习记录（保留账号）</label>
+          <label><input type="radio" name="scope" value="account" /> 连账号一起清</label>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <input id="wipeConfirm" type="text" placeholder="输入「删除」确认" />
+          <button id="wipeBtn" disabled onclick="wipe()">清空</button>
+        </div>
+        <p class="hint">按行删除单个用户时，管理台不知道你前台登录的是哪个账号，所以要求手打该账号名确认——打错一个字就不会执行。</p>
       </div>
     </section>
   </main>
@@ -108,10 +133,132 @@
       return res.json();
     }
 
+    async function send(path, method, body) {
+      const res = await fetch(path, {
+        method,
+        headers: { 'X-Admin-Key': key(), 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) {}
+      if (!res.ok) throw new Error(data.detail || String(res.status));
+      return data;
+    }
+
     function cell(text) {
       const td = document.createElement('td');
       td.textContent = text;
       return td;
+    }
+
+    function note(text) {
+      const ok = document.getElementById('opResult');
+      const err = document.getElementById('opErr');
+      err.classList.add('hidden');
+      ok.textContent = text;
+      ok.classList.remove('hidden');
+    }
+
+    function fail(text) {
+      const ok = document.getElementById('opResult');
+      const err = document.getElementById('opErr');
+      ok.classList.add('hidden');
+      err.textContent = text;
+      err.classList.remove('hidden');
+    }
+
+    function summary(r) {
+      return [
+        r.deleted_users ? `账号 ${r.deleted_users}` : '',
+        `会话 ${r.deleted_sessions || 0}`,
+        `轮次 ${r.deleted_turns || 0}`,
+        `报告 ${r.deleted_reports || 0}`,
+        `跟读 ${r.deleted_drill_attempts || 0}`,
+      ].filter(Boolean).join(' · ');
+    }
+
+    function miniBtn(label, danger, handler) {
+      const b = document.createElement('button');
+      b.className = danger ? 'mini danger' : 'mini';
+      b.textContent = label;
+      b.addEventListener('click', handler);
+      return b;
+    }
+
+    function renderOps(td, u) {
+      td.replaceChildren();
+      td.appendChild(miniBtn('清空数据', false, () => askClear(td, u)));
+      td.appendChild(miniBtn('删除用户', true, () => askDelete(td, u)));
+    }
+
+    function askClear(td, u) {
+      td.replaceChildren();
+      const box = document.createElement('div');
+      box.className = 'confirm-box';
+      const tip = document.createElement('span');
+      tip.className = 'mini-hint';
+      tip.textContent = `清空 ${u.username} 的记录？`;
+      const yes = miniBtn('确认清空', true, () => doClear(td, u));
+      const no = miniBtn('取消', false, () => renderOps(td, u));
+      box.append(tip, yes, no);
+      td.appendChild(box);
+    }
+
+    async function doClear(td, u) {
+      try {
+        const r = await send('/api/admin/data', 'DELETE', { scope: 'records', confirm: '删除', user_id: u.id });
+        note(`已清空 ${u.username} 的练习记录：${summary(r)}（账号保留）`);
+        await load();
+      } catch (e) {
+        fail('清空失败：' + e.message);
+        renderOps(td, u);
+      }
+    }
+
+    function askDelete(td, u) {
+      td.replaceChildren();
+      const box = document.createElement('div');
+      box.className = 'confirm-box';
+      const tip = document.createElement('span');
+      tip.className = 'mini-hint';
+      tip.textContent = `输入账号名「${u.username}」确认：`;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.autocomplete = 'off';
+      const yes = miniBtn('确认删除', true, () => doDelete(td, u, input.value));
+      yes.disabled = true;
+      input.addEventListener('input', () => { yes.disabled = input.value.trim() !== u.username; });
+      const no = miniBtn('取消', false, () => renderOps(td, u));
+      box.append(tip, input, yes, no);
+      td.appendChild(box);
+      input.focus();
+    }
+
+    async function doDelete(td, u, typed) {
+      if (typed.trim() !== u.username) return;
+      try {
+        const r = await send(`/api/admin/users/${u.id}`, 'DELETE');
+        note(`已删除账号 ${u.username} 及其全部数据：${summary(r)}`);
+        await load();
+      } catch (e) {
+        fail('删除失败：' + e.message);
+        renderOps(td, u);
+      }
+    }
+
+    async function wipe() {
+      const typed = document.getElementById('wipeConfirm').value.trim();
+      if (typed !== '删除') return;
+      const scope = document.querySelector('input[name="scope"]:checked').value;
+      try {
+        const r = await send('/api/admin/data', 'DELETE', { scope, confirm: '删除' });
+        note(`已清空全库（${scope === 'account' ? '含账号' : '仅记录'}）：${summary(r)}`);
+        document.getElementById('wipeConfirm').value = '';
+        document.getElementById('wipeBtn').disabled = true;
+        await load();
+      } catch (e) {
+        fail('清空失败：' + e.message);
+      }
     }
 
     async function load() {
@@ -133,6 +280,9 @@
           tr.appendChild(cell(u.sessions));
           tr.appendChild(cell(u.reports));
           tr.appendChild(cell(u.avg_score === null ? '—' : u.avg_score));
+          const ops = document.createElement('td');
+          renderOps(ops, u);
+          tr.appendChild(ops);
           userBody.appendChild(tr);
         }
 
@@ -162,6 +312,10 @@
     }
 
     function refresh() { load(); }
+
+    document.getElementById('wipeConfirm').addEventListener('input', (e) => {
+      document.getElementById('wipeBtn').disabled = e.target.value.trim() !== '删除';
+    });
 
     if (key()) load();
   </script>
