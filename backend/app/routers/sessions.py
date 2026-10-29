@@ -1,4 +1,5 @@
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -63,8 +64,11 @@ def create_session(
     scene = get_scene(body.scene_id)
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在")
+    difficulty = (body.difficulty or "medium").strip().lower()
+    if difficulty not in ("easy", "medium", "hard"):
+        raise HTTPException(status_code=400, detail="难度只能是 easy / medium / hard")
     sess = PracticeSession(
-        user_id=user.id, scene_id=body.scene_id, difficulty=body.difficulty
+        user_id=user.id, scene_id=body.scene_id, difficulty=difficulty
     )
     db.add(sess)
     db.commit()
@@ -93,6 +97,9 @@ def add_turn(
     transcript = (body.transcript or "").strip()
     if not transcript:
         raise HTTPException(status_code=400, detail="这一轮没有听到内容，请再说一遍或手动输入")
+    if not re.search(r"[A-Za-z]", transcript):
+        # 纯标点 / 纯表情 / 纯数字都不是英语作答，不能当成一轮有效发言
+        raise HTTPException(status_code=400, detail="这一轮没有英文内容，请用英文回答或手动输入")
     if len(transcript) > MAX_TRANSCRIPT_CHARS:
         raise HTTPException(
             status_code=400,
