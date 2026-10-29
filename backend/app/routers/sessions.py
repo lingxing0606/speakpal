@@ -15,23 +15,12 @@ from ..schemas import (
 )
 from ..security import get_current_user
 from ..services.llm import chat_reply
+from ..services.report_view import report_out
 from ..services.scenes import get_scene
 from ..services.scoring import generate_report
 from evaluation.features import fluency_features, speech_features, tokenize
 
 router = APIRouter(prefix="/api", tags=["sessions"])
-
-
-def _report_out(rep: Report) -> ReportOut:
-    return ReportOut(
-        report_id=rep.id,
-        total_score=rep.total_score,
-        dimensions=json.loads(rep.dimensions_json or "{}"),
-        sentence_fixes=json.loads(rep.fixes_json or "[]"),
-        comment=rep.comment,
-        features=json.loads(rep.features_json or "{}"),
-        note="分数由 AI 估算，仅供参考。",
-    )
 
 
 @router.post("/sessions", response_model=CreateSessionOut)
@@ -107,7 +96,7 @@ def finish_session(
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="会话不存在")
     if sess.report:
-        return _report_out(sess.report)
+        return report_out(sess.report)
 
     scene = get_scene(sess.scene_id)
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
@@ -122,8 +111,12 @@ def finish_session(
 
     rep = Report(
         session_id=sess.id,
-        total_score=int(data.get("total", 0)),
+        total_score=data.get("total_score"),
+        band=data.get("band"),
+        cefr=data.get("cefr"),
+        source=data.get("source", "llm"),
         dimensions_json=json.dumps(data.get("dimensions", {}), ensure_ascii=False),
+        bands_json=json.dumps(data.get("bands", {}), ensure_ascii=False),
         fixes_json=json.dumps(data.get("sentence_fixes", []), ensure_ascii=False),
         features_json=json.dumps(features, ensure_ascii=False),
         comment=data.get("comment", ""),
@@ -132,7 +125,7 @@ def finish_session(
     sess.status = "finished"
     db.commit()
     db.refresh(rep)
-    return _report_out(rep)
+    return report_out(rep)
 
 
 @router.get("/sessions", response_model=list[HistoryItem])

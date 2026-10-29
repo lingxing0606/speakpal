@@ -71,10 +71,15 @@ class SentenceFix(BaseModel):
 
 class ReportOut(BaseModel):
     report_id: int
-    total_score: int
-    dimensions: Dict[str, int]
-    sentence_fixes: List[SentenceFix]
-    comment: str
+    # 降级报告（模型不可用）不计分：total_score / band / cefr 均为 None
+    total_score: int | None = None
+    band: float | None = None
+    cefr: str | None = None
+    source: str = "llm"  # llm | mock
+    dimensions: Dict[str, int] = {}
+    bands: Dict[str, float] = {}
+    sentence_fixes: List[SentenceFix] = []
+    comment: str = ""
     features: Dict[str, Any] = {}
     note: str = "分数由 AI 估算，仅供参考。"
 

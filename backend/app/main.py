@@ -14,17 +14,27 @@ Base.metadata.create_all(bind=engine)
 
 
 def _ensure_schema():
+    """给旧库补列（SQLite 不支持 ADD COLUMN IF NOT EXISTS，只能先查）。
+
+    只加列、不改不删，旧数据保持可读；band 为空的旧报告前端按“无档位”处理。
+    """
     insp = inspect(engine)
     tables = insp.get_table_names()
+    report_cols = {
+        "features_json": "TEXT DEFAULT '{}'",
+        "bands_json": "TEXT DEFAULT '{}'",
+        "band": "REAL",
+        "cefr": "VARCHAR(8)",
+        "source": "VARCHAR(16) DEFAULT 'llm'",
+    }
     if "reports" in tables:
-        cols = [c["name"] for c in insp.get_columns("reports")]
-        if "features_json" not in cols:
-            with engine.begin() as conn:
-                conn.execute(
-                    text("ALTER TABLE reports ADD COLUMN features_json TEXT DEFAULT '{}'")
-                )
+        cols = {c["name"] for c in insp.get_columns("reports")}
+        for name, ddl in report_cols.items():
+            if name not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE reports ADD COLUMN {name} {ddl}"))
     if "turns" in tables:
-        cols = [c["name"] for c in insp.get_columns("turns")]
+        cols = {c["name"] for c in insp.get_columns("turns")}
         if "audio_json" not in cols:
             with engine.begin() as conn:
                 conn.execute(
