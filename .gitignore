@@ -8,3 +8,5 @@ dist/
 .tmp/
 tools/node/
 .workbuddy/
+# 本机存储位置覆盖（含绝对路径，只属于某台机器，不进仓库）
+data_location.json
