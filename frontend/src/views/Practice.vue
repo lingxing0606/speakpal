@@ -96,7 +96,8 @@ async function send(text, audio = null) {
     scrollBottom()
   } catch (e) {
     const detail = e?.response?.data?.detail
-    if (e?.response?.status === 409 && detail === 'llm_key_required') {
+    const kind = e?.response?.data?.kind
+    if (e?.response?.status === 409 && (kind === 'llm_not_configured' || detail === 'llm_key_required')) {
       error.value = KEY_REQUIRED_MESSAGE
     } else {
       error.value = '发送失败：' + (detail || e.message)
