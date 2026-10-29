@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
+import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
 
 const route = useRoute()
@@ -116,21 +117,27 @@ function again() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50">
-    <header class="border-b border-slate-200 bg-white">
-      <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-        <div class="font-semibold">复盘报告</div>
-        <button class="text-sm text-slate-500 hover:text-slate-800" @click="router.push('/')">返回首页</button>
+  <div class="min-h-screen bg-canvas">
+    <header class="sp-header">
+      <div class="sp-shell flex items-center justify-between py-3">
+        <div class="flex items-center gap-3">
+          <router-link to="/" aria-label="返回首页">
+            <BrandLogo :size="30" />
+          </router-link>
+          <span class="h-4 w-px bg-line"></span>
+          <div class="font-semibold text-ink">复盘报告</div>
+        </div>
+        <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
       </div>
     </header>
 
-    <main class="mx-auto max-w-3xl px-4 py-8">
-      <p v-if="error" class="text-rose-500">{{ error }}</p>
+    <main class="sp-shell py-8">
+      <p v-if="error" class="sp-alert-error">{{ error }}</p>
 
       <div v-if="report">
         <div
           v-if="isMock"
-          class="mb-4 rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-800 ring-1 ring-amber-200"
+          class="sp-alert-warn mb-4"
         >
           示例报告（本次不计分）：{{ mockHint }}
           <router-link v-if="showMockSettingsLink" to="/settings" class="ml-1 font-medium underline">去设置</router-link>
@@ -138,92 +145,106 @@ function again() {
 
         <div
           v-if="hasScore"
-          class="rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200"
+          class="relative overflow-hidden rounded-card bg-white p-7 text-center shadow-card ring-1 ring-line/70"
         >
-          <div class="text-sm text-slate-500">综合得分</div>
-          <div class="text-5xl font-bold text-indigo-600">{{ report.total_score }}</div>
-          <div v-if="bandText" class="mt-2 inline-flex rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
-            {{ bandText }}
+          <div class="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-brand-100/60 blur-2xl"></div>
+          <div class="relative">
+            <div class="text-xs font-medium tracking-wide text-ink-mute">综合得分</div>
+            <div class="sp-num mt-1 text-[56px] font-semibold leading-none text-ink">{{ report.total_score }}</div>
+            <div v-if="bandText" class="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3.5 py-1.5 text-sm font-medium text-brand-700">
+              {{ bandText }}
+            </div>
+            <div class="mt-2.5 text-xs leading-5 text-ink-mute">{{ report.note }}</div>
           </div>
-          <div class="mt-2 text-xs text-slate-400">{{ report.note }}</div>
         </div>
 
         <div
           v-if="Object.keys(report.dimensions || {}).length"
-          class="mt-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
+          class="sp-card mt-4 p-6"
         >
-          <div class="font-semibold">四个维度</div>
-          <div v-for="(v, k) in report.dimensions" :key="k" class="mb-3 mt-3">
-            <div class="flex justify-between text-sm">
-              <span>{{ dimLabels[k] || k }}</span>
-              <span class="font-medium">
-                {{ v }}
-                <span v-if="dimBand(k)" class="ml-1 text-xs font-normal text-slate-400">雅思 {{ dimBand(k) }}</span>
+          <div class="flex items-baseline justify-between">
+            <div class="font-semibold text-ink">四个维度</div>
+            <div class="text-xs text-ink-mute">模型分与可测指标融合</div>
+          </div>
+          <div v-for="(v, k) in report.dimensions" :key="k" class="mb-4 mt-4 last:mb-0">
+            <div class="flex items-baseline justify-between text-sm">
+              <span class="text-ink-soft">{{ dimLabels[k] || k }}</span>
+              <span class="flex items-baseline gap-2">
+                <span class="sp-num text-base font-semibold text-ink">{{ v }}</span>
+                <span v-if="dimBand(k)" class="text-xs font-normal text-ink-mute">雅思 {{ dimBand(k) }}</span>
               </span>
             </div>
-            <div class="mt-1 h-2 rounded bg-slate-100">
-              <div class="h-2 rounded bg-indigo-500" :style="{ width: v + '%' }"></div>
+            <div class="sp-bar mt-2">
+              <div class="sp-bar-fill" :style="{ width: v + '%' }"></div>
             </div>
           </div>
         </div>
 
         <div
           v-if="Object.keys(displayFeatures).length"
-          class="mt-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
+          class="sp-card mt-4 p-6"
         >
-          <div class="font-semibold">流利度与表达指标</div>
-          <div class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-            <div v-for="(v, k) in displayFeatures" :key="k" class="rounded-xl bg-slate-50 p-3">
-              <div class="text-xs text-slate-500">{{ featureLabels[k] || k }}</div>
-              <div class="mt-1 font-medium">{{ v }}</div>
+          <div class="font-semibold text-ink">流利度与表达指标</div>
+          <div class="mt-3.5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+            <div v-for="(v, k) in displayFeatures" :key="k" class="rounded-xl bg-canvas px-3.5 py-3 ring-1 ring-line/60">
+              <div class="text-[11px] text-ink-mute">{{ featureLabels[k] || k }}</div>
+              <div class="sp-num mt-1 text-[15px] font-semibold text-ink">{{ v }}</div>
             </div>
           </div>
         </div>
 
         <div
           v-if="hasDetail"
-          class="mt-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
+          class="sp-card mt-4 p-6"
         >
-          <div class="font-semibold">评分依据（可复现）</div>
-          <div v-if="report.scoring_detail.note" class="mt-1 text-xs text-slate-500">
+          <div class="font-semibold text-ink">评分依据（可复现）</div>
+          <div v-if="report.scoring_detail.note" class="mt-1 text-xs leading-5 text-ink-mute">
             {{ report.scoring_detail.note }}
           </div>
-          <div v-for="(d, k) in scoringDims" :key="k" class="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-            <div class="flex items-center justify-between">
-              <span>{{ dimLabels[k] || k }}</span>
-              <span class="text-xs text-slate-500">
+          <div v-for="(d, k) in scoringDims" :key="k" class="mt-3 rounded-xl bg-canvas p-3.5 text-sm ring-1 ring-line/60">
+            <div class="flex flex-wrap items-baseline justify-between gap-1">
+              <span class="font-medium text-ink-soft">{{ dimLabels[k] || k }}</span>
+              <span class="text-[11px] text-ink-mute">
                 模型 {{ d.model_score ?? '—' }} · 规则 {{ d.rule_score ?? '—' }} · 最终 {{ d.final_score ?? '—' }}
               </span>
             </div>
-            <div v-if="d.clamped" class="mt-1 text-xs text-amber-600">{{ d.clamp_reason }}</div>
-            <div class="mt-1 text-xs text-slate-500">{{ d.note }}</div>
-            <div v-if="evidenceText(d)" class="mt-1 text-xs text-slate-400">{{ evidenceText(d) }}</div>
+            <div v-if="d.clamped" class="mt-1.5 text-xs text-warn">{{ d.clamp_reason }}</div>
+            <div class="mt-1.5 text-xs leading-5 text-ink-soft">{{ d.note }}</div>
+            <div v-if="evidenceText(d)" class="mt-1 text-[11px] leading-5 text-ink-mute">{{ evidenceText(d) }}</div>
           </div>
         </div>
 
-        <div class="mt-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-          <div class="font-semibold">逐句纠错</div>
-          <p v-if="!report.sentence_fixes.length" class="mt-3 text-sm text-slate-400">
+        <div class="sp-card mt-4 p-6">
+          <div class="font-semibold text-ink">逐句纠错</div>
+          <p v-if="!report.sentence_fixes.length" class="mt-3 text-sm text-ink-mute">
             本次没有可展示的句子。
           </p>
           <div
             v-for="(f, i) in report.sentence_fixes"
             :key="i"
-            class="mt-3 rounded-xl bg-slate-50 p-3 text-sm"
+            class="mt-3 rounded-xl bg-canvas p-4 text-sm ring-1 ring-line/60"
           >
-            <div :class="f.better ? 'text-rose-500 line-through' : 'text-slate-600'">{{ f.original }}</div>
-            <div v-if="f.better" class="text-emerald-600">{{ f.better }}</div>
-            <div class="mt-1 text-xs text-slate-500">{{ f.reason }}</div>
+            <div class="flex items-start gap-2">
+              <span class="mt-0.5 text-[11px] font-medium text-ink-mute">原句</span>
+              <div :class="f.better ? 'text-rose-500 line-through decoration-rose-300' : 'text-ink-soft'" class="leading-6">
+                {{ f.original }}
+              </div>
+            </div>
+            <div v-if="f.better" class="mt-1.5 flex items-start gap-2">
+              <span class="mt-0.5 text-[11px] font-medium text-brand-700">改写</span>
+              <div class="leading-6 text-brand-700">{{ f.better }}</div>
+            </div>
+            <div class="mt-2 border-t border-line/70 pt-2 text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
           </div>
         </div>
 
-        <div class="mt-4 rounded-2xl bg-white p-6 text-sm leading-6 text-slate-600 shadow-sm ring-1 ring-slate-200">
+        <div class="sp-card mt-4 p-6 text-sm leading-6 text-ink-soft">
           {{ report.comment }}
         </div>
 
         <div class="mt-6 flex gap-3">
-          <button class="flex-1 rounded-lg bg-indigo-600 py-2 text-white" @click="again">再来一次</button>
-          <button class="flex-1 rounded-lg border border-slate-200 py-2" @click="router.push('/history')">看历史</button>
+          <button class="sp-btn-primary flex-1" @click="again">再来一次</button>
+          <button class="sp-btn-secondary flex-1" @click="router.push('/history')">看历史</button>
         </div>
       </div>
     </main>

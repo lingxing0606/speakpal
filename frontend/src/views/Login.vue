@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import api from '../api/client'
+import BrandLogo from '../components/BrandLogo.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
 
@@ -56,47 +57,76 @@ async function submit() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-sky-100 px-4">
-    <div class="w-full max-w-sm rounded-2xl bg-white p-8 shadow-xl">
-      <h1 class="text-2xl font-bold text-slate-900">SpeakPal</h1>
-      <p class="mt-1 text-sm text-slate-500">场景化 AI 英语口语陪练</p>
+  <div class="relative min-h-screen overflow-hidden bg-canvas">
+    <div class="pointer-events-none absolute -left-24 -top-32 h-80 w-80 rounded-full bg-brand-200/45 blur-3xl"></div>
+    <div class="pointer-events-none absolute -bottom-32 -right-24 h-80 w-80 rounded-full bg-coral-300/30 blur-3xl"></div>
 
-      <div class="mt-6 space-y-3">
-        <input
-          v-model="username"
-          class="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-indigo-400"
-          placeholder="账号"
-        />
-        <input
-          v-model="password"
-          type="password"
-          class="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-indigo-400"
-          placeholder="密码"
-        />
-        <input
-          v-if="mode === 'register'"
-          v-model="nickname"
-          class="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-indigo-400"
-          placeholder="昵称（可选）"
-        />
+    <div class="relative flex min-h-screen items-center justify-center px-4 py-10">
+      <div class="w-full max-w-[400px]">
+        <div class="mb-6 flex flex-col items-center text-center">
+          <BrandLogo :size="46" />
+          <h1 class="mt-3.5 text-2xl font-bold tracking-tight text-ink">SpeakPal</h1>
+          <p class="mt-1 text-sm text-ink-soft">场景化 AI 英语口语陪练</p>
+        </div>
+
+        <div class="sp-card p-6 sm:p-7">
+          <div class="mb-5">
+            <div class="text-[15px] font-semibold text-ink">
+              {{ mode === 'login' ? '欢迎回来' : '创建账号' }}
+            </div>
+            <div class="mt-0.5 text-xs text-ink-mute">
+              {{ mode === 'login' ? '登录后继续你的口语练习' : '注册后即可开始练习，记录只属于你' }}
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <label class="block">
+              <span class="mb-1.5 block text-xs font-medium text-ink-soft">账号</span>
+              <input v-model="username" class="sp-input" placeholder="账号" autocomplete="username" />
+            </label>
+            <label class="block">
+              <span class="mb-1.5 block text-xs font-medium text-ink-soft">密码</span>
+              <input
+                v-model="password"
+                type="password"
+                class="sp-input"
+                placeholder="密码"
+                autocomplete="current-password"
+                @keyup.enter="submit"
+              />
+            </label>
+            <label v-if="mode === 'register'" class="block">
+              <span class="mb-1.5 block text-xs font-medium text-ink-soft">昵称</span>
+              <input
+                v-model="nickname"
+                class="sp-input"
+                placeholder="昵称（可选）"
+                @keyup.enter="submit"
+              />
+            </label>
+          </div>
+
+          <p v-if="error" class="sp-alert-error mt-4">{{ error }}</p>
+
+          <button
+            :disabled="loading"
+            class="sp-btn-primary mt-5 w-full py-2.5"
+            @click="submit"
+          >
+            {{ loading ? '请稍候…' : mode === 'login' ? '登录' : '注册' }}
+          </button>
+
+          <div class="mt-4 text-center">
+            <button class="sp-link" @click="mode = mode === 'login' ? 'register' : 'login'">
+              {{ mode === 'login' ? '没有账号？去注册' : '已有账号？去登录' }}
+            </button>
+          </div>
+        </div>
+
+        <p class="mt-5 text-center text-xs text-ink-mute">
+          练习记录按账号独立保存，密钥只留在你自己的浏览器里
+        </p>
       </div>
-
-      <p v-if="error" class="mt-3 text-sm text-rose-500">{{ error }}</p>
-
-      <button
-        :disabled="loading"
-        class="mt-5 w-full rounded-lg bg-indigo-600 py-2 font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
-        @click="submit"
-      >
-        {{ loading ? '请稍候…' : mode === 'login' ? '登录' : '注册' }}
-      </button>
-
-      <button
-        class="mt-3 w-full text-sm text-indigo-600 hover:underline"
-        @click="mode = mode === 'login' ? 'register' : 'login'"
-      >
-        {{ mode === 'login' ? '没有账号？去注册' : '已有账号？去登录' }}
-      </button>
     </div>
   </div>
 </template>

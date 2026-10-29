@@ -1,6 +1,5 @@
 <script setup>
-import { nextTick, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref } from 'vue'import { useRouter } from 'vue-router'
 
 import api from '../api/client'
 import { useSessionStore } from '../stores/session'
@@ -17,8 +16,14 @@ const sending = ref(false)
 const finishing = ref(false)
 const error = ref('')
 const chatEl = ref(null)
+const manualOpen = ref(false)
+const manualText = ref('')
+const manualInput = ref(null)
 let recognizer = null
 let capturer = null
+
+const DIFFICULTY_LABELS = { easy: '简单', medium: '中等', hard: '困难' }
+const difficultyLabel = computed(() => DIFFICULTY_LABELS[session.difficulty] || session.difficulty || '—')
 
 onMounted(() => {
   if (!session.sessionId) {
@@ -110,6 +115,34 @@ async function send(text, audio = null) {
 function manualSend() {
   const text = window.prompt('输入你的回答（英文）')
   if (text && text.trim()) send(text.trim())
+}
+
+async function openManual() {
+  manualOpen.value = true
+  await nextTick()
+  manualInput.value?.focus()
+}
+
+function closeManual() {
+  manualOpen.value = false
+  manualText.value = ''
+}
+
+function submitManual() {
+  const text = manualText.value.trim()
+  if (!text) return
+  manualText.value = ''
+  manualOpen.value = false
+  send(text)
+}
+
+function onManualKeydown(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    submitManual()
+  } else if (event.key === 'Escape') {
+    closeManual()
+  }
 }
 
 async function finish() {

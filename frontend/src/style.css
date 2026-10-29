@@ -2,6 +2,182 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-50 text-slate-800 antialiased;
+/* SpeakPal 视觉模板：色板与层级见 docs/ui-visual.md */
+
+@layer base {
+  :root {
+    --sp-ink: #1b2430;
+    --sp-ink-soft: #475467;
+    --sp-ink-mute: #6b7785;
+    --sp-brand: #14806f;
+    --sp-brand-soft: #d5f1ea;
+    --sp-canvas: #f5f8f8;
+    --sp-line: #e3eae9;
+    --sp-coral: #ff6f52;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-canvas text-ink antialiased;
+  }
+
+  ::selection {
+    background: #b0e5da;
+    color: #0d423b;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-300 ring-offset-2 ring-offset-canvas;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* 版心 */
+  .sp-shell {
+    @apply mx-auto w-full max-w-3xl px-4 sm:px-6;
+  }
+
+  .sp-header {
+    @apply sticky top-0 z-20 border-b border-line bg-white/85 backdrop-blur;
+  }
+
+  /* 卡片 */
+  .sp-card {
+    @apply rounded-card bg-white shadow-card ring-1 ring-line/70;
+  }
+
+  .sp-card-flat {
+    @apply rounded-2xl bg-white ring-1 ring-line/70;
+  }
+
+  /* 按钮 */
+  .sp-btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 py-2.5
+      text-sm font-medium transition duration-150 ease-out
+      disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .sp-btn-primary {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5
+      text-sm font-medium text-white shadow-soft transition duration-150 ease-out
+      hover:bg-brand-700 active:translate-y-px
+      disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .sp-btn-secondary {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5
+      text-sm font-medium text-ink-soft ring-1 ring-line transition duration-150 ease-out
+      hover:text-ink hover:ring-brand-300
+      disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .sp-btn-soft {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl bg-brand-50 px-4 py-2.5
+      text-sm font-medium text-brand-700 transition duration-150 ease-out
+      hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .sp-btn-ghost {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-3 py-2
+      text-sm font-medium text-ink-soft transition duration-150 ease-out
+      hover:bg-brand-50 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .sp-link {
+    @apply rounded text-sm font-medium text-brand-700 underline-offset-4 transition hover:text-brand-800 hover:underline;
+  }
+
+  /* 输入 */
+  .sp-input {
+    @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none
+      transition duration-150 placeholder:text-ink-mute/80
+      focus:border-brand-400 focus:ring-2 focus:ring-brand-200;
+  }
+
+  .sp-select {
+    @apply rounded-xl border border-line bg-white px-3 py-2 text-sm text-ink outline-none
+      transition duration-150 focus:border-brand-400 focus:ring-2 focus:ring-brand-200;
+  }
+
+  /* 标签 / 药丸 */
+  .sp-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+
+  .sp-chip-brand {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700;
+  }
+
+  .sp-chip-line {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-ink-soft ring-1 ring-line;
+  }
+
+  .sp-chip-coral {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-coral-50 px-2.5 py-1 text-xs font-medium text-coral-700;
+  }
+
+  /* 数字（分数用衬线，拉开气质） */
+  .sp-num {
+    font-family: Georgia, 'Times New Roman', 'Songti SC', serif;
+    font-variant-numeric: tabular-nums lining-nums;
+    letter-spacing: -0.02em;
+  }
+
+  /* 进度条 */
+  .sp-bar {
+    @apply h-2 overflow-hidden rounded-full bg-brand-50;
+  }
+
+  .sp-bar-fill {
+    @apply h-full rounded-full bg-brand-500 transition-[width] duration-500 ease-out;
+  }
+
+  /* 内联提示 */
+  .sp-alert {
+    @apply rounded-xl px-3.5 py-2.5 text-sm leading-6;
+  }
+
+  .sp-alert-error {
+    @apply rounded-xl bg-rose-50 px-3.5 py-2.5 text-sm leading-6 text-rose-600 ring-1 ring-rose-100;
+  }
+
+  .sp-alert-warn {
+    @apply rounded-xl bg-amber-50 px-3.5 py-2.5 text-sm leading-6 text-amber-800 ring-1 ring-amber-100;
+  }
+
+  /* 头像/图标底板 */
+  .sp-icon-tile {
+    @apply flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-50 text-xl ring-1 ring-brand-100;
+  }
+
+  /* 录音按钮呼吸圈 */
+  .sp-mic-pulse::after {
+    content: '';
+    @apply pointer-events-none absolute inset-0 rounded-full ring-4 ring-coral-300/60;
+    animation: sp-pulse 1.6s ease-out infinite;
+  }
+}
+
+@keyframes sp-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
 }
