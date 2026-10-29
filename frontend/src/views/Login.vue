@@ -4,9 +4,11 @@ import { useRouter } from 'vue-router'
 
 import api from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useSettingsStore } from '../stores/settings'
 
 const router = useRouter()
 const auth = useAuthStore()
+const settings = useSettingsStore()
 
 const mode = ref('login')
 const username = ref('')
@@ -14,6 +16,16 @@ const password = ref('')
 const nickname = ref('')
 const error = ref('')
 const loading = ref(false)
+
+async function firstStop() {
+  // 没配密钥且服务端也没有兜底密钥时才引导去设置页；接口不可用时放行，别挡住演示
+  try {
+    const { data } = await api.get('/config/llm')
+    return data?.env_configured ? '/' : '/settings?onboarding=1'
+  } catch {
+    return '/'
+  }
+}
 
 async function submit() {
   error.value = ''
@@ -34,7 +46,7 @@ async function submit() {
           }
     const { data } = await api.post(path, body)
     auth.setAuth(data.token, data.user)
-    router.push('/')
+    router.push(settings.configured ? '/' : await firstStop())
   } catch (e) {
     error.value = e?.response?.data?.detail || '请求失败，请稍后重试'
   } finally {

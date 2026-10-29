@@ -29,7 +29,10 @@ function open(item) {
     <header class="border-b border-slate-200 bg-white">
       <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
         <div class="font-semibold">历史记录</div>
-        <button class="text-sm text-slate-500 hover:text-slate-800" @click="router.push('/')">返回首页</button>
+        <div class="flex items-center gap-3 text-sm">
+          <router-link to="/settings" class="text-indigo-600 hover:underline">设置</router-link>
+          <button class="text-slate-500 hover:text-slate-800" @click="router.push('/')">返回首页</button>
+        </div>
       </div>
     </header>
 
