@@ -11,3 +11,8 @@ tools/node/
 # 本机存储位置覆盖（含绝对路径，只属于某台机器，不进仓库）
 data_location.json
 frontend/.tmp-render/
+
+# 无头截图用的调试页与临时图，不进仓库
+frontend/public/probe.html
+frontend/public/seed.html
+tmp-zoom-*.png
