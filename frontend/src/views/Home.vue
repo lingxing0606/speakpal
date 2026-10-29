@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import api from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useSessionStore } from '../stores/session'
+import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -30,6 +31,12 @@ async function start(scene) {
   loading.value = true
   error.value = ''
   try {
+    const gate = await llmReady()
+    if (!gate.ok) {
+      error.value = KEY_REQUIRED_MESSAGE
+      router.push('/settings?onboarding=1')
+      return
+    }
     const { data } = await api.post('/sessions', {
       scene_id: scene.id,
       difficulty: difficulty.value,

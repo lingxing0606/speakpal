@@ -24,8 +24,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const masked = computed(() => {
     const key = apiKey.value.trim()
     if (!key) return ''
-    if (key.length <= 8) return '****'
-    return `${key.slice(0, 3)}****${key.slice(-4)}`
+    return key.length <= 4 ? '****' : `****${key.slice(-4)}`
   })
 
   function persist() {

@@ -31,6 +31,10 @@ const confirming = ref(false)
 const confirmWord = ref('')
 const dataState = ref({ running: false, tip: '', error: '' })
 
+const accountOpen = ref(false)
+const accountWord = ref('')
+const accountState = ref({ running: false, error: '' })
+
 const sizeText = computed(() => {
   const bytes = storage.value.size_bytes
   if (bytes === null || bytes === undefined) return '—'
@@ -147,6 +151,22 @@ async function migrateStorage() {
     await loadStorage()
   } finally {
     migrating.value = false
+  }
+}
+
+async function deleteAccount() {
+  if (accountWord.value.trim() !== '注销') {
+    accountState.value = { running: false, error: '请先输入「注销」两个字' }
+    return
+  }
+  accountState.value = { running: true, error: '' }
+  try {
+    await api.delete('/me/account')
+    settings.clear()
+    auth.logout()
+    router.push('/login')
+  } catch (e) {
+    accountState.value = { running: false, error: errText(e) }
   }
 }
 
@@ -280,6 +300,42 @@ function logout() {
         </div>
         <p v-if="dataState.tip" class="mt-3 text-xs text-emerald-600">{{ dataState.tip }}</p>
         <p v-if="dataState.error" class="mt-3 text-xs text-rose-600">{{ dataState.error }}</p>
+      </section>
+
+      <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <h2 class="font-semibold text-slate-900">注销账号</h2>
+        <p class="mt-1 text-xs leading-5 text-slate-500">
+          会删除账号本身，以及这个账号名下的全部练习记录、对话和报告，之后无法登录、无法恢复。
+          只清记录不删账号的话，用上面那段。
+        </p>
+        <div class="mt-4 space-y-2 text-sm">
+          <button
+            v-if="!accountOpen"
+            class="rounded-lg border border-rose-400 px-3 py-1.5 text-rose-700"
+            @click="accountOpen = true"
+          >
+            注销我的账号
+          </button>
+          <template v-else>
+            <p class="text-slate-600">确认注销「{{ auth.user?.username }}」？输入「注销」两个字再点确认。</p>
+            <div class="flex flex-wrap items-center gap-2">
+              <input
+                v-model="accountWord"
+                placeholder="注销"
+                class="w-24 rounded-lg border border-slate-200 px-3 py-1.5"
+              />
+              <button
+                class="rounded-lg bg-rose-700 px-3 py-1.5 text-white disabled:opacity-60"
+                :disabled="accountState.running"
+                @click="deleteAccount"
+              >
+                {{ accountState.running ? '注销中…' : '确认注销' }}
+              </button>
+              <button class="text-slate-500 hover:text-slate-800" @click="accountOpen = false; accountWord = ''">取消</button>
+            </div>
+          </template>
+          <p v-if="accountState.error" class="text-xs text-rose-600">{{ accountState.error }}</p>
+        </div>
       </section>
 
       <section class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">

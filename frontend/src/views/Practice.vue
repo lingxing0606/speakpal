@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import api from '../api/client'
 import { useSessionStore } from '../stores/session'
 import { startAudioCapture } from '../utils/audio'
+import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
 import { createRecognizer, speak } from '../utils/speech'
 
 const router = useRouter()
@@ -77,6 +78,11 @@ function stopListening() {
 
 async function send(text, audio = null) {
   if (!text || sending.value) return
+  const gate = await llmReady()
+  if (!gate.ok) {
+    error.value = KEY_REQUIRED_MESSAGE
+    return
+  }
   sending.value = true
   session.turns.push({ role: 'user', content: text })
   scrollBottom()
@@ -89,7 +95,12 @@ async function send(text, audio = null) {
     speak(data.ai_reply)
     scrollBottom()
   } catch (e) {
-    error.value = '发送失败：' + (e?.response?.data?.detail || e.message)
+    const detail = e?.response?.data?.detail
+    if (e?.response?.status === 409 && detail === 'llm_key_required') {
+      error.value = KEY_REQUIRED_MESSAGE
+    } else {
+      error.value = '发送失败：' + (detail || e.message)
+    }
   } finally {
     sending.value = false
   }
