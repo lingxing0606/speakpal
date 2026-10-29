@@ -106,6 +106,9 @@ class HistoryItem(BaseModel):
     id: int
     scene_id: str
     scene_name: str
+    # 前端靠这两个字段决定点开去哪：有 report_id → 报告页；status=active → 继续练习
+    status: str = "active"  # active | finished
+    report_id: int | None = None
     total_score: int | None = None
     created_at: str
 

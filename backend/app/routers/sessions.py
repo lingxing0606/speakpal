@@ -246,6 +246,8 @@ def list_sessions(
                 id=s.id,
                 scene_id=s.scene_id,
                 scene_name=scene["name"] if scene else s.scene_id,
+                status=s.status,
+                report_id=s.report.id if s.report else None,
                 total_score=s.report.total_score if s.report else None,
                 created_at=s.created_at.isoformat(),
             )
