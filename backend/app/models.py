@@ -68,6 +68,7 @@ class Report(Base):
     source = Column(String(16), default="llm")  # llm | mock（示例报告）
     dimensions_json = Column(Text, default="{}")
     bands_json = Column(Text, default="{}")
+    scoring_json = Column(Text, default="{}")
     fixes_json = Column(Text, default="[]")
     features_json = Column(Text, default="{}")
     comment = Column(Text, default="")

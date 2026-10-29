@@ -26,6 +26,7 @@ def _ensure_schema():
         "band": "REAL",
         "cefr": "VARCHAR(8)",
         "source": "VARCHAR(16) DEFAULT 'llm'",
+        "scoring_json": "TEXT DEFAULT '{}'",
     }
     if "reports" in tables:
         cols = {c["name"] for c in insp.get_columns("reports")}

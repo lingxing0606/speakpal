@@ -19,5 +19,6 @@ def report_out(rep: Report) -> ReportOut:
         sentence_fixes=json.loads(rep.fixes_json or "[]"),
         comment=rep.comment or "",
         features=json.loads(rep.features_json or "{}"),
+        scoring_detail=json.loads(rep.scoring_json or "{}"),
         note=MOCK_NOTE if source == "mock" else DEFAULT_NOTE,
     )

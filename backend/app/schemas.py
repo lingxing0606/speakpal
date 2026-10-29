@@ -81,6 +81,7 @@ class ReportOut(BaseModel):
     sentence_fixes: List[SentenceFix] = []
     comment: str = ""
     features: Dict[str, Any] = {}
+    scoring_detail: Dict[str, Any] = {}
     note: str = "分数由 AI 估算，仅供参考。"
 
 

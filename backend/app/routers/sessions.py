@@ -16,6 +16,7 @@ from ..schemas import (
 from ..security import get_current_user
 from ..services.llm import chat_reply
 from ..services.report_view import report_out
+from ..services.rules import apply_to_report
 from ..services.scenes import get_scene
 from ..services.scoring import generate_report
 from evaluation.features import fluency_features, speech_features, tokenize
@@ -100,13 +101,20 @@ def finish_session(
 
     scene = get_scene(sess.scene_id)
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
-    data = generate_report(scene, sess.difficulty, history)
     user_text = " ".join(t["content"] for t in history if t["role"] == "user")
-    features = fluency_features(user_text)
     user_turns = [t for t in sess.turns if t.role == "user"]
     audio_metas = [json.loads(t.audio_json or "{}") for t in user_turns]
+
+    # 先算可测特征，再打分：规则子分要拿 features 才能和模型分融合
+    features = fluency_features(user_text)
     features.update(
         speech_features([len(tokenize(t.content)) for t in user_turns], audio_metas)
+    )
+    data = generate_report(scene, sess.difficulty, history)
+    data = apply_to_report(data, features, sess.scene_id, user_text)
+    detail = data.get("scoring_detail") or {}
+    scoring_json = json.dumps(
+        {"dimensions": detail, "note": data.get("scoring_note", "")}, ensure_ascii=False
     )
 
     rep = Report(
@@ -119,6 +127,7 @@ def finish_session(
         bands_json=json.dumps(data.get("bands", {}), ensure_ascii=False),
         fixes_json=json.dumps(data.get("sentence_fixes", []), ensure_ascii=False),
         features_json=json.dumps(features, ensure_ascii=False),
+        scoring_json=scoring_json,
         comment=data.get("comment", ""),
     )
     db.add(rep)

@@ -158,14 +158,14 @@ S_fluency_rule = 45 + 45·combined            # 落在 45–90，对应雅思 3.
 `pause_ratio` 0.15 左右接近自然停顿水平，0.45 以上是明显的表达困难【文献，区间为本作品取整】。
 `filler_rate` 在 STT 转写里天然偏低（Chrome 常不转写 um/uh），所以阈值取得宽【自定】。
 
-**已实测的坑（`filler_rate` 有假阳性）**：`FILLERS` 里收了 `like / well / actually / basically`，
-但 `like` 和 `well` 经常是实词。实测 `"I like coffee ..."`（14 词）被算出 `filler_count = 1`、`filler_rate = 7.1%`，
-咖啡店场景里 `I'd like a latte` 会稳定被判成填充词。
+**已修复的坑（`filler_rate` 曾大量假阳性）**：旧实现是「词表命中即计」，`FILLERS` 里含 `like / well / actually / basically`，
+于是 `I'd like a latte` 必然被算成填充词（实测 3 句点单场景 3/3 误判，一句话少 3.8 分）。
+现改为 `find_fillers()` 位置判定：硬词（um/uh/erm/hmm/mm/ah）直计；软标记只在句首、标点/停顿之后、
+或紧跟一个已计的填充词时才计——`as well as` 里的 `well` 前面是 `as`，不算。修复后同样 3 句为 0/3。
 
-影响不是小数：`f_filler(0.071) = 0.66`，比满分少 0.34，按 0.25 权重 → 少 3.8 分。
-**规则【自定】**：`like / well / actually / basically` 只在句首、或前后紧邻另一个填充词时才计入；
-或直接把这四个从 `FILLERS` 移除，只留 `um / uh / erm / hmm / mm / ah`（反正 STT 也很少转写它们）。
-哪种更好要看 §6.4 的标注数据，先按前者实现并留开关。
+**`sentence_count` 只用于「有标点」的输入**：Chrome 的语音转写通常不带标点，此时 `sentence_count` 恒为 1，
+`mean_sentence_len` 会退化成整段词数。规则层因此只在句数 ≥2 时使用句长项；没有标点时用停顿估句数，
+两者都没有就把句长项的权重让给从句标记（见 §3.3）。
 
 **示例**：38 词 / 30 秒 → 76 wpm；pause_ratio 0.35；filler_rate 0.10
 
@@ -191,15 +191,17 @@ S_complexity_rule = 45 + 45·(0.45·f_mtld + 0.35·f_msl + 0.20·f_cx)
 ```
 
 `complex_markers`：`because, although, though, while, whereas, which, who, that, when, if, so that, in order to, unless`
-这类从句/连接词的计数（词表【自定】）。
+这类从句/连接词的计数（词表【自定】）。**必须按整词匹配**：按子串匹配时 `although` 里的 `though` 会被重复计一次
+（实测踩到过，2 个标记被算成 3 个）。`that / who` 噪声大（很多 `that` 是普通从句引导词），校准时要重点看是否保留。
 
 **两个必须处理的已知坑**：
 
 1. **`sentence_count` 在语音输入下不可靠**：Chrome 的 Web Speech API 转写**通常不带标点**，
    而 `fluency_features()` 用 `[.!?]+` 分句 → 实际几乎总是 `sentence_count = 1`、`mean_sentence_len` = 整段词数。
    这会让 `f_msl` 变成「总词数」的代理，方向是错的。
-   **修正方案【自定】**：有录音时用停顿（≥0.35 s）切句；无录音时用连接词/从句标记数代替句长项。
-   在修正前，`f_msl` 只能用于手动输入的场景。
+   **实现【自定，已落地】**：句数 ≥2（有标点）直接用；只有录音时用 `1 + pause_count` 估句数（上限 `word_count/4`）；
+   两者都没有则丢弃句长项，把它 0.35 的权重让给从句标记（MTLD 0.45 + 从句 0.55）。
+   报告里会写清句数是从标点来还是从停顿估的（`sentence_source`）。
 2. **MTLD 对短文本不稳**：MTLD 的原始研究建议文本长度 ≥100 词，且对长度仍有依赖【文献，McCarthy & Jarvis 2010】。
    本作品单轮多为 10–40 词，整场累计可能才 100 词左右。
    **规则【自定】**：整场用户总词数 < 50 时，词汇多样性回退到 TTR（并按词数标注「样本过短」）；
@@ -238,12 +240,15 @@ S_task_final = 0.6·S_task_rule + 0.4·S_pragmatic_llm     # 40% 来自语用得
 
 ### 3.6 规则分汇总
 
-| 维度 | 规则分来源 | 无语音时 |
-|---|---|---|
-| pronunciation | 无（仅模型 + 代理信号） | 同 |
-| fluency | §3.2 | `None` |
-| grammar_vocab | §3.3（范围）+ 纠错错误率（准确度） | 可用（MTLD 回退 TTR） |
-| task_completion | §3.4 清单命中率 | 可用（文本判定） |
+| 维度 | 规则分来源 | 无语音时 | 融合权重（规则:模型） |
+|---|---|---|---|
+| pronunciation | 无（仅模型 + 代理信号），报告写「无规则证据」 | 同 | 0 : 1 |
+| fluency | §3.2（语速/停顿/填充词） | `None`，只用模型分并标「无语音证据」 | 0.5 : 0.5 |
+| grammar_vocab | §3.3（只测**语言范围**；准确度只有模型能给） | 可用（MTLD 回退，句长项可弃） | 0.35 : 0.65 |
+| task_completion | §3.4 清单命中率（只测「有没有做」；得体性交给模型） | 可用（文本判定） | 0.6 : 0.4 |
+
+**准确度这一块目前没有规则分**：逐句纠错还没有错误分类，所以数不出错误率，语法准确度完全由模型给。
+这是 P1 的活（错误分类 + 错误率），做之前不要在文档里假装有。
 
 ---
 
@@ -252,9 +257,11 @@ S_task_final = 0.6·S_task_rule + 0.4·S_pragmatic_llm     # 40% 来自语用得
 ### 4.1 单维融合
 
 ```
-若 rule 可用:  final = 0.5·S_llm + 0.5·S_rule
+若 rule 可用:  final = (1−w)·S_llm + w·S_rule      # w 见 §3.6
 若 rule 缺失:  final = S_llm，并在报告标「本维度无规则证据」
 ```
+
+先按权重取加权平均，再套下面的钳制（钳制作用在加权结果上，不是替换加权结果的计算过程）。
 
 **只做单向钳制（防虚高）【自定】**：
 
@@ -265,6 +272,10 @@ S_task_final = 0.6·S_task_rule + 0.4·S_pragmatic_llm     # 40% 来自语用得
 
 理由：评分产品最伤信任的是「虚高」；规则分偏低时更可能是规则没覆盖到（比如内容很好但词表没命中），
 所以只压不抬。所有钳制必须在报告里可见，不能静默改分。
+
+**可复现**：每次融合都把 `model_score`（模型原分）、`rule_score`、`final_score`、`clamped`、`clamp_reason`
+和参与计算的输入（wpm、停顿占比、填充词占比、MTLD、清单命中）一起写进 `scoring_json` 落库，
+报告页「评分依据（可复现）」逐维展示。压分之后模型原分不会丢，答辩时能当场说明哪一维被压、压了多少。
 
 ### 4.2 取整规则（给 `validate.py` 用）
 
@@ -402,6 +413,9 @@ D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
 |---|---|---|---|---|
 | 1 | 10-29 | `f_mtld` 区间 | 25→0 / 60→1 改为 30→0 / 90→1 | 73 词 B1 普通段落实测 MTLD=93.26，旧锚顶格；仍属【自定】，待真人样本校准 |
 | 2 | 10-29 | 填充词判定 | 词表命中即计 → 硬词直计、软标记按位置 | 点单场景 `I'd like a latte` 被误计（3 句实测旧逻辑 3/3 假阳性，新逻辑 0/3） |
+| 3 | 10-29 | 从句标记匹配 | 子串匹配 → 整词匹配 | `although` 里的 `though` 被重复计：2 个标记算成 3 个，字数越长的句子越虚高 |
+| 4 | 10-29 | 规则权重 | 语法维度统一 0.5 → 语法规则 0.35、任务 0.6 | 语法规则分只测「语言范围」，不测准确度；任务清单只测「有没有做」，不测得体性，权重给模型多留一点 |
+| 5 | 10-29 | 钳制位置 | 钳制加权结果 → 先加权再钳制 | 否则 0.5/0.5 下永远差不到 20 分，钳制形同虚设 |
 
 ---
 
@@ -418,15 +432,18 @@ D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
 | `backend/app/services/report_view.py` | `report_out()` 统一报告出参，`sessions` 与 `reports` 两个路由共用 | ✅ 已完成 |
 | `backend/app/schemas.py` | `ReportOut` 增加 `band / cefr / source / bands`，`total_score` 可空 | ✅ 已完成 |
 | `frontend/src/views/Report.vue` | 显示「B1 · 雅思 5.0」；每维显示 band；降级横幅；空改写不显示删除线 | ✅ 已完成 |
-| `backend/app/services/rules.py` | 按 §3 计算规则子分 + 依据，与模型分融合、钳制 | ⏳ 待做（P0-1 的下一半） |
-| `frontend/src/views/Report.vue` 每维「依据」 | wpm / 停顿 / 清单命中的展开说明 | ⏳ 依赖 rules.py |
+| `backend/app/services/rules.py` | 规则子分（流利度/复杂度/任务清单）、只压不抬的融合、`scoring_json` 留原值 | ✅ 已完成 |
+| `frontend/src/views/Report.vue` 每维「依据」 | 模型分 / 规则分 / 最终分 / 钳制原因 / 输入特征展开 | ✅ 已完成 |
+| 发音的可测代理（confidence、同句重读稳定性） | 前端上报 + 相关性实验 | ⏳ 未做（§3.5） |
+| 逐句纠错的错误分类与错误率 | 语法准确度规则分 | ⏳ 未做（P1） |
 | `docs/validation.md` | 补 CEFR 档 kappa 口径与 0.61 验收线 | ✅ 已完成 |
 
 **已完成部分的实测**（可复跑）：
 
 - `bands.py`：39 例换算全过（含 5.25→5.5、9.5→9.0、39 分→无 band）。
-- 后端三模式：mock（12 项断言）、真实模型（17 项断言）、旧库迁移（补 4 列、旧报告仍可读）。
-- 真实模型那一次：总分 62、band 5.0、B1，四维 band 都落在 0.5 步长上，改写原句确实是用户说过的话。
+- `rules.py`：24 项单测全过（含「模型虚高 25 分被压回规则+10」、模型偏低只标记不抬、无语音时流利度不用模型硬凑）。
+- 后端三模式：mock（12 项断言）、真实模型（33 项断言，含每个维度留了模型原分）、旧库迁移（补 5 列、旧报告仍可读）。
+- 真实模型那一次：模型四维 band 5.0–6.0，融合后总分与档位重算一致，`scoring_json` 里每维都能看到 model/rule/final 三个数。
 
 ---
 
@@ -434,5 +451,6 @@ D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
 
 - 不是雅思官方评分，band 为模型 + 规则的估算。
 - 不是音素级发音测评；发音维度只有文本推断和转写置信度代理。
+- **语法准确度目前没有规则分**，只有模型判断；规则分只测语言范围（§3.6）。
 - 规则权重在**真实标注数据上尚未校准**，§3 全部数值为初版【自定】。
 - n < 20 不做任何一致性结论；`demo_data.csv` 的合成结果不算证据。
