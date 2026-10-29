@@ -161,7 +161,7 @@ async function deleteAccount() {
   }
   accountState.value = { running: true, error: '' }
   try {
-    await api.delete('/me/account')
+    await api.delete('/me/account', { data: { confirm: accountWord.value.trim() } })
     settings.clear()
     auth.logout()
     router.push('/login')
