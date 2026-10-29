@@ -83,7 +83,12 @@ async function testKey() {
     if (data.ok) {
       testState.value = { running: false, ok: true, message: `连通 · 模型 ${data.model || '—'} · ${data.latency_ms ?? '—'} ms` }
     } else {
-      const why = data.error_kind === 'invalid_key' ? '密钥无效或被拒绝' : data.error_kind === 'unavailable' ? '服务不可达或超时' : '调用失败'
+      const labels = {
+        invalid_key: '密钥无效或被拒绝',
+        timeout: '请求超时',
+        unreachable: '服务不可达',
+      }
+      const why = labels[data.error_kind] || '调用失败'
       testState.value = { running: false, ok: false, message: `${why}${data.error ? '：' + data.error : ''}` }
     }
   } catch (e) {
@@ -127,11 +132,11 @@ async function migrateStorage() {
   migrating.value = true
   migrateTip.value = { ok: null, message: '正在处理…' }
   try {
-    const { data } = await api.put('/admin/storage', {
-      path: newPath.value.trim(),
-      admin_key: adminKey.value.trim(),
-      copy_existing: copyExisting.value,
-    })
+    const { data } = await api.put(
+      '/admin/storage',
+      { path: newPath.value.trim(), copy_existing: copyExisting.value },
+      { headers: { 'X-Admin-Key': adminKey.value.trim() } }
+    )
     migrateTip.value = {
       ok: true,
       message: `已写入 ${data.path || newPath.value}${data.copied_bytes ? `（复制了 ${Math.round(data.copied_bytes / 1024)} KB）` : ''}，重启后端后生效。`,
