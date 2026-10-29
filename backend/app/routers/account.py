@@ -65,7 +65,7 @@ def delete_my_account(
     防止别的调用方误删）。删完后这个 token 对应不到用户，之后任何请求一律 401。
     """
     confirm = (body.confirm if body else None) or ""
-    if confirm not in ("注销", "删除"):
+    if confirm != "注销":
         raise HTTPException(status_code=400, detail="注销不可恢复，请输入「注销」确认")
 
     deleted_sessions, deleted_turns, deleted_reports = _delete_user_data(db, user.id)
