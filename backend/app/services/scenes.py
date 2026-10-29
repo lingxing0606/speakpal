@@ -62,3 +62,44 @@ def public_scenes():
         {"id": s["id"], "name": s["name"], "icon": s["icon"], "desc": s["desc"]}
         for s in SCENES
     ]
+
+
+# 句型脚手架：A2 卡住时给三种说法，用完不扣分
+SCENE_FRAMES = {
+    "job_interview": [
+        {"en": "I'm currently studying ... at ...", "zh": "我目前在……读……"},
+        {"en": "I worked on a project where ...", "zh": "我做过一个项目，在项目里……"},
+        {"en": "My role was to ...", "zh": "我的职责是……"},
+    ],
+    "cafe_order": [
+        {"en": "I'd like a ..., please.", "zh": "我要一杯……，谢谢。"},
+        {"en": "Could I get that with ...?", "zh": "可以给我加……吗？"},
+        {"en": "How much is that?", "zh": "一共多少钱？"},
+    ],
+    "ielts_part1": [
+        {"en": "I live in ... , which is ...", "zh": "我住在……，那里……"},
+        {"en": "The main reason is that ...", "zh": "主要原因是……"},
+        {"en": "For example, ...", "zh": "比如说……"},
+    ],
+    "hotel_checkin": [
+        {"en": "I have a reservation under the name ...", "zh": "我用……的名字订了房。"},
+        {"en": "Does the room include breakfast?", "zh": "房间含早餐吗？"},
+        {"en": "What time is check-out?", "zh": "几点退房？"},
+    ],
+    "airport_checkin": [
+        {"en": "Here is my passport and booking.", "zh": "这是我的护照和订票信息。"},
+        {"en": "I'd like a window seat, please.", "zh": "我想要靠窗的座位。"},
+        {"en": "Which gate is the flight departing from?", "zh": "航班在几号登机口？"},
+    ],
+    "restaurant_order": [
+        {"en": "A table for ..., please.", "zh": "……位，谢谢。"},
+        {"en": "I'll have the ..., please.", "zh": "我要一份……。"},
+        {"en": "Could we have the bill, please?", "zh": "可以买单吗？"},
+    ],
+}
+
+
+def get_frames(scene_id: str):
+    if not get_scene(scene_id):
+        return None
+    return SCENE_FRAMES.get(scene_id, [])

@@ -81,3 +81,16 @@ class Report(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("PracticeSession", back_populates="report")
+
+
+class DrillAttempt(Base):
+    """跟读重说的每一次尝试，用来算「这句练了几遍、最好到什么程度」。"""
+
+    __tablename__ = "drill_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    report_id = Column(Integer, ForeignKey("reports.id"), nullable=False, index=True)
+    item_index = Column(Integer, nullable=False)
+    transcript = Column(Text, nullable=False)
+    similarity = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

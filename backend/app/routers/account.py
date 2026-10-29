@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
-from ..models import User
-from ..schemas import ProfileOut, ProfileUpdateIn, UserOut
+from ..models import PracticeSession, Report, User
+from ..schemas import ProfileOut, ProfileUpdateIn, RecommendationOut, UserOut
 from ..security import create_token, get_current_user, hash_password, verify_password
 from ..services.user_data import delete_user_data
 
@@ -63,6 +63,46 @@ def update_my_profile(
     if password_changed:
         out.token = create_token(user.id, user.token_version)
     return out
+
+
+@router.get("/recommendation", response_model=RecommendationOut)
+def get_recommendation(
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """按上一份报告的 band 推难度：连续练上去就自动加难。"""
+    last = (
+        db.query(PracticeSession)
+        .join(Report, Report.session_id == PracticeSession.id)
+        .filter(PracticeSession.user_id == user.id)
+        .order_by(PracticeSession.id.desc())
+        .first()
+    )
+    if not last or not last.report:
+        return RecommendationOut(
+            recommended_difficulty="medium",
+            reason="还没有带分数的记录，先从中等开始",
+        )
+    band = last.report.band
+    if band is None:
+        return RecommendationOut(
+            recommended_difficulty="medium",
+            last_scene_id=last.scene_id,
+            reason="上一份是示例报告（没有分数），先保持中等",
+        )
+    if band >= 7.0:
+        difficulty, reason = "hard", f"上次 band {band}，可以试困难档"
+    elif band >= 5.5:
+        difficulty, reason = "medium", f"上次 band {band}，保持中等"
+    else:
+        difficulty, reason = "easy", f"上次 band {band}，先用简单档把句子说完整"
+    return RecommendationOut(
+        recommended_difficulty=difficulty,
+        last_band=band,
+        cefr=last.report.cefr,
+        last_scene_id=last.scene_id,
+        reason=reason,
+    )
 
 
 @router.delete("/account")

@@ -144,3 +144,50 @@ class SessionDetailOut(BaseModel):
     turns: List[SessionTurnOut] = []
     report_id: int | None = None
     total_score: int | None = None
+
+
+class DrillItem(BaseModel):
+    index: int
+    source: str  # 用户原句里要改的那句
+    target: str  # 改写后的目标句，跟读这句
+    focus: str = ""
+    attempts: int = 0
+    best_similarity: float | None = None
+    passed: bool = False
+
+
+class DrillsOut(BaseModel):
+    report_id: int
+    pass_threshold: float
+    items: List[DrillItem] = []
+
+
+class DrillAttemptIn(BaseModel):
+    transcript: str
+
+
+class DrillAttemptOut(BaseModel):
+    index: int
+    similarity: float
+    passed: bool
+    attempts: int
+    best_similarity: float
+    feedback: str
+
+
+class SceneFrame(BaseModel):
+    en: str
+    zh: str
+
+
+class SceneFramesOut(BaseModel):
+    scene_id: str
+    frames: List[SceneFrame] = []
+
+
+class RecommendationOut(BaseModel):
+    recommended_difficulty: str  # easy | medium | hard
+    last_band: float | None = None
+    cefr: str | None = None
+    last_scene_id: str | None = None
+    reason: str

@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from .db import Base, engine
-from .routers import account, admin, auth, reports, scenes, sessions, system
+from .routers import account, admin, auth, exercises, reports, scenes, sessions, system
 
 Base.metadata.create_all(bind=engine)
 
@@ -77,6 +77,7 @@ app.include_router(sessions.router)
 app.include_router(reports.router)
 app.include_router(account.router)
 app.include_router(system.router)
+app.include_router(exercises.router)
 
 
 _ADMIN_HTML = _STATIC_DIR / "admin.html"
