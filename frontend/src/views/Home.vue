@@ -109,6 +109,7 @@ function logout() {
           </span>
         </div>
         <div class="flex items-center gap-1">
+          <router-link to="/welcome?again=1" class="sp-btn-ghost">新手引导</router-link>
           <router-link to="/history" class="sp-btn-ghost">历史记录</router-link>
           <router-link to="/settings" class="sp-btn-ghost">设置</router-link>
           <button class="sp-btn-ghost" @click="logout">退出</button>

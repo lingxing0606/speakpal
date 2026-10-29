@@ -78,8 +78,11 @@ async function submit() {
       router.push(nextPath)
       return
     }
-    // 第一次登录先走一遍引导（只跑一次），之后按密钥状态决定去首页还是设置页
-    if (mode.value === 'register' || localStorage.getItem('sp_welcomed') !== '1') {
+    // 新注册的账号、或者这台机器上还没看过引导的账号，先走一遍引导
+    const welcomedFor = localStorage.getItem('sp_welcomed') || ''
+    const isNewUser = mode.value === 'register'
+    const seenHere = welcomedFor === '1' || (!!welcomedFor && welcomedFor === (data.user?.username || ''))
+    if (isNewUser || !seenHere) {
       router.push('/welcome')
       return
     }

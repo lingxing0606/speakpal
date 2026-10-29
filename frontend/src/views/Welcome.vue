@@ -2,8 +2,10 @@
 import { useRouter } from 'vue-router'
 
 import BrandLogo from '../components/BrandLogo.vue'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const auth = useAuthStore()
 
 const steps = [
   {
@@ -27,7 +29,8 @@ const steps = [
 ]
 
 function begin() {
-  localStorage.setItem('sp_welcomed', '1')
+  // 记「哪个账号看过」，而不是一个全局的 1：同一台机器换账号还能看到引导
+  localStorage.setItem('sp_welcomed', auth.user?.username || '1')
   router.push('/')
 }
 </script>
