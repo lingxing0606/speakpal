@@ -147,9 +147,15 @@ async function clearData() {
   dataState.value = { running: true, tip: '', error: '' }
   try {
     const { data } = await api.delete('/me/data')
+    const sessions = data.deleted_sessions ?? 0
+    const reports = data.deleted_reports ?? 0
     dataState.value = {
       running: false,
-      tip: `已删除 ${data.deleted_sessions ?? 0} 次练习、${data.deleted_reports ?? 0} 份报告。`,
+      // 本来就没有数据时要说清「没有可删的」，否则「已删除 0 次练习」看着像没反应
+      tip:
+        sessions === 0 && reports === 0
+          ? '这个账号还没有练习记录，没有可删除的内容。'
+          : `已删除 ${sessions} 次练习、${reports} 份报告。`,
       error: '',
     }
     confirming.value = false
@@ -201,7 +207,9 @@ function logout() {
 
     <main class="sp-shell space-y-5 py-8">
       <p v-if="onboarding" class="sp-alert-warn">
-        配一下你自己的模型密钥，之后每次练习都用它调用评分模型。没有密钥也可以先跳过，用服务端的兜底密钥。
+        配一下你自己的模型密钥，之后每次练习都用它调用评分模型。
+        <template v-if="server.env_configured === true">没有密钥也可以先跳过，用服务端的兜底密钥。</template>
+        <template v-else-if="server.env_configured === false">服务端没有配兜底密钥，不填就开不了练习。</template>
         <button class="ml-2 font-medium underline" @click="router.push('/')">先跳过</button>
       </p>
 

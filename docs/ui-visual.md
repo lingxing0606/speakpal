@@ -95,7 +95,7 @@
 | `.sp-icon-tile` | 场景图标底（44×44，`brand-50` 底 + 16 圆角） |
 | `.sp-mic-pulse` | 录音呼吸圈（`::after` 1.6s 扩散，`prefers-reduced-motion` 下自动关闭） |
 
-品牌标：`components/BrandMark.vue` 只负责尺寸与字标排版，图形直接引用 `frontend/public/logo-mark.svg`（由 logo设计师 维护，favicon 用 `/favicon.svg`），**换色改形只改 SVG，全站自动生效**。当前待办：SVG 里是靛蓝 `#4F46E5`，需换成品牌青 `#14806F`（反白版同步换），已同步给 logo设计师。
+品牌标：`components/BrandLogo.vue` 只负责挑版本、尺寸与字标排版（≥32px 带星标、<32px 用居中简化版、深色底反白），图形只有一份真源 `frontend/public/*.svg`（由 logo设计师 维护，favicon 用 `/favicon.svg`），**换色改形只改 SVG，全站自动生效**；完整规范见 `docs/logo.md`。
 
 ## 6 页面规范
 
