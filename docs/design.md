@@ -109,6 +109,9 @@ speakpal/
 - 顶部：场景名 + 当前轮次（如 2/4）
 - 对话区：AI 气泡在左、用户气泡在右，逐条出现
 - 麦克风按钮：点击开始录音，实时显示转写文字；再点结束
+- 手动输入：切到「手动输入」后，用**页面内的输入框**提交（回车或按钮发送）。
+  **禁止用 `window.prompt` / `alert` / `confirm`**——浏览器弹窗会打断对话流，看起来也很突兀（`Practice.vue:111` 原来就是 `window.prompt`，已要求改掉）。
+- 无可用模型密钥时，点「开始练习」或「发送」都会被拦下并引导到 `/settings`（见 §13.1），不进入一段注定 mock 的对话
 - 每句 AI 气泡带「播放」按钮（speechSynthesis）
 - 底部：结束并生成报告
 
@@ -123,6 +126,15 @@ speakpal/
 - 只显示当前用户的记录
 - 列表：时间、场景、综合分
 - 点击进入该次报告
+
+### Settings 设置页（需登录）
+
+两块（「数据存储位置」已按用户要求从网页移除，见 §13.3）：
+
+- **模型密钥**：输入 → 「测试连接」→ 成功显示脱敏结果（只露后四位）→ 可删除本地密钥。key 只存 localStorage，不落库、不打日志。
+- **我的数据**：清除练习记录（手打「删除」）；注销账号（手打「注销」，账号与全部记录一起删，不可恢复）。
+
+首次登录若本浏览器与服务端都没有密钥，会引导到 `/settings?onboarding=1`，但**可以跳过**；真正拦住的是开始练习时（§13.1）。
 
 ## 6. 接口设计
 
@@ -142,11 +154,13 @@ speakpal/
 | POST | /api/stt | （可选）后端兜底转写 | 是 |
 | POST | /api/config/llm/test | 验证用户自带 API key（见 §13） | 是 |
 | GET | /api/config/llm | 服务端兜底 key 是否配置（不回显 key） | 是 |
-| GET | /api/system/storage | 数据目录/库文件/可写性（见 §13.3） | 是 |
+| GET | /api/system/storage | 数据目录/库文件/可写性（运维用，网页不展示，见 §13.3） | 是 |
 | DELETE | /api/me/data | 清除自己的练习记录（只接受 `scope=records`，见 §13.2） | 是 |
 | DELETE | /api/me/account | 注销账号：删记录 + 删用户，`confirm="注销"`（见 §13.2） | 是 |
-| DELETE | /api/admin/data | 清空全库（ADMIN_KEY） | 否（管理密钥） |
-| PUT | /api/admin/storage | 改数据目录，重启生效（ADMIN_KEY） | 否（管理密钥） |
+| DELETE | /api/admin/data | 清空全库（ADMIN_KEY，`confirm="删除"`，`scope=account` 连用户） | 否（管理密钥） |
+| PUT | /api/admin/storage | 改数据目录，重启生效（运维用，网页不展示） | 否（管理密钥） |
+| PATCH | /api/admin/users/{id} | 改某用户的昵称 / 密码（ADMIN_KEY） | 否（管理密钥） |
+| DELETE | /api/admin/users/{id} | 删某用户及其全部练习数据（ADMIN_KEY） | 否（管理密钥） |
 
 除 `/api/auth/register`、`/api/auth/login` 外，其余接口都要带 `Authorization: Bearer <token>`，并按 token 里的 user_id 隔离数据。
 
@@ -291,7 +305,7 @@ System prompt 模板：
 
 三件事：用户自带 API key、清除数据、显示/更改数据位置。三条都不进评分链，可独立实现与验收。
 
-状态：前端已在 `86fc0bd` 落地（`/settings` 三段 + 请求头拦截器 + 可跳过的引导）；后端接口按本节契约实现中。
+状态：后端已落地（`4e78966` 密钥层、`7592fc5` 数据位置 + 清数据/注销）；前端除「数据存储位置」那块外已在 `86fc0bd` / `4b344ff` 落地，该块按用户 11:32 要求移除。
 本节按「代码优先」定稿过一轮：key 与管理密钥都走请求头，迁移参数是 `{path, copy_existing}`，原因字段是 `error_kind` / `mock_reason`。
 
 ### 13.1 用户自带 API key
@@ -334,10 +348,17 @@ System prompt 模板：
 |---|---|---|
 | `DELETE /api/me/data` | 登录用户 | 只删自己 `user_id` 的 sessions / turns / reports（只接受 `scope=records`） |
 | `DELETE /api/me/account` | 登录用户 | 删记录 + 删 `users` 行，注销账号 |
-| `DELETE /api/admin/data` | `X-Admin-Key` 头（错密钥 → **403**） | 清全库，演示前重置用 |
+| `DELETE /api/admin/data` | `X-Admin-Key` 头（错密钥 → **403**） | 清全库，演示前重置用；`scope=account` 连 `users` 一起清空 |
+| `DELETE /api/admin/users/{id}` | 同上 | 管理员删单个用户及其全部练习数据 |
+| `PATCH /api/admin/users/{id}` | 同上 | 管理员改单个用户的昵称 / 密码（不需要旧密码） |
 
 - `/api/me/data` 响应：`{"deleted_sessions": 3, "deleted_turns": 12, "deleted_reports": 3, "deleted_account": 0, "scope": "records"}`。
   传 `scope=account` 要回 **400** 并指向 `/api/me/account`——**注销只有一个入口**，不要两条路各做一套。
+- `/api/admin/data`：body `{"confirm": "删除", "scope": "records" | "account"}`，`confirm` 不对返 400；`scope=account` 会连 `users` 一起删
+  （响应 `{deleted_users, deleted_sessions, deleted_turns, deleted_reports, scope}`）。**删行不删 `.db` 文件**：engine 握着旧文件，删文件会让新连接建出空库、表都没有。
+  用户要求「本次清空所有用户数据」时用这个接口的 `scope=account`，或直接删库文件后让后端重建，别手改表。
+- `/api/admin/users/{id}`：`PATCH` body `{"nickname"?, "password"?}`，两项都没有返 400，返回 `{id, username, nickname, password_changed}`；
+  `DELETE` 不存在返 404，返回 `{deleted_account, deleted_sessions, deleted_turns, deleted_reports, user_id}`。两个都是不可逆操作，前端不做二次确认就别接。
 - 账号注销（用户已确认）：`DELETE /api/me/account`，body `{"confirm": "注销"}`。
   服务端校验 `confirm == "注销"`（`account.py:68`），不符返 400——**「删除」也放行的那版已收紧（`5fdbbdd`），现在只认「注销」**。
   删完后 `users` 行没了，该用户旧 token 一律 401。级联顺序：报告 → 对话轮次 → 会话 → 用户，同一事务提交，不留孤儿行。
@@ -348,7 +369,11 @@ System prompt 模板：
 - 两个确认词别串：清记录是「删除」（`Settings.vue:112`，也用于 `/admin/data`），注销是「注销」（`Settings.vue:158`）。
 - 注销不可恢复，前端二次确认要显示账号名与影响范围（`Settings.vue:320` 已做）。
 
-### 13.3 数据位置：显示与更改
+### 13.3 数据位置：显示与更改（**网页不再提供**，仅运维用）
+
+- 用户 11:32 要求：**前端删除「数据存储位置」界面**（`Settings.vue` 里显示路径/大小/迁移的那块），网页不该暴露服务器目录。
+  后端接口保留，只给命令行/管理用途；不要因为前端删了就把下面的契约当成作废。
+- 如果后续决定连后端接口一起去掉，说一声，届时删这一节与 §6 表里两行，别留半套。
 
 `GET /api/system/storage`（登录即可，方便排错）→
 ```json
