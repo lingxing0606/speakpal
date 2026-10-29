@@ -325,7 +325,7 @@ def apply_to_report(data: dict, features: dict, scene_id: str, user_text: str) -
             model_scores["pronunciation"],
             None,
             0.0,
-            note="发音由模型依转写推断，无规则证据（本项目不做声学测评）",
+            note="发音由模型依转写推断（本项目不做声学测评）",
         )
         final_scores["pronunciation"] = detail["pronunciation"]["final_score"]
 
