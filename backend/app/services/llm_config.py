@@ -81,3 +81,49 @@ class UserKeyInvalid(Exception):
     def __init__(self, message: str = "模型密钥无效或被拒绝，请到「设置」更换密钥后再试"):
         self.message = message
         super().__init__(message)
+
+
+# ---------------------------------------------------------------- TTS（可选）
+@dataclass(frozen=True)
+class TTSConfig:
+    api_key: str
+    base_url: str
+    model: str
+    voice: str
+    key_source: str  # user | env | none
+
+    @property
+    def configured(self) -> bool:
+        return self.key_source != "none"
+
+
+def build_tts_config(
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+    voice: str | None = None,
+) -> TTSConfig:
+    user_key = _clean(api_key)
+    env_key = (settings.tts_api_key or "").strip()
+    if user_key:
+        key, source = user_key, "user"
+    elif env_key:
+        key, source = env_key, "env"
+    else:
+        key, source = "", "none"
+    return TTSConfig(
+        api_key=key,
+        base_url=_clean(base_url) or settings.tts_base_url,
+        model=_clean(model) or settings.tts_model,
+        voice=_clean(voice) or settings.tts_voice,
+        key_source=source,
+    )
+
+
+def get_tts_config(
+    x_tts_key: str | None = Header(default=None, alias="X-TTS-Key"),
+    x_tts_base_url: str | None = Header(default=None, alias="X-TTS-Base-URL"),
+    x_tts_model: str | None = Header(default=None, alias="X-TTS-Model"),
+    x_tts_voice: str | None = Header(default=None, alias="X-TTS-Voice"),
+) -> TTSConfig:
+    return build_tts_config(x_tts_key, x_tts_base_url, x_tts_model, x_tts_voice)

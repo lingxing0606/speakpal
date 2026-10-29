@@ -128,6 +128,8 @@ class StorageIn(BaseModel):
 class AdminDeleteIn(BaseModel):
     scope: str = "records"  # records | account
     confirm: str | None = None
+    # 只清某一个用户的练习记录；传了它就不能同时删账号（删账号走 DELETE /admin/users/{id}）
+    user_id: int | None = None
 
 
 @router.put("/storage")
@@ -191,6 +193,28 @@ def delete_all_data(
         raise HTTPException(status_code=400, detail="请输入「删除」两个字确认")
     if scope not in ("records", "account"):
         raise HTTPException(status_code=400, detail="scope 只能是 records 或 account")
+
+    # 按单个用户清记录：管理台每行的「清空数据」走这条，账号保留
+    if body is not None and body.user_id is not None:
+        if scope != "records":
+            raise HTTPException(
+                status_code=400,
+                detail="按用户清理只能传 scope=records；要连账号一起删请用 DELETE /api/admin/users/{id}",
+            )
+        target = db.get(User, body.user_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        d_sessions, d_turns, d_reports, d_drills = delete_user_data(db, body.user_id)
+        db.commit()
+        return {
+            "deleted_users": 0,
+            "deleted_sessions": d_sessions,
+            "deleted_turns": d_turns,
+            "deleted_reports": d_reports,
+            "deleted_drill_attempts": d_drills,
+            "scope": "records",
+            "user_id": body.user_id,
+        }
 
     deleted_drills = db.query(DrillAttempt).delete(synchronize_session=False)
     deleted_reports = db.query(Report).delete(synchronize_session=False)

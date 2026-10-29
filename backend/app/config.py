@@ -57,6 +57,11 @@ class Settings:
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
     llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     llm_model: str = os.getenv("LLM_MODEL", "deepseek-chat")
+    # 语音合成（可选）：用的是 OpenAI 兼容的 /audio/speech，不填就走浏览器内置朗读
+    tts_api_key: str = os.getenv("TTS_API_KEY", "")
+    tts_base_url: str = os.getenv("TTS_BASE_URL", "https://api.openai.com/v1")
+    tts_model: str = os.getenv("TTS_MODEL", "tts-1")
+    tts_voice: str = os.getenv("TTS_VOICE", "alloy")
     admin_key: str = os.getenv("ADMIN_KEY", "admin123")
 
 
