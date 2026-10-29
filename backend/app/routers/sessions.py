@@ -88,6 +88,19 @@ def add_turn(
     audio_json = (
         json.dumps(body.audio.model_dump(), ensure_ascii=False) if body.audio else "{}"
     )
+
+    # 先把这一轮拼进内存里的 history，模型调用成功后才落库。
+    # 否则 502 之后用户那句已经写进 turns，换好 key 重试会在对话里出现两遍。
+    history = [{"role": t.role, "content": t.content} for t in sess.turns]
+    history.append({"role": "user", "content": body.transcript})
+    user_count = sum(1 for t in history if t["role"] == "user")
+
+    try:
+        reply = chat_reply(scene, sess.difficulty, history, user_count, llm)
+    except UserKeyInvalid:
+        db.rollback()
+        return key_invalid_response()
+
     db.add(
         Turn(
             session_id=sess.id,
@@ -96,16 +109,6 @@ def add_turn(
             audio_json=audio_json,
         )
     )
-    db.commit()
-    db.refresh(sess)
-
-    history = [{"role": t.role, "content": t.content} for t in sess.turns]
-    user_count = sum(1 for t in history if t["role"] == "user")
-    try:
-        reply = chat_reply(scene, sess.difficulty, history, user_count, llm)
-    except UserKeyInvalid:
-        return key_invalid_response()
-
     db.add(Turn(session_id=sess.id, role="ai", content=reply))
     db.commit()
 
