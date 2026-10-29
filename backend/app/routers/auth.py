@@ -21,7 +21,7 @@ def register(body: RegisterIn, db: OrmSession = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    return TokenOut(token=create_token(user.id), user=UserOut.model_validate(user))
+    return TokenOut(token=create_token(user.id, user.token_version), user=UserOut.model_validate(user))
 
 
 @router.post("/login", response_model=TokenOut)
@@ -29,7 +29,7 @@ def login(body: LoginIn, db: OrmSession = Depends(get_db)):
     user = db.query(User).filter(User.username == body.username).first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=400, detail="账号或密码错误")
-    return TokenOut(token=create_token(user.id), user=UserOut.model_validate(user))
+    return TokenOut(token=create_token(user.id, user.token_version), user=UserOut.model_validate(user))
 
 
 @router.get("/me", response_model=UserOut)

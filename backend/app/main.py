@@ -37,10 +37,21 @@ def _ensure_schema():
                     conn.execute(text(f"ALTER TABLE reports ADD COLUMN {name} {ddl}"))
     if "turns" in tables:
         cols = {c["name"] for c in insp.get_columns("turns")}
-        if "audio_json" not in cols:
+        turn_cols = {
+            "audio_json": "TEXT DEFAULT '{}'",
+            # 旧对话默认按录音算（当时只有录音入口）
+            "input_mode": "VARCHAR(8) DEFAULT 'voice'",
+        }
+        for name, ddl in turn_cols.items():
+            if name not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE turns ADD COLUMN {name} {ddl}"))
+    if "users" in tables:
+        cols = {c["name"] for c in insp.get_columns("users")}
+        if "token_version" not in cols:
             with engine.begin() as conn:
                 conn.execute(
-                    text("ALTER TABLE turns ADD COLUMN audio_json TEXT DEFAULT '{}'")
+                    text("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0")
                 )
 
 

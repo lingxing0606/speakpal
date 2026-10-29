@@ -227,6 +227,8 @@ def update_user(
         target.nickname = nickname
     if password:
         target.password_hash = hash_password(password)
+        # 管理员重置密码后，该用户所有已登录设备立即失效
+        target.token_version = int(target.token_version or 0) + 1
     db.commit()
     db.refresh(target)
     return {

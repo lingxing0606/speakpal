@@ -28,6 +28,12 @@ class TokenOut(BaseModel):
     user: UserOut
 
 
+class ProfileOut(UserOut):
+    """改密码会签发新 token：旧 token 立刻失效，当前设备用这个继续。"""
+
+    token: str | None = None
+
+
 class ProfileUpdateIn(BaseModel):
     """自己改资料：昵称直接改；改密码必须给出旧密码。"""
 
@@ -69,6 +75,8 @@ class AudioMeta(BaseModel):
 class TurnIn(BaseModel):
     transcript: str
     audio: AudioMeta | None = None
+    # voice | typed。不传就按有没有音频推断（前端打字时 audio 为空）
+    input_mode: str | None = None
 
 
 class TurnOut(BaseModel):
@@ -110,6 +118,9 @@ class HistoryItem(BaseModel):
     status: str = "active"  # active | finished
     report_id: int | None = None
     total_score: int | None = None
+    # 这一场里录音/打字各说几句，历史卡片可以直接标「有打字」
+    voice_turns: int = 0
+    typed_turns: int = 0
     created_at: str
 
 
@@ -117,6 +128,7 @@ class SessionTurnOut(BaseModel):
     id: int
     role: str  # ai | user
     content: str
+    input_mode: str = "voice"  # ai 轮恒为 voice，无意义
     created_at: str
 
 

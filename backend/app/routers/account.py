@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
 from ..models import User
-from ..schemas import ProfileUpdateIn, UserOut
-from ..security import get_current_user, hash_password, verify_password
+from ..schemas import ProfileOut, ProfileUpdateIn, UserOut
+from ..security import create_token, get_current_user, hash_password, verify_password
 from ..services.user_data import delete_user_data
 
 router = APIRouter(prefix="/api/me", tags=["me"])
@@ -29,30 +29,40 @@ class DeleteAccountIn(BaseModel):
     confirm: str | None = None
 
 
-@router.patch("/profile", response_model=UserOut)
+@router.patch("/profile", response_model=ProfileOut)
 def update_my_profile(
     body: ProfileUpdateIn,
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
 ):
-    """改昵称或密码。改密码必须带当前密码，防止拿着别人电脑直接改。"""
+    """改昵称或密码。改密码必须带当前密码，防止拿着别人电脑直接改。
+
+    改密码会让 `token_version` +1：其他设备上签发的 token 立即 401，
+    当前设备拿到响应里新签发的 `token` 继续用，不用重新登录。
+    """
     nickname = (body.nickname or "").strip()
     password = body.password or ""
     if not nickname and not password:
         raise HTTPException(status_code=400, detail="昵称和密码至少改一项")
 
+    password_changed = False
     if password:
         if not body.current_password:
             raise HTTPException(status_code=400, detail="改密码需要提供当前密码")
         if not verify_password(body.current_password, user.password_hash):
             raise HTTPException(status_code=400, detail="当前密码不正确")
         user.password_hash = hash_password(password)
+        user.token_version = int(user.token_version or 0) + 1
+        password_changed = True
     if nickname:
         user.nickname = nickname
 
     db.commit()
     db.refresh(user)
-    return UserOut.model_validate(user)
+    out = ProfileOut.model_validate(user)
+    if password_changed:
+        out.token = create_token(user.id, user.token_version)
+    return out
 
 
 @router.delete("/account")

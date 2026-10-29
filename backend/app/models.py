@@ -13,6 +13,8 @@ class User(Base):
     username = Column(String(64), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     nickname = Column(String(64), default="")
+    # 改密码时 +1，让其他设备上签发的 token 立即失效
+    token_version = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     sessions = relationship("PracticeSession", back_populates="user")
@@ -50,6 +52,8 @@ class Turn(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
     role = Column(String(8), nullable=False)  # ai | user
     content = Column(Text, nullable=False)
+    # user 轮的输入方式：voice（录音）/ typed（打字），报告据此决定哪些维度能算
+    input_mode = Column(String(8), default="voice")
     audio_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow)
 
