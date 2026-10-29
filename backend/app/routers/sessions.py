@@ -34,6 +34,9 @@ KEY_REQUIRED_BODY = {
     "detail": "还没有接入模型密钥",
 }
 
+# 单轮回答的长度上限：再长就说明不是一句话，前端也不好展示
+MAX_TRANSCRIPT_CHARS = 2000
+
 
 def key_invalid_response() -> JSONResponse:
     """用户自己的密钥被拒：502 + key_invalid，明确让人去换 key，不降级。"""
@@ -84,6 +87,15 @@ def add_turn(
     if not llm.configured:
         return key_required_response()
 
+    transcript = (body.transcript or "").strip()
+    if not transcript:
+        raise HTTPException(status_code=400, detail="这一轮没有听到内容，请再说一遍或手动输入")
+    if len(transcript) > MAX_TRANSCRIPT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单轮回答太长了（上限 {MAX_TRANSCRIPT_CHARS} 字符），可以分两句说",
+        )
+
     scene = get_scene(sess.scene_id)
     audio_json = (
         json.dumps(body.audio.model_dump(), ensure_ascii=False) if body.audio else "{}"
@@ -92,7 +104,7 @@ def add_turn(
     # 先把这一轮拼进内存里的 history，模型调用成功后才落库。
     # 否则 502 之后用户那句已经写进 turns，换好 key 重试会在对话里出现两遍。
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
-    history.append({"role": "user", "content": body.transcript})
+    history.append({"role": "user", "content": transcript})
     user_count = sum(1 for t in history if t["role"] == "user")
 
     try:
@@ -105,7 +117,7 @@ def add_turn(
         Turn(
             session_id=sess.id,
             role="user",
-            content=body.transcript,
+            content=transcript,
             audio_json=audio_json,
         )
     )
@@ -138,8 +150,11 @@ def finish_session(
 
     scene = get_scene(sess.scene_id)
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
-    user_text = " ".join(t["content"] for t in history if t["role"] == "user")
     user_turns = [t for t in sess.turns if t.role == "user"]
+    if not user_turns:
+        # 一句没说就出报告，只会拿到一份“没有可展示的句子”的空报告，没有意义
+        raise HTTPException(status_code=400, detail="还没有任何回答，先至少聊一轮再生成报告")
+    user_text = " ".join(t["content"] for t in history if t["role"] == "user")
     audio_metas = [json.loads(t.audio_json or "{}") for t in user_turns]
 
     # 先算可测特征，再打分：规则子分要拿 features 才能和模型分融合
