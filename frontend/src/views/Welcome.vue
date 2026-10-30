@@ -29,6 +29,16 @@ const steps = [
 ]
 
 function begin() {
+  // 这次浏览里已经看过介绍，登录/注册后就不再自动弹一遍
+  try {
+    sessionStorage.setItem('sp_intro_seen', '1')
+  } catch {
+    // 隐私模式下 sessionStorage 可能不可用，忽略
+  }
+  if (!auth.token) {
+    router.push('/login')
+    return
+  }
   // 记「哪个账号看过」，而不是一个全局的 1：同一台机器换账号还能看到引导
   localStorage.setItem('sp_welcomed', auth.user?.username || '1')
   router.push('/')
@@ -74,8 +84,10 @@ function begin() {
       </div>
 
       <div class="mt-8 flex flex-col items-center gap-3">
-        <button class="sp-btn-primary w-full max-w-xs py-3" @click="begin">开始第一次练习</button>
-        <p class="text-xs text-ink-mute">这段引导只出现这一次，之后登录直接进首页。</p>
+        <button class="sp-btn-primary w-full max-w-xs py-3" @click="begin">
+          {{ auth.token ? '开始第一次练习' : '开始使用（先注册或登录）' }}
+        </button>
+        <p class="text-xs text-ink-mute">这段引导只出现一次；之后从首页右上角「新手引导」还能再看。</p>
       </div>
     </div>
   </div>

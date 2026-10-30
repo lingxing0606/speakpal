@@ -79,12 +79,19 @@ async function submit() {
       return
     }
     // 新注册的账号、或者这台机器上还没看过引导的账号，先走一遍引导；
-    // 旧版全局标记 '1' 没有用户名，当「未知」处理，让老账号也能看一次
+    // 旧版全局标记 '1' 没有用户名，当「未知」处理，让老账号也能看一次；
+    // 本次浏览里刚在欢迎页点过「开始使用」的，就不再弹第二遍
     const welcomedFor = localStorage.getItem('sp_welcomed') || ''
     const isNewUser = mode.value === 'register'
     const seenHere =
       !!welcomedFor && welcomedFor !== '1' && welcomedFor === (data.user?.username || '')
-    if (isNewUser || !seenHere) {
+    let introSeen = false
+    try {
+      introSeen = sessionStorage.getItem('sp_intro_seen') === '1'
+    } catch {
+      introSeen = false
+    }
+    if (!introSeen && (isNewUser || !seenHere)) {
       router.push('/welcome')
       return
     }
