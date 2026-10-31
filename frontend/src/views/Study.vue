@@ -19,6 +19,21 @@ const KIND_LABELS = { word: '单词', phrase: '短语', spelling: '拼写' }
 
 const current = computed(() => items.value[index.value] || null)
 const isSpelling = computed(() => (current.value?.kind || '') === 'spelling')
+
+function words(arr) {
+  return (arr || [])
+    .map((x) => (typeof x === 'string' ? x : x?.term || x?.word || ''))
+    .filter(Boolean)
+}
+
+const relatedRows = computed(() => {
+  const rel = current.value?.related || {}
+  return [
+    { label: '近义', items: words(rel.synonyms) },
+    { label: '反义', items: words(rel.antonyms) },
+    { label: '同类', items: words(rel.similar) },
+  ].filter((r) => r.items.length)
+})
 const done = computed(() => !loading.value && !current.value)
 
 async function load() {
@@ -182,6 +197,12 @@ async function sendReview(grade) {
               <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="speakTerm">听一遍</button>
             </div>
             <div class="mt-1">正确写法：<span class="font-mono font-medium">{{ current.term }}</span></div>
+            <div v-if="relatedRows.length" class="mt-2 space-y-0.5 text-xs leading-5">
+              <div v-for="r in relatedRows" :key="r.label">
+                <span class="text-ink-mute">{{ r.label }}</span>
+                <span class="ml-1 text-ink-soft">{{ r.items.join('、') }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -206,6 +227,12 @@ async function sendReview(grade) {
             <p v-if="current.example" class="rounded-xl bg-canvas px-3 py-2 text-sm leading-6 text-ink-soft">
               {{ current.example }}
             </p>
+            <div v-if="relatedRows.length" class="rounded-xl bg-canvas px-3 py-2 text-xs leading-6">
+              <div v-for="r in relatedRows" :key="r.label">
+                <span class="text-ink-mute">{{ r.label }}</span>
+                <span class="ml-1 text-ink-soft">{{ r.items.join('、') }}</span>
+              </div>
+            </div>
           </div>
         </div>
 

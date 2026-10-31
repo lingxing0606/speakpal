@@ -221,6 +221,44 @@ const drillResult = ref(null)
 const drillBusy = ref(false)
 let drillRecognizer = null
 
+// ---- 加入学习清单：语法/啰嗦两类后端不会自动建卡，要用户自己挑 ----
+const ERROR_LABELS = {
+  spelling: '拼写',
+  grammar: '语法',
+  stiffness: '表达僵硬',
+  wordiness: '啰嗦',
+}
+const addedMap = ref({})
+const addBusy = ref(null)
+const addError = ref({})
+
+function errorLabel(type) {
+  return ERROR_LABELS[type] || '表达'
+}
+
+async function addToStudy(fix, i) {
+  if (addedMap.value[i] || addBusy.value === i) return
+  addBusy.value = i
+  addError.value = { ...addError.value, [i]: '' }
+  try {
+    const kind = fix.error_type === 'spelling' ? 'spelling' : 'phrase'
+    await api.post('/study/items', {
+      kind,
+      term: fix.word || fix.better || fix.original,
+      context: fix.original,
+      meaning_zh: fix.reason || '',
+      example: fix.better || '',
+      related: fix.related || {},
+      source_session_id: Number(route.params.id) || null,
+    })
+    addedMap.value = { ...addedMap.value, [i]: true }
+  } catch (e) {
+    addError.value = { ...addError.value, [i]: '加入失败：' + (e?.response?.data?.detail || e.message) }
+  } finally {
+    addBusy.value = null
+  }
+}
+
 async function loadDrills() {
   try {
     const { data } = await api.get(`/sessions/${route.params.id}/drills`)
@@ -444,16 +482,30 @@ function again() {
               <span class="mt-0.5 text-[11px] font-medium text-brand-700">改写</span>
               <div class="leading-6 text-brand-700">{{ f.better }}</div>
             </div>
-            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line/70 pt-2">
-              <div class="text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
-              <button
-                v-if="drillByIndex[i]"
-                class="sp-btn-secondary shrink-0 !px-3 !py-1 text-xs"
-                @click="openDrill(drillByIndex[i])"
-              >
-                {{ drillByIndex[i].passed ? '已通过 · 再练' : '重说这句' }}
-              </button>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="sp-chip-line">{{ errorLabel(f.error_type) }}</span>
+              <span v-if="f.natural" class="text-xs leading-5 text-ink-soft">更自然：{{ f.natural }}</span>
             </div>
+            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line/70 pt-2">
+              <div class="min-w-0 text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
+              <div class="flex shrink-0 items-center gap-2">
+                <button
+                  v-if="drillByIndex[i]"
+                  class="sp-btn-secondary !px-3 !py-1 text-xs"
+                  @click="openDrill(drillByIndex[i])"
+                >
+                  {{ drillByIndex[i].passed ? '已通过 · 再练' : '重说这句' }}
+                </button>
+                <button
+                  class="sp-btn-ghost !px-3 !py-1 text-xs"
+                  :disabled="addedMap[i] || addBusy === i"
+                  @click="addToStudy(f, i)"
+                >
+                  {{ addedMap[i] ? '已加入清单' : '加入学习清单' }}
+                </button>
+              </div>
+            </div>
+            <p v-if="addError[i]" class="mt-1 text-[11px] leading-5 text-danger">{{ addError[i] }}</p>
 
             <div
               v-if="drillByIndex[i] && drillOpen === i"
