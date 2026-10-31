@@ -21,13 +21,13 @@ const kickReason = (() => {
 })()
 const kicked = !!kickReason
 const KICK_TEXTS = {
-  password_changed: '密码已修改，请用新密码重新登录（其他设备已下线）。',
+  password_changed: '密码已修改，请用新密码重新登录。',
   user_gone: '这个账号已注销，重新注册一个就能继续练。',
-  token_invalid: '登录凭证已失效，重新登录即可（练习记录还在）。',
+  token_invalid: '登录凭证已失效，重新登录即可。',
   unauthenticated: '请先登录。',
 }
 const kickText =
-  KICK_TEXTS[kickReason] || '登录状态已过期，重新登录就能接着练（练习记录还在）。'
+  KICK_TEXTS[kickReason] || '登录状态已过期，重新登录即可继续。'
 const nextPath = (() => {
   const raw = route.query.next
   const value = Array.isArray(raw) ? raw[0] : raw
@@ -172,7 +172,7 @@ async function submit() {
               <input
                 v-model="nickname"
                 class="sp-input"
-                placeholder="昵称（可选）"
+                placeholder="昵称"
                 @keyup.enter="submit"
               />
             </label>

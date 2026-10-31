@@ -23,7 +23,7 @@ const steps = [
   {
     n: '03',
     title: '拿到评分和逐句纠错',
-    desc: '按 CEFR（欧洲语言共同参考框架）和雅思量表给分，报告里有更地道的说法、中文原因和下一步练什么。',
+    desc: '按 CEFR、雅思量表给分，报告里有更地道的说法、中文原因和下一步练什么。',
     icon: 'chart',
   },
 ]
@@ -85,9 +85,8 @@ function begin() {
 
       <div class="mt-8 flex flex-col items-center gap-3">
         <button class="sp-btn-primary w-full max-w-xs py-3" @click="begin">
-          {{ auth.token ? '开始第一次练习' : '开始使用（先注册或登录）' }}
+          {{ auth.token ? '开始第一次练习' : '开始使用' }}
         </button>
-        <p class="text-xs text-ink-mute">这段引导只出现一次；之后从首页右上角「新手引导」还能再看。</p>
       </div>
     </div>
   </div>

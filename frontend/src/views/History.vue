@@ -204,7 +204,7 @@ function open(item) {
         </p>
         <div class="mt-3 flex flex-wrap items-center gap-2">
           <button class="sp-btn-primary" @click="router.push('/settings?onboarding=1')">去设置填密钥</button>
-          <button v-if="envFallback" class="sp-btn-secondary" @click="useServerKey">用服务端密钥继续（演示）</button>
+          <button v-if="envFallback" class="sp-btn-secondary" @click="useServerKey">用服务端密钥继续</button>
           <button class="sp-btn-ghost" @click="needKey = false">取消</button>
         </div>
       </div>
@@ -232,11 +232,11 @@ function open(item) {
       <div v-else class="space-y-3">
         <div v-if="curve" class="sp-card mb-4 p-5">
           <div class="flex items-baseline justify-between">
-            <div class="font-semibold text-ink">成长曲线（可比 band）</div>
+            <div class="font-semibold text-ink">成长曲线</div>
             <div class="text-xs text-ink-mute">{{ curve.count }} 次</div>
           </div>
           <p class="mt-0.5 text-[11px] leading-5 text-ink-mute">
-            两种练习用同一把尺子量（只看语言复杂度 + 语用得体性），所以打字和录音能直接比；纵轴固定雅思 3–9。
+            打字和录音用同一套标准计分，可以直接比。
           </p>
           <svg :viewBox="`0 0 ${curve.w} ${curve.h}`" class="mt-3 h-24 w-full" role="img" aria-label="可比 band 成长曲线，纵轴固定雅思 3 到 9">
             <line

@@ -4,10 +4,12 @@ import { useAuthStore } from '../stores/auth'
 import History from '../views/History.vue'
 import Home from '../views/Home.vue'
 import Login from '../views/Login.vue'
+import Notes from '../views/Notes.vue'
 import Practice from '../views/Practice.vue'
 import Pronunciation from '../views/Pronunciation.vue'
 import Report from '../views/Report.vue'
 import Settings from '../views/Settings.vue'
+import Study from '../views/Study.vue'
 import Welcome from '../views/Welcome.vue'
 
 const router = createRouter({
@@ -20,6 +22,8 @@ const router = createRouter({
     { path: '/practice/:id', component: Practice },
     { path: '/report/:id', component: Report },
     { path: '/history', component: History },
+    { path: '/study', component: Study },
+    { path: '/notes', component: Notes },
     { path: '/pronunciation', component: Pronunciation },
     { path: '/settings', component: Settings },
   ],

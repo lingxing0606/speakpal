@@ -356,7 +356,7 @@ function again() {
           v-if="isMock"
           class="sp-alert-warn mb-4"
         >
-          示例报告（本次不计分）：{{ mockHint }}
+          示例报告，本次不计分：{{ mockHint }}
           <router-link v-if="showMockSettingsLink" to="/settings" class="ml-1 font-medium underline">去设置</router-link>
         </div>
 
@@ -413,7 +413,7 @@ function again() {
           <div class="min-w-0">
             <div class="font-semibold text-ink">最该改的 {{ topFixes.length }} 句</div>
             <p class="mt-0.5 text-xs leading-5 text-ink-mute">
-              在下面「逐句纠错」里点「重说这句」，跟读相似度 ≥ {{ Math.round(drills.pass_threshold * 100) }}% 算过。
+              跟读相似度 ≥ {{ Math.round(drills.pass_threshold * 100) }}% 算过。
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -515,7 +515,7 @@ function again() {
         <div v-if="hasDetail" class="sp-card mt-4 p-6">
           <div class="flex items-start justify-between gap-3">
             <div>
-              <div class="font-semibold text-ink">评分依据（可复现）</div>
+              <div class="font-semibold text-ink">评分依据</div>
               <div class="mt-0.5 text-xs text-ink-mute">想核对分数怎么来的再展开，学习者只看分数和等级就行。</div>
             </div>
             <button class="sp-btn-ghost shrink-0 py-1.5" @click="showDetail = !showDetail">
@@ -546,7 +546,7 @@ function again() {
             </div>
 
             <div class="mt-4 rounded-xl bg-canvas p-3.5 text-[11px] leading-5 text-ink-mute ring-1 ring-line/60">
-              <div class="mb-1 font-medium text-ink-soft">综合分怎么来的（按作答模式加权）</div>
+              <div class="mb-1 font-medium text-ink-soft">综合分怎么算</div>
               <div>纯录音：发音 20 · 流利度 20 · 语法词汇（语言复杂度）30 · 任务完成度（语用得体性）30</div>
               <div>纯打字：文字表达 35 · 语法词汇（语言复杂度）35 · 任务完成度（语用得体性）30</div>
               <div>混合：发音 15 · 流利度 15 · 文字表达 20 · 语法词汇（语言复杂度）25 · 任务完成度（语用得体性）25</div>

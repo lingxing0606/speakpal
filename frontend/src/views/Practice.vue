@@ -87,7 +87,7 @@ const userTurnCount = computed(() => session.turns.filter((t) => t.role === 'use
 const progressHint = computed(() => {
   if (canFinish.value) return '聊得差不多了，可以出报告了'
   const left = 3 - userTurnCount.value
-  if (left > 0) return `再说 ${left} 句就能出报告（已说 ${userTurnCount.value} 句）`
+  if (left > 0) return `再说 ${left} 句就能出报告`
   return '可以点「结束并出报告」看评分'
 })
 
@@ -155,7 +155,7 @@ async function loadSession(id) {
     } catch (e) {
       error.value =
         e?.response?.status === 404
-          ? '这次对话找不到了（可能已被删除）。回首页重新开始一次吧。'
+          ? '这次对话找不到了，回首页重新开始一次吧。'
           : '恢复对话失败：' + (e?.response?.data?.detail || e.message)
       return
     } finally {
@@ -424,7 +424,7 @@ async function finish() {
         </p>
         <div class="mt-4 flex flex-wrap items-center gap-2">
           <button class="sp-btn-primary" @click="router.push('/settings?onboarding=1')">去设置填密钥</button>
-          <button v-if="envFallback" class="sp-btn-secondary" @click="continueWithServer">用服务端密钥继续（演示）</button>
+          <button v-if="envFallback" class="sp-btn-secondary" @click="continueWithServer">用服务端密钥继续</button>
           <button v-if="blockReason" class="sp-btn-ghost" @click="blocked = false">返回练习</button>
           <button v-else class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
         </div>

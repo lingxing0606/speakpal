@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
+import TabBar from '../components/TabBar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
 import { resetTtsProbe } from '../utils/speech'
@@ -100,9 +101,9 @@ async function testTts() {
     }
     let msg = '试听失败：连不上语音合成服务，或返回的不是音频。练习里会自动用浏览器朗读。'
     if (status === 409) msg = '试听失败：没读到你的 key，服务端也没有兜底，练习里会用浏览器朗读。'
-    else if (status === 502 && kind === 'tts_key_invalid') msg = '试听失败：key 被语音服务拒绝（401）。检查是不是复制少了字符，练习里会先用浏览器朗读。'
+    else if (status === 502 && kind === 'tts_key_invalid') msg = '试听失败：key 被语音服务拒绝了，检查是不是复制少了字符。练习里会先用浏览器朗读。'
     else if (status === 502 && kind === 'tts_unavailable') msg = '试听失败：Base URL 不可达或超时。检查地址和网络，练习里会先用浏览器朗读。'
-    else if (status === 400) msg = '试听失败：请求被拒（400），检查 Base URL 是否指向 OpenAI 兼容的 /audio/speech。'
+    else if (status === 400) msg = '试听失败：请求被拒，检查 Base URL 是否指向 OpenAI 兼容的 /audio/speech。'
     ttsTest.value = { running: false, ok: false, message: msg }
   }
 }
@@ -301,7 +302,7 @@ function logout() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-canvas">
+  <div class="min-h-screen bg-canvas pb-16 sm:pb-0">
     <header class="sp-header">
       <div class="sp-shell flex items-center justify-between py-3">
         <div class="flex items-center gap-3">
@@ -379,7 +380,7 @@ function logout() {
 <section id="key" class="sp-card scroll-mt-20 p-6">
         <h2 class="font-semibold text-ink">模型密钥</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
-          不填也能练：服务端配了兜底密钥时就用它；填了就优先用你自己的，且只存在这个浏览器里，不上传、不写数据库、不写日志。
+          只存在这个浏览器里，不上传、不写数据库、不写日志；不填就用服务端的兜底密钥。
         </p>
         <p class="mt-1 text-xs leading-5 text-ink-mute">
           没有 key？
@@ -399,18 +400,18 @@ function logout() {
               v-model="keyInput"
               type="password"
               autocomplete="off"
-              placeholder="sk-…（DeepSeek 控制台获取）"
+              placeholder="sk-…"
               class="sp-input font-mono"
             />
           </label>
 
           <div class="grid gap-3 sm:grid-cols-2">
             <label class="block text-sm">
-              <span class="mb-1.5 block text-xs font-medium text-ink-mute">Base URL（可留空用默认）</span>
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">Base URL</span>
               <input v-model="baseInput" placeholder="https://api.deepseek.com/v1" class="sp-input" />
             </label>
             <label class="block text-sm">
-              <span class="mb-1.5 block text-xs font-medium text-ink-mute">模型（可留空用默认）</span>
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">模型</span>
               <input v-model="modelInput" placeholder="deepseek-chat" class="sp-input" />
             </label>
           </div>
@@ -434,7 +435,7 @@ function logout() {
             {{ testState.message }}
           </p>
           <p class="text-xs leading-5 text-ink-mute">
-            当前：{{ settings.configured ? `已配置（${settings.masked}）` : '本浏览器未配置' }}
+            当前：{{ settings.configured ? `已配置 ${settings.masked}` : '本浏览器未配置' }}
             <span v-if="server.env_configured === true">· 服务端已配置兜底密钥</span>
             <span v-else-if="server.env_configured === false">· 服务端未配置兜底密钥</span>
             <span v-if="server.error">· 读取服务端状态失败：{{ server.error }}</span>
@@ -443,7 +444,7 @@ function logout() {
       </section>
 
 <section id="tts" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">语音合成密钥（可选）</h2>
+        <h2 class="font-semibold text-ink">语音合成</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           <span class="font-medium text-ink">这是朗读用的 key，和上面的对话密钥不是同一把</span>；填错不影响评分，只会让声音不自然。
           不填就用浏览器自带的朗读，不需要任何 key；填了会走第三方语音合成，按你自己的额度计费。
@@ -462,8 +463,7 @@ function logout() {
             rel="noopener noreferrer"
             class="font-medium text-brand-700 underline-offset-2 hover:underline"
           >语音合成文档</a>
-          ）。下面的 Base URL / 模型 / 音色留空就用上面的硅基流动默认值（CosyVoice2），一般只粘 key 就行；
-          保存时会把实际用到的值一起存下来，不会出现「保存成功但请求打到别家」。
+          ）。Base URL、模型、音色留空就用默认值，粘贴 key 保存即可。
         </p>
 
         <div class="mt-4 space-y-3">
@@ -473,22 +473,22 @@ function logout() {
               v-model="ttsInput.key"
               type="password"
               autocomplete="off"
-              placeholder="sk-…（不填则用浏览器朗读）"
+              placeholder="sk-…"
               class="sp-input font-mono"
             />
           </label>
 
           <div class="grid gap-3 sm:grid-cols-3">
             <label class="block text-sm">
-              <span class="mb-1.5 block text-xs font-medium text-ink-mute">Base URL（留空用默认）</span>
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">Base URL</span>
               <input v-model="ttsInput.base" :placeholder="ttsDefaults().base" class="sp-input" />
             </label>
             <label class="block text-sm">
-              <span class="mb-1.5 block text-xs font-medium text-ink-mute">模型（留空用默认）</span>
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">模型</span>
               <input v-model="ttsInput.model" :placeholder="ttsDefaults().model" class="sp-input" />
             </label>
             <label class="block text-sm">
-              <span class="mb-1.5 block text-xs font-medium text-ink-mute">音色（留空用默认音色）</span>
+              <span class="mb-1.5 block text-xs font-medium text-ink-mute">音色</span>
               <input v-model="ttsInput.voice" :placeholder="ttsDefaults().voice" class="sp-input" />
             </label>
           </div>
@@ -512,7 +512,7 @@ function logout() {
             {{ ttsTest.message }}
           </p>
           <p class="text-xs leading-5 text-ink-mute">
-            当前：{{ settings.ttsConfigured ? `已配置（${settings.ttsMasked}）· 朗读走第三方语音合成` : '未配置 · 使用浏览器朗读' }}
+            当前：{{ settings.ttsConfigured ? `已配置 ${settings.ttsMasked} · 朗读走第三方语音合成` : '未配置 · 使用浏览器朗读' }}
             <span v-if="server.tts_env_configured === true">· 服务端已配置兜底语音密钥</span>
           </p>
         </div>
@@ -573,7 +573,7 @@ function logout() {
       </p>
 
       <div class="pb-6 text-center">
-        <button class="sp-btn-ghost text-xs" @click="router.push('/welcome?again=1')">再看一遍新手引导（30 秒）</button>
+        <button class="sp-btn-ghost text-xs" @click="router.push('/welcome?again=1')">再看一遍新手引导</button>
       </div>
     </main>
   </div>
