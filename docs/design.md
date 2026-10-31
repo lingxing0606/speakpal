@@ -250,6 +250,7 @@ speakpal/
 | POST | /api/tts | 语音合成（可选；无 key 409，key 被拒/不可达 502，见 §13.4） | 是 |
 | DELETE | /api/me/data | 清除自己的练习记录（只接受 `scope=records`，见 §13.2） | 是 |
 | GET | /api/study/due | 今天到期的学习卡（`date(due_at) <= today`，见 §16.5） | 是 |
+| GET | /api/study/today | **复习统一队列**：按 `word → spelling → grammar → spoken → phrase` 分组，组内按 `due_at` 升序（见 §18.4） | 是 |
 | GET | /api/study/summary | 首页聚合：`{due_count, notes_count, total, word_count, phrase_count, spelling_count}`（不是单独的业务操作，见 §16.5） | 是 |
 | GET | /api/study/vocab | 词库取词：`?scope=gaokao|cet4|cet6&limit=`，只返还没建卡的词（见 §18.3） | 是 |
 | POST | /api/study/vocab/add | 把选中的词落成学习卡（按 user+term+kind 去重，**无每日上限**） | 是 |
@@ -717,7 +718,7 @@ System prompt 模板：
 1. `GET /api/study/vocab?scope=<scope>&limit=10`（不传 `scope` 用设置里的范围）→
    `{scope, name, desc, total, learned, remaining, daily_limit, used_today, remaining_today, items, scopes}`。
    `scopes` 就是三档按钮的数据（`{id, name, desc, total}`）；`items` 只给**用户还没有卡**的词。
-   `daily_limit` / `used_today` / `remaining_today` 字段**保留但不再限制**（用户要求取消每日数量限制），前端不要据此禁用按钮。
+   `daily_limit` / `used_today` / `remaining_today` 三个字段**保留但恒 `null`**（每日上限已取消），前端不要据此禁用「加入」按钮，也不要显示「今天还能学 N 个」。
 2. `POST /api/study/vocab/add` body `{scope, terms: [...]}`（或 `{scope, count: 10}`）→
    `{added, skipped, limited}`（兼容字段保留，`limited` 恒为 0）：`skipped` = 已在清单。
    **一次批量加，不要循环单条 POST**；落库为 `study_items(kind=word, source='vocab')`，`due_at` 设当天、`ease=2.5 / interval=0 / reps=0`。
@@ -736,13 +737,18 @@ System prompt 模板：
 
 | 模块 | `kind` | `source` | 数量 | 字段落法 |
 |---|---|---|---|---|
-| 语法 | `grammar` | `grammar` | 四组各 15：时态 / 冠词 / 介词 / 从句 | `term`=语法点名（≤6 字，如「一般过去时」）；`meaning_zh`=规则一句话（能独立读懂）；`context`=错例句；`example`=正确例句；`related`=相关语法点 |
-| 口语 | `phrase` | `spoken` | 60 | `term`=书面说法；`example`=更自然的口语说法；`meaning_zh`=「为什么」一句话（讲语域/语气差别，如「太正式」「更客气」）；`context`=使用场景 |
+| 语法 | `grammar` | `grammar` | 四组各 15：时态 / 冠词 / 介词 / 从句 | `term`=语法点名（≤6 字，如「一般过去时」）；`meaning_zh`=规则一句话；`context`=错例句；`example`=正确例句；`related.blank`=**挖空句**、`related.answer`=**要填的那个点** |
+| 口语 | `phrase` | `spoken` | 60 | `term`=书面说法；`example`=更自然的口语说法；`meaning_zh`=「为什么」一句话（讲语域/语气，如「太正式」「更客气」）；`context`=使用场景 |
 
-- 接口与词库同构：`GET /api/study/grammar` → `{groups:[{id,name,total}], items, learned}`；`POST /api/study/grammar/add {group, count?}` 或 `{items:[...]}`；
-  口语 `GET /api/study/spoken`、`POST /api/study/spoken/add`。同样批量加、同样按 `user_id+term+kind` 去重、同样当天到期。
-- 内容放仓库里的 JSON（`backend/app/data/grammar/*.json`、`backend/app/data/spoken/*.json`），**不联网**。
-- 文案要求：语法卡一张只教一个点，错句要真错、改句只动错的那个点；口语卡箭头两边都得是完整句子，口语侧得是母语者真会说的，别把书面句加个 "you know" 当口语。
+- **`related.blank` / `related.answer` 是语法卡判档的关键**：`blank` 是挖空后的句子、`answer` 是要填的语法点。
+  **`blank` 为空表示这张卡不挖空**（比如「删掉多余词」的卡），走整句改写判档——别把「没挖空」当 bug 排查。
+- 语法卡复习**必须传 `answer`**：填对那个点或整句正确 → `good`；只差一个词 → `hard`；其余 → `again`；不传 `answer` → **400**。
+- 口语卡 `answer` 与 `example` 做词级相似度：≥0.7 → `good`，≥0.5 → `hard`；归一化小写、中文标点、压缩空格后再比。
+- 接口与词库同构：`GET /api/study/grammar` → `{groups:[{id,name,total}], items, learned}`；`POST /api/study/grammar/add {group|ids}`；
+  口语 `GET /api/study/spoken`、`POST /api/study/spoken/add {ids|count}`。同样批量加、同样按 `user_id+term+kind` 去重、同样当天到期，全部走 §16.2 的 SRS（实测 `interval 0→1`、`reps 0→1`，不是只翻卡）。
+- **复习队列统一走 `GET /api/study/today`**：分组顺序固定 `word → spelling → grammar → spoken → phrase`，组内按 `due_at` 升序；`summary` 同时给 `grammar_count` 与 `due_word / due_spelling / due_grammar / due_spoken / due_phrase_count`，四个 tab 的数字不用前端自己算。
+- 内容放仓库里的 JSON（`backend/app/data/grammar/*.json`、`backend/app/data/spoken/*.json`），**不联网**；`tools/check_content.py` 可离线校验字段、例句含词、跨档无重复。
+- 文案要求：语法卡一张只教一个点，错句要真错、改句只动错的那个点；口语卡箭头两边都得是完整句子，口语侧得是母语者真会说的，别把书面句加句 "you know" 当口语。
 
 ### 18.5 待确认（不要按这版直接写死）
 
