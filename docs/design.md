@@ -180,7 +180,10 @@ speakpal/
 顶部四个 tab，各自只显示自己的内容；从首页对应卡片直接进到对应 tab（`/study?tab=review|new|grammar|speaking`，tab 缺失时默认复习）。
 
 - **复习**：到期队列，一次一张卡。卡分三类：拼写卡（只给中文释义 + 语境，默写判档，不显示 `term`）、单词/句型/口语卡（正面 `term` + `context`，翻面给释义、例句、近近义/同类词，三档自评）、语法卡（语法点 + 规则一句 + 正误对照，自评）。
-- **学新词**：选范围（高考 / 四级 / 六级，各「精选 200 词」）→ 取一批 → 批量加入 → 当天进复习队列。**没有每日数量上限**，选多少加多少；`daily_limit` 字段保留但不再限制（见 §18.3）。
+- **学新词**：选范围（高考 / 四级 / 六级，各「精选 200 词」）→ 选数量（10 / 20 / 30 / 全部）→ 批量加入 → 当天进复习队列。
+  **没有每日数量上限**，选多少加多少；`daily_limit` 字段保留但恒 `null`（见 §18.3）。
+  每个范围卡显示**自己**的「已学 N / 精选 200」，不共用一个总数。
+  加入后要就地给确认（绿字「已加入 10 个，1 个之前学过」/「这 10 个之前都学过」），不能只让数字悄悄变——A2 会以为按钮没反应；确认要在刷新完之后再写，别被刷新清掉。
 - **语法**：四组（时态 / 冠词 / 介词 / 从句，各 15 张），一次批加入，进同一套 SRS。
 - **口语**：60 张「书面说法 → 更自然口语说法 + 为什么」，同样可批量加入、走同一套 SRS。
 - 朗读按钮（喇叭）常驻在卡上：单词/句型/口语卡都能听（TTS 失败回落浏览器朗读，见 §13.4）。
@@ -717,7 +720,8 @@ System prompt 模板：
 
 1. `GET /api/study/vocab?scope=<scope>&limit=10`（不传 `scope` 用设置里的范围）→
    `{scope, name, desc, total, learned, remaining, daily_limit, used_today, remaining_today, items, scopes}`。
-   `scopes` 就是三档按钮的数据（`{id, name, desc, total}`）；`items` 只给**用户还没有卡**的词。
+   `scopes` 是三档按钮的数据 `{id, name, desc, total, learned}`——**每个档位都带自己的 `learned`**，不是共用一个总数（前端缺字段时按 0 显示，别显示空白）。
+   `items` 只给**用户还没有卡**的词；`limit` 默认 10、上限 200。
    `daily_limit` / `used_today` / `remaining_today` 三个字段**保留但恒 `null`**（每日上限已取消），前端不要据此禁用「加入」按钮，也不要显示「今天还能学 N 个」。
 2. `POST /api/study/vocab/add` body `{scope, terms: [...]}`（或 `{scope, count: 10}`）→
    `{added, skipped, limited}`（兼容字段保留，`limited` 恒为 0）：`skipped` = 已在清单。
