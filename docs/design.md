@@ -124,7 +124,8 @@ speakpal/
 - 6 张场景卡（图标、场景名、一句描述）：求职面试 `job_interview` / 咖啡店点单 `cafe_order` / 雅思 Part 1 `ielts_part1` / 酒店入住 `hotel_checkin` / 机场值机 `airport_checkin` / 餐厅点餐 `restaurant_order`
 - 难度选择（简单 / 中等 / 困难）
 - 开始按钮
-- **「今天要复习 N 个」卡片**：`N` 来自 `GET /api/study/summary`（一次拿到 `due_count` 与 `notes_count`，别发两个请求）；N=0 时给空状态（不摆一张空卡）。点进 `/study`
+- **「今天要复习 N 个」卡片**：`N` 来自 `GET /api/study/summary`（**只调一次**，别再分别打 `/study/due` 和 `/notes`）；N=0 时给空状态（不摆一张空卡）。
+  **取不到时不要静默当 0**：显示「暂时取不到」，否则「后端挂了」和「今天没卡」在界面上一样，用户会以为学习计划空了。点进 `/study`
 - 「历史记录」「笔记」入口
 
 ### Practice 练习页（需登录）
@@ -241,7 +242,7 @@ speakpal/
 | POST | /api/tts | 语音合成（可选；无 key 409，key 被拒/不可达 502，见 §13.4） | 是 |
 | DELETE | /api/me/data | 清除自己的练习记录（只接受 `scope=records`，见 §13.2） | 是 |
 | GET | /api/study/due | 今天到期的学习卡（`date(due_at) <= today`，见 §16.5） | 是 |
-| GET | /api/study/summary | 首页聚合：`{due_count, notes_count}`（不是单独的业务操作，见 §16.5） | 是 |
+| GET | /api/study/summary | 首页聚合：`{due_count, notes_count, total, word_count, phrase_count, spelling_count}`（不是单独的业务操作，见 §16.5） | 是 |
 | POST | /api/study/items | 新建学习卡（手动加入 / 报告页「加入学习清单」） | 是 |
 | POST | /api/study/items/{id}/review | 提交复习 `{grade: again|hard|good}` 或拼写卡 `{answer}`，推进 `due_at` | 是 |
 | DELETE | /api/study/items/{id} | 删学习卡（只能删自己的） | 是 |
@@ -625,7 +626,7 @@ System prompt 模板：
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/study/due` | 今天到期的卡（`date(due_at) <= today`，按到期时间升序） |
-| GET | `/api/study/summary` | **聚合接口**（不是第十个业务操作）：一次返回首页卡片要的数字 `{due_count, notes_count}`，省掉两次请求。口径与 `/study/due` 一致，N 必须等于它的条数 |
+| GET | `/api/study/summary` | **聚合接口**（不是第十个业务操作）：一次返回首页卡片要的数字 `{due_count, notes_count, total, word_count, phrase_count, spelling_count}`，省掉两次请求。`due_count` 的口径与 `/study/due` 完全一致（`date(due_at) <= today`），必须等于它的条数 |
 | POST | `/api/study/items` | 新建卡（手动加入 / 报告页「加入学习清单」） |
 | POST | `/api/study/items/{id}/review` | 提交一次复习：body `{grade?: "again"|"hard"|"good", answer?: "用户默写的文本"}`；传 `answer` 时由后端判档（拼写卡），否则按 `grade`（单词/句型卡自评） |
 | DELETE | `/api/study/items/{id}` | 删卡（只能删自己的） |
@@ -639,7 +640,7 @@ System prompt 模板：
 
 ### 16.6 前端落点（ui 做，依赖上面的接口）
 
-- 首页一张「今天要复习 N 个词」卡片（N=0 时给空状态，不显示一块空卡片）；点进 `/study` 做翻转卡片复习，三档按钮就是「忘了 / 模糊 / 认识」。
+- 首页一张「今天要复习 N 个」卡片（只调 `GET /api/study/summary` 一次；N=0 给空状态，请求失败给「暂时取不到」而不是 0）；点进 `/study` 做翻转卡片复习。
 - `/notes` 笔记列表 + 编辑（空状态、搜索无结果状态都要有）；报告页每条纠错旁给「加入学习清单」，拼写类给单词讲解 + 近反义/同类词，句型类给「原句 → 更自然说法 → 为什么」。
 - 文案遵守 §17：不写「（可选）」「点击后…」这类旁白，不解释机制本身。
 
