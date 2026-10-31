@@ -62,8 +62,9 @@ def default_scope() -> str:
     return DEFAULT_SCOPE if DEFAULT_SCOPE in ids else (sorted(ids)[0] if ids else DEFAULT_SCOPE)
 
 
-def scopes_out() -> list[dict]:
-    """范围列表：名字、说明、总数，学习页的「选择词库」用。"""
+def scopes_out(learned_terms: set[str] | None = None) -> list[dict]:
+    """范围列表：名字、说明、总数和已学数，学习页的「选择词库」用。"""
+    learned = {str(t).strip().lower() for t in (learned_terms or set()) if t}
     out = []
     for scope in SCOPES:
         data = _load(scope)
@@ -75,6 +76,7 @@ def scopes_out() -> list[dict]:
                 "name": data["name"],
                 "desc": data["desc"],
                 "total": len(data["words"]),
+                "learned": sum(1 for w in data["words"] if str(w["term"]).lower() in learned),
             }
         )
     return out

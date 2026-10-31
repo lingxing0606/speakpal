@@ -216,11 +216,20 @@ async function pickScope(id) {
 onMounted(async () => {
   await loadPrefs()
   await loadServerStatus()
-  // 从「去设置填密钥」跳进来时，直接滚到模型密钥那块，别让人对着个人资料找
-  if (onboarding.value) {
-    await nextTick()
-    document.getElementById('key')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  // 从「去设置填密钥」跳进来时，直接落到模型密钥那块，别让人对着个人资料找。
+  // 上面两块内容刚撑开，等两帧再滚，并在 120ms 后补一次，避免布局变化把位置顶回去
+  if (!onboarding.value) return
+  await nextTick()
+  const jumpToKey = () => {
+    const el = document.getElementById('key')
+    if (!el) return
+    const top = el.getBoundingClientRect().top + window.scrollY - 72
+    window.scrollTo({ top: Math.max(0, top), behavior: 'auto' })
   }
+  requestAnimationFrame(() => {
+    jumpToKey()
+    setTimeout(jumpToKey, 120)
+  })
 })
 
 function saveKey() {
@@ -607,7 +616,7 @@ function logout() {
       </section>
 
 <section id="data" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">账号与数据 · 清除练习记录</h2>
+        <h2 class="font-semibold text-ink">清除练习记录</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           只删除你自己的练习记录和报告，账号保留，别人的数据不受影响。删除后不可恢复。
         </p>
@@ -631,7 +640,7 @@ function logout() {
       </section>
 
 <section id="account" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">账号与数据 · 注销账号</h2>
+        <h2 class="font-semibold text-ink">注销账号</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           会删除账号本身，以及这个账号名下的全部练习记录、对话和报告，之后无法登录、无法恢复。
           只清记录不删账号的话，用上面那段。

@@ -237,6 +237,16 @@ const bankLoading = ref(false)
 const bankData = ref(null)
 const bankBusy = ref(false)
 const bankTip = ref('')
+const bankTipBad = ref(false)
+
+// 每次取几个：10 / 20 / 30 / 全部（后端一次最多 200）
+const PULL_OPTIONS = [
+  { value: 10, label: '10' },
+  { value: 20, label: '20' },
+  { value: 30, label: '30' },
+  { value: 200, label: '全部' },
+]
+const pullCount = ref(10)
 
 const bankWords = computed(() => bankData.value?.items || [])
 const bankScopes = computed(() => bankData.value?.scopes || [])
@@ -244,16 +254,24 @@ const bankScopes = computed(() => bankData.value?.scopes || [])
 async function fetchVocab(scope) {
   bankLoading.value = true
   bankTip.value = ''
+  bankTipBad.value = false
   try {
     const { data } = await api.get('/study/vocab', {
-      params: scope ? { scope, limit: 10 } : { limit: 10 },
+      params: scope ? { scope, limit: pullCount.value } : { limit: pullCount.value },
     })
     bankData.value = data
   } catch (e) {
     bankTip.value = '暂时取不到词库：' + (e?.response?.data?.detail || e.message)
+    bankTipBad.value = true
   } finally {
     bankLoading.value = false
   }
+}
+
+async function setPullCount(n) {
+  if (pullCount.value === n) return
+  pullCount.value = n
+  await fetchVocab(bankData.value?.scope)
 }
 
 async function pickScope(id) {
@@ -271,20 +289,26 @@ async function addBankWords() {
   if (bankBusy.value || !bankWords.value.length) return
   bankBusy.value = true
   bankTip.value = ''
+  bankTipBad.value = false
   try {
     const terms = bankWords.value.map((w) => w.term)
     const { data } = await api.post('/study/vocab/add', {
       scope: bankData.value?.scope,
       terms,
     })
-    const parts = []
-    if (data.added) parts.push(`加入 ${data.added} 个`)
-    if (data.skipped) parts.push(`${data.skipped} 个已在清单里`)
-    bankTip.value = parts.length ? parts.join('，') : '没有加入新词'
+    const added = Number(data.added || 0)
+    const skipped = Number(data.skipped || 0)
+    let text = '没有加入新词'
+    if (added && skipped) text = `已加入 ${added} 个，${skipped} 个之前学过`
+    else if (added) text = `已加入 ${added} 个`
+    else if (skipped) text = `这 ${skipped} 个之前都学过`
+    // 先刷新列表再写提示：fetchVocab 会清空旧提示，顺序反了就等于什么都没显示
     await fetchVocab(bankData.value?.scope)
     await loadToday()
+    bankTip.value = text
   } catch (e) {
     bankTip.value = '加入失败：' + (e?.response?.data?.detail || e.message)
+    bankTipBad.value = true
   } finally {
     bankBusy.value = false
   }
@@ -411,7 +435,20 @@ async function addSpoken() {
               @click="pickScope(sc.id)"
             >
               <div class="text-sm font-medium text-ink">{{ sc.name }}</div>
-              <div class="mt-1 text-[11px] text-ink-mute">已学 {{ sc.learned }} / 精选 {{ sc.total }} 词</div>
+              <div class="mt-1 text-[11px] text-ink-mute">已学 {{ sc.learned ?? 0 }} / 精选 {{ sc.total }} 词</div>
+            </button>
+          </div>
+
+          <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
+            <span class="text-ink-mute">每次取</span>
+            <button
+              v-for="opt in PULL_OPTIONS"
+              :key="opt.value"
+              class="rounded-lg px-2.5 py-1 transition"
+              :class="pullCount === opt.value ? 'bg-brand-50 font-medium text-brand-700 ring-1 ring-brand-100' : 'text-ink-mute hover:bg-canvas hover:text-ink-soft'"
+              @click="setPullCount(opt.value)"
+            >
+              {{ opt.label }}
             </button>
           </div>
 
@@ -433,7 +470,13 @@ async function addSpoken() {
           </div>
 
           <p v-else-if="!bankLoading" class="mt-3 text-xs text-ink-mute">这一档的词都学过了，换一档看看</p>
-          <p v-if="bankTip" class="mt-2 text-xs leading-5 text-ink-soft">{{ bankTip }}</p>
+          <p
+            v-if="bankTip"
+            class="mt-3 rounded-xl px-3 py-2 text-xs leading-5 ring-1"
+            :class="bankTipBad ? 'bg-rose-50 text-danger ring-rose-100' : 'bg-brand-50 text-brand-700 ring-brand-100'"
+          >
+            {{ bankTip }}
+          </p>
         </div>
         <p class="mt-3 text-center text-[11px] text-ink-mute">加进来的词会进「复习」，当天就能过一遍。</p>
       </div>
@@ -479,6 +522,12 @@ async function addSpoken() {
           </div>
         </div>
 
+        <div v-if="grammarLib && !grammarLib.groups.length" class="flex flex-col items-center py-12 text-center">
+          <div class="mt-2 text-lg font-semibold text-ink">今天没有要练的语法</div>
+          <p class="mt-1 max-w-xs text-sm leading-6 text-ink-soft">去练一次对话，报告里的语法点会回到这里。</p>
+          <router-link to="/" class="sp-btn-primary mt-6">去练一次</router-link>
+        </div>
+
         <p v-if="grammarTip" class="mt-3 text-xs leading-5 text-ink-soft">{{ grammarTip }}</p>
         <p class="mt-4 text-center text-[11px] text-ink-mute">做题在「复习」里：给错句改对或补上空缺，由服务端判档。</p>
       </div>
@@ -520,7 +569,19 @@ async function addSpoken() {
         </div>
 
         <p v-if="spokenTip" class="mt-3 text-xs leading-5 text-ink-soft">{{ spokenTip }}</p>
-        <p v-if="spokenLib && !spokenLib.items.length" class="mt-4 text-center text-xs text-ink-mute">暂时没有口语卡。</p>
+
+        <div v-if="spokenLib && !spokenLib.items.length" class="flex flex-col items-center py-12 text-center">
+          <div class="sp-icon-tile h-14 w-14 text-brand-700">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="2.8" width="6" height="11" rx="3" />
+              <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0" />
+              <path d="M12 17.8v3.4" />
+            </svg>
+          </div>
+          <div class="mt-4 text-lg font-semibold text-ink">今天没有要练的口语</div>
+          <p class="mt-1 max-w-xs text-sm leading-6 text-ink-soft">去练一次带口语的对话，报告里的说法会回到这里。</p>
+          <router-link to="/" class="sp-btn-primary mt-6">去练一次</router-link>
+        </div>
       </div>
 
       <!-- 复习队列 -->

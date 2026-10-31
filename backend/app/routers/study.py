@@ -275,7 +275,7 @@ def vocab_next(
         remaining=info["remaining"],
         used_today=_vocab_used_today(db, user.id),
         items=wordbank.next_words(scope_id, learned, limit),
-        scopes=wordbank.scopes_out(),
+        scopes=wordbank.scopes_out(learned),
     )
 
 
