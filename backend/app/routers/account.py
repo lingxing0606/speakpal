@@ -120,17 +120,17 @@ def delete_my_account(
     if confirm != "注销":
         raise HTTPException(status_code=400, detail="注销不可恢复，请输入「注销」确认")
 
-    deleted_sessions, deleted_turns, deleted_reports, deleted_drills = delete_user_data(
-        db, user.id
-    )
+    deleted = delete_user_data(db, user.id)
     deleted_account = db.query(User).filter(User.id == user.id).delete(synchronize_session=False)
     db.commit()
     return {
         "deleted_account": int(deleted_account or 0),
-        "deleted_sessions": deleted_sessions,
-        "deleted_turns": deleted_turns,
-        "deleted_reports": deleted_reports,
-        "deleted_drill_attempts": deleted_drills,
+        "deleted_sessions": deleted["sessions"],
+        "deleted_turns": deleted["turns"],
+        "deleted_reports": deleted["reports"],
+        "deleted_drill_attempts": deleted["drill_attempts"],
+        "deleted_study_items": deleted["study_items"],
+        "deleted_notes": deleted["notes"],
         "scope": "account",
     }
 
@@ -151,14 +151,14 @@ def delete_my_data(
     if scope != "records":
         raise HTTPException(status_code=400, detail="scope 只能是 records")
 
-    deleted_sessions, deleted_turns, deleted_reports, deleted_drills = delete_user_data(
-        db, user.id
-    )
+    deleted = delete_user_data(db, user.id)
     db.commit()
     return {
-        "deleted_sessions": deleted_sessions,
-        "deleted_turns": deleted_turns,
-        "deleted_reports": deleted_reports,
-        "deleted_drill_attempts": deleted_drills,
+        "deleted_sessions": deleted["sessions"],
+        "deleted_turns": deleted["turns"],
+        "deleted_reports": deleted["reports"],
+        "deleted_drill_attempts": deleted["drill_attempts"],
+        "deleted_study_items": deleted["study_items"],
+        "deleted_notes": deleted["notes"],
         "scope": "records",
     }

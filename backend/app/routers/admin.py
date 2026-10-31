@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from ..config import database_url_locked_by_env, settings
 from ..db import get_db
-from ..models import DrillAttempt, PracticeSession, Report, Turn, User
+from ..models import DrillAttempt, Note, PracticeSession, Report, StudyItem, Turn, User
 from ..schemas import AdminUserUpdateIn
 from ..security import hash_password
 from ..services.scenes import get_scene
@@ -204,18 +204,22 @@ def delete_all_data(
         target = db.get(User, body.user_id)
         if not target:
             raise HTTPException(status_code=404, detail="用户不存在")
-        d_sessions, d_turns, d_reports, d_drills = delete_user_data(db, body.user_id)
+        deleted = delete_user_data(db, body.user_id)
         db.commit()
         return {
             "deleted_users": 0,
-            "deleted_sessions": d_sessions,
-            "deleted_turns": d_turns,
-            "deleted_reports": d_reports,
-            "deleted_drill_attempts": d_drills,
+            "deleted_sessions": deleted["sessions"],
+            "deleted_turns": deleted["turns"],
+            "deleted_reports": deleted["reports"],
+            "deleted_drill_attempts": deleted["drill_attempts"],
+            "deleted_study_items": deleted["study_items"],
+            "deleted_notes": deleted["notes"],
             "scope": "records",
             "user_id": body.user_id,
         }
 
+    deleted_notes = db.query(Note).delete(synchronize_session=False)
+    deleted_study = db.query(StudyItem).delete(synchronize_session=False)
     deleted_drills = db.query(DrillAttempt).delete(synchronize_session=False)
     deleted_reports = db.query(Report).delete(synchronize_session=False)
     deleted_turns = db.query(Turn).delete(synchronize_session=False)
@@ -230,6 +234,8 @@ def delete_all_data(
         "deleted_turns": int(deleted_turns or 0),
         "deleted_reports": int(deleted_reports or 0),
         "deleted_drill_attempts": int(deleted_drills or 0),
+        "deleted_study_items": int(deleted_study or 0),
+        "deleted_notes": int(deleted_notes or 0),
         "scope": scope,
     }
 
@@ -275,16 +281,16 @@ def delete_user(
     target = db.get(User, user_id)
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
-    deleted_sessions, deleted_turns, deleted_reports, deleted_drills = delete_user_data(
-        db, user_id
-    )
+    deleted = delete_user_data(db, user_id)
     db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
     db.commit()
     return {
         "deleted_account": 1,
-        "deleted_sessions": deleted_sessions,
-        "deleted_turns": deleted_turns,
-        "deleted_reports": deleted_reports,
-        "deleted_drill_attempts": deleted_drills,
+        "deleted_sessions": deleted["sessions"],
+        "deleted_turns": deleted["turns"],
+        "deleted_reports": deleted["reports"],
+        "deleted_drill_attempts": deleted["drill_attempts"],
+        "deleted_study_items": deleted["study_items"],
+        "deleted_notes": deleted["notes"],
         "user_id": user_id,
     }

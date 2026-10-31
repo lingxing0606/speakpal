@@ -1,56 +1,61 @@
-"""用户数据的级联删除，供「注销自己」「管理员删用户」「管理员全清」共用。
+"""用户数据的级联删除，供「清记录」「注销」「管理员删用户」「管理员全清」共用。
 
-注意：`drill_attempts` 存的是用户跟读时的原句，属于用户数据，必须一起删。
-之前漏了这张表，清完数据后原句还能从库里捞回来——违背「全部不保留」。
+之前漏过 `drill_attempts`，这次把 `study_items`（学习卡，含用户原句）和 `notes`
+一起带上：用户说「全部不保留」，笔记和学习卡同样是用户数据。
 """
 
 from __future__ import annotations
 
 from sqlalchemy.orm import Session as OrmSession
 
-from ..models import DrillAttempt, PracticeSession, Report, Turn
+from ..models import DrillAttempt, Note, PracticeSession, Report, StudyItem, Turn
 
 
-def delete_user_data(db: OrmSession, user_id: int) -> tuple[int, int, int, int]:
-    """跟读记录 → 报告 → 轮次 → 会话，同一事务里删干净。
-
-    返回 (sessions, turns, reports, drill_attempts)。
-    """
+def delete_user_data(db: OrmSession, user_id: int) -> dict:
+    """跟读 → 学习卡 → 笔记 → 报告 → 轮次 → 会话，同一事务里删干净。"""
     session_ids = [
         row[0] for row in db.query(PracticeSession.id).filter(PracticeSession.user_id == user_id)
     ]
-    deleted_reports = 0
-    deleted_turns = 0
-    deleted_drills = 0
+    deleted = {
+        "sessions": 0,
+        "turns": 0,
+        "reports": 0,
+        "drill_attempts": 0,
+        "study_items": 0,
+        "notes": 0,
+    }
     if session_ids:
         report_ids = [
-            row[0]
-            for row in db.query(Report.id).filter(Report.session_id.in_(session_ids))
+            row[0] for row in db.query(Report.id).filter(Report.session_id.in_(session_ids))
         ]
         if report_ids:
-            deleted_drills = (
+            deleted["drill_attempts"] = (
                 db.query(DrillAttempt)
                 .filter(DrillAttempt.report_id.in_(report_ids))
                 .delete(synchronize_session=False)
             )
-        deleted_reports = (
+        deleted["reports"] = (
             db.query(Report)
             .filter(Report.session_id.in_(session_ids))
             .delete(synchronize_session=False)
         )
-        deleted_turns = (
+        deleted["turns"] = (
             db.query(Turn)
             .filter(Turn.session_id.in_(session_ids))
             .delete(synchronize_session=False)
         )
-    deleted_sessions = (
+    # 学习卡可能来自这次练习，也可能是用户手动加的：统一按 user_id 清干净
+    deleted["study_items"] = (
+        db.query(StudyItem)
+        .filter(StudyItem.user_id == user_id)
+        .delete(synchronize_session=False)
+    )
+    deleted["notes"] = (
+        db.query(Note).filter(Note.user_id == user_id).delete(synchronize_session=False)
+    )
+    deleted["sessions"] = (
         db.query(PracticeSession)
         .filter(PracticeSession.user_id == user_id)
         .delete(synchronize_session=False)
     )
-    return (
-        int(deleted_sessions or 0),
-        int(deleted_turns or 0),
-        int(deleted_reports or 0),
-        int(deleted_drills or 0),
-    )
+    return {key: int(value or 0) for key, value in deleted.items()}

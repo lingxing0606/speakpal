@@ -90,23 +90,31 @@ class SentenceFix(BaseModel):
     original: str
     better: str
     reason: str
+    # docs/design.md §16.4：错误分类 + 更自然的说法
+    error_type: str = "grammar"  # spelling | grammar | stiffness | wordiness
+    natural: str = ""
+    # 拼写类才有的字段（报告页展示单词讲解和近义/反义/同类词）
+    word: str = ""
+    related: Dict[str, Any] = {}
 
 
-class LearningItemOut(BaseModel):
+class StudyItemOut(BaseModel):
+    """学习卡（docs/design.md §16.1）。"""
+
     id: int
-    type: str  # spelling | natural | grammar
-    trigger: str
-    target: str
-    explanation: str = ""
-    examples: List[str] = []
-    related: List[Dict[str, str]] = []
-    review_prompt: str = ""
+    kind: str  # word | phrase | spelling
+    term: str
+    context: str = ""
+    meaning_zh: str = ""
+    example: str = ""
+    related: Dict[str, Any] = {}
+    source_session_id: int | None = None
     reps: int = 0
     lapses: int = 0
-    interval_days: int = 0
+    interval_days: float = 0
     due_at: str
     due: bool = False
-    session_id: int | None = None
+    last_result: str | None = None
     created_at: str
 
 
@@ -125,8 +133,8 @@ class ReportOut(BaseModel):
     dimensions: Dict[str, int] = {}
     bands: Dict[str, float] = {}
     sentence_fixes: List[SentenceFix] = []
-    # 这次诊断出来的、可以直接去练的学习卡（拼写 / 表达僵硬 / 语法）
-    learning_items: List[LearningItemOut] = []
+    # 这次练习自动建的学习卡（拼写 / 句型）
+    study_items: List[StudyItemOut] = []
     comment: str = ""
     features: Dict[str, Any] = {}
     scoring_detail: Dict[str, Any] = {}
@@ -221,30 +229,33 @@ class RecommendationOut(BaseModel):
     reason: str
 
 
-class LearningReviewIn(BaseModel):
-    quality: str  # again | hard | good | easy
+class StudyItemIn(BaseModel):
+    kind: str  # word | phrase | spelling
+    term: str
+    context: str = ""
+    meaning_zh: str = ""
+    example: str = ""
+    related: Dict[str, Any] = {}
+    source_session_id: int | None = None
 
 
-class LearningSummaryOut(BaseModel):
-    total: int = 0
-    due: int = 0
-    spelling: int = 0
-    natural: int = 0
-    grammar: int = 0
+class StudyReviewIn(BaseModel):
+    # 句型卡自评三档（grade，兼容旧字段 result）；拼写卡用 answer 默写、由后端判档
+    grade: str | None = None  # again | hard | good
+    result: str | None = None
+    answer: str | None = None
 
 
 class NoteIn(BaseModel):
-    title: str = Field(default="", max_length=120)
-    content: str = ""
-    learning_item_id: int | None = None
+    title: str | None = Field(default=None, max_length=128)
+    body: str = ""
     session_id: int | None = None
 
 
 class NoteOut(BaseModel):
     id: int
     title: str
-    content: str
-    learning_item_id: int | None = None
+    body: str
     session_id: int | None = None
     created_at: str
     updated_at: str

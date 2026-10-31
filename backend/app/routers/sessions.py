@@ -19,8 +19,8 @@ from ..schemas import (
 )
 from ..security import get_current_user
 from ..timeutil import utc_iso
-from ..services.learning import upsert_items
 from ..services.llm import chat_reply
+from ..services.study import cards_from_fixes, create_cards
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
 from ..services.report_view import report_out
 from ..services.rules import apply_to_report
@@ -248,8 +248,8 @@ def finish_session(
     )
     db.add(rep)
     sess.status = "finished"
-    # 这次诊断出的薄弱点落成可复习的学习卡（去重：同类型同目标只留一条）
-    upsert_items(db, user.id, sess.id, data.get("learning_items") or [])
+    # §16.4：只给 spelling / stiffness 自动建卡（草稿、立即可复习），其余类型由用户手动加入
+    create_cards(db, user.id, sess.id, cards_from_fixes(data.get("sentence_fixes") or []))
     db.commit()
     db.refresh(rep)
     return report_out(rep, db)
