@@ -19,4 +19,4 @@ def get_report(
     sess = db.get(PracticeSession, session_id)
     if not sess or sess.user_id != user.id or not sess.report:
         raise HTTPException(status_code=404, detail="报告不存在")
-    return report_out(sess.report)
+    return report_out(sess.report, db)

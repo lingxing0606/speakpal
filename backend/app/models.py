@@ -97,3 +97,45 @@ class DrillAttempt(Base):
     transcript = Column(Text, nullable=False)
     similarity = Column(Float, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LearningItem(Base):
+    """从一次练习里诊断出来的薄弱点：拼写错误 / 表达僵硬 / 语法问题。
+
+    每条都是一个可复习的卡：有触发句、目标词/句、中文讲解、例子、近义反义同类词，
+    以及间隔重复（SM-2 简化版）的调度状态。
+    """
+
+    __tablename__ = "learning_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
+    type = Column(String(16), nullable=False)  # spelling | natural | grammar
+    trigger = Column(Text, nullable=False)  # 用户原句（问题现场）
+    target = Column(Text, nullable=False)  # 正确拼写 / 更自然的说法
+    explanation = Column(Text, default="")  # 中文讲解
+    examples_json = Column(Text, default="[]")
+    related_json = Column(Text, default="[]")  # [{word, relation, meaning_zh}]
+    review_prompt = Column(Text, default="")
+    status = Column(String(12), default="active")  # active | suspended
+    reps = Column(Integer, default=0)
+    lapses = Column(Integer, default=0)
+    ease = Column(Float, default=2.5)
+    interval_days = Column(Integer, default=0)
+    due_at = Column(DateTime, default=datetime.utcnow, index=True)
+    last_reviewed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Note(Base):
+    __tablename__ = "notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(120), default="")
+    content = Column(Text, default="")
+    learning_item_id = Column(Integer, ForeignKey("learning_items.id"), nullable=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)

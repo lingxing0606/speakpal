@@ -13,6 +13,7 @@ from .routers import (
     admin,
     auth,
     exercises,
+    learning,
     reports,
     scenes,
     sessions,
@@ -93,6 +94,7 @@ app.include_router(account.router)
 app.include_router(system.router)
 app.include_router(exercises.router)
 app.include_router(tts.router)
+app.include_router(learning.router)
 
 
 _ADMIN_HTML = _STATIC_DIR / "admin.html"

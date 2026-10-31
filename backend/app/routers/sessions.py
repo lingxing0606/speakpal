@@ -19,6 +19,7 @@ from ..schemas import (
 )
 from ..security import get_current_user
 from ..timeutil import utc_iso
+from ..services.learning import upsert_items
 from ..services.llm import chat_reply
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
 from ..services.report_view import report_out
@@ -247,9 +248,11 @@ def finish_session(
     )
     db.add(rep)
     sess.status = "finished"
+    # 这次诊断出的薄弱点落成可复习的学习卡（去重：同类型同目标只留一条）
+    upsert_items(db, user.id, sess.id, data.get("learning_items") or [])
     db.commit()
     db.refresh(rep)
-    return report_out(rep)
+    return report_out(rep, db)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailOut)

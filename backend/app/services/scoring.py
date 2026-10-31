@@ -5,6 +5,7 @@ import httpx
 
 from evaluation.bands import DIMENSIONS, report_bands, round_band
 
+from .learning import from_fixes, sanitize_learning
 from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
 
 # 报告卡上的注脚：必须是真实口径。之前写「分数由 AI 估算」，
@@ -108,13 +109,16 @@ def parse_llm_report(text: str, history):
         return None
 
     scored = report_bands(parsed)
+    fixes = _sanitize_fixes(data.get("sentence_fixes"), history)
+    items = sanitize_learning(data.get("learning_items"), history) or from_fixes(fixes)
     return {
         "total_score": scored["total_score"],
         "dimensions": scored["dimensions"],
         "bands": scored["bands"],
         "band": scored["band"],
         "cefr": scored["cefr"],
-        "sentence_fixes": _sanitize_fixes(data.get("sentence_fixes"), history),
+        "sentence_fixes": fixes,
+        "learning_items": items,
         "comment": str(data.get("comment") or "").strip(),
         "note": str(data.get("note") or "").strip() or DEFAULT_NOTE,
         "source": "llm",
@@ -149,6 +153,7 @@ def _fallback_report(history, mock_reason: str, detail: str = ""):
         "band": None,
         "cefr": None,
         "sentence_fixes": fixes,
+        "learning_items": from_fixes(fixes),
         "comment": (
             "示例报告（模型不可用）：这次没有拿到评分模型的返回，也没有规则分兜底，"
             "所以本次不计分。下面列出的句子都是你真实说过的内容，不是示例句。"
@@ -179,6 +184,10 @@ def _prompt(scene: dict, difficulty: str, history) -> str:
         '{"bands":{"pronunciation":3.0-9.0,"fluency":3.0-9.0,'
         '"grammar_vocab":3.0-9.0,"task_completion":3.0-9.0,"written_expression":3.0-9.0},'
         '"sentence_fixes":[{"original":"","better":"","reason":""}],'
+        '"learning_items":[{"type":"spelling|natural|grammar","trigger":"",'
+        '"target":"","explanation":"","examples":[""],'
+        '"related":[{"word":"","relation":"synonym|antonym|similar","meaning_zh":""}],'
+        '"review_prompt":""}],'
         '"comment":"","note":"分数由 AI 估算，仅供参考。"}\n'
         "Which dimensions to return (IMPORTANT):\n"
         f"- This conversation has {modes['voice']} spoken (voice) turns and {modes['typed']} typed turns.\n"
@@ -201,6 +210,14 @@ def _prompt(scene: dict, difficulty: str, history) -> str:
         "  a coherent answer with some errors belongs to band 6; accurate, flexible language is band 7+.\n"
         "- sentence_fixes: 1-3 items. `original` MUST be copied verbatim from the learner's turn;\n"
         "  never invent a sentence the learner did not say.\n"
+        "- learning_items: 0-4 targeted things to practise later. Each item:\n"
+        "  * type=spelling: the learner misspelled a word. `target` = the correct word; `related` = 2-4\n"
+        "    synonyms/antonyms/similar words with Chinese meanings; `explanation` says why the spelling is confusing.\n"
+        "  * type=natural: the sentence is grammatically fine but stiff/unnatural. `trigger` = that sentence,\n"
+        "    `target` = a natural rewrite, `explanation` explains what sounds stiff and why.\n"
+        "  * type=grammar: a recurring grammar mistake; `target` = the corrected sentence.\n"
+        "  * `trigger` MUST be copied verbatim from the learner's turn. `target`/`examples` in English,\n"
+        "    `explanation`/`review_prompt` in Simplified Chinese. Return [] if nothing is worth practising.\n"
         "- Write `comment` and every `reason` in Simplified Chinese (简体中文).\n"
         "- Keep `original` and `better` in English: the learner's sentence and the improved version.\n\n"
         f"Scene: {scene['name']}\nDifficulty: {difficulty}\nConversation:\n{convo}"

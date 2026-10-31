@@ -92,6 +92,24 @@ class SentenceFix(BaseModel):
     reason: str
 
 
+class LearningItemOut(BaseModel):
+    id: int
+    type: str  # spelling | natural | grammar
+    trigger: str
+    target: str
+    explanation: str = ""
+    examples: List[str] = []
+    related: List[Dict[str, str]] = []
+    review_prompt: str = ""
+    reps: int = 0
+    lapses: int = 0
+    interval_days: int = 0
+    due_at: str
+    due: bool = False
+    session_id: int | None = None
+    created_at: str
+
+
 class ReportOut(BaseModel):
     report_id: int
     # 降级报告（模型不可用）不计分：total_score / band / cefr 均为 None
@@ -107,6 +125,8 @@ class ReportOut(BaseModel):
     dimensions: Dict[str, int] = {}
     bands: Dict[str, float] = {}
     sentence_fixes: List[SentenceFix] = []
+    # 这次诊断出来的、可以直接去练的学习卡（拼写 / 表达僵硬 / 语法）
+    learning_items: List[LearningItemOut] = []
     comment: str = ""
     features: Dict[str, Any] = {}
     scoring_detail: Dict[str, Any] = {}
@@ -199,3 +219,32 @@ class RecommendationOut(BaseModel):
     cefr: str | None = None
     last_scene_id: str | None = None
     reason: str
+
+
+class LearningReviewIn(BaseModel):
+    quality: str  # again | hard | good | easy
+
+
+class LearningSummaryOut(BaseModel):
+    total: int = 0
+    due: int = 0
+    spelling: int = 0
+    natural: int = 0
+    grammar: int = 0
+
+
+class NoteIn(BaseModel):
+    title: str = Field(default="", max_length=120)
+    content: str = ""
+    learning_item_id: int | None = None
+    session_id: int | None = None
+
+
+class NoteOut(BaseModel):
+    id: int
+    title: str
+    content: str
+    learning_item_id: int | None = None
+    session_id: int | None = None
+    created_at: str
+    updated_at: str
