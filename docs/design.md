@@ -124,7 +124,7 @@ speakpal/
 - 6 张场景卡（图标、场景名、一句描述）：求职面试 `job_interview` / 咖啡店点单 `cafe_order` / 雅思 Part 1 `ielts_part1` / 酒店入住 `hotel_checkin` / 机场值机 `airport_checkin` / 餐厅点餐 `restaurant_order`
 - 难度选择（简单 / 中等 / 困难）
 - 开始按钮
-- **「今天要复习 N 个词」卡片**：N 来自 `GET /api/study/due`；N=0 时给空状态（不摆一张空卡）。点进 `/study`
+- **「今天要复习 N 个」卡片**：`N` 来自 `GET /api/study/summary`（一次拿到 `due_count` 与 `notes_count`，别发两个请求）；N=0 时给空状态（不摆一张空卡）。点进 `/study`
 - 「历史记录」「笔记」入口
 
 ### Practice 练习页（需登录）
@@ -240,9 +240,10 @@ speakpal/
 | PATCH | /api/me/profile | 改昵称 / 密码（改密码要带 `current_password`，见 §5 设置页） | 是 |
 | POST | /api/tts | 语音合成（可选；无 key 409，key 被拒/不可达 502，见 §13.4） | 是 |
 | DELETE | /api/me/data | 清除自己的练习记录（只接受 `scope=records`，见 §13.2） | 是 |
-| GET | /api/study/due | 今天到期的学习卡（`due_at <= now`，见 §16.5） | 是 |
+| GET | /api/study/due | 今天到期的学习卡（`date(due_at) <= today`，见 §16.5） | 是 |
+| GET | /api/study/summary | 首页聚合：`{due_count, notes_count}`（不是单独的业务操作，见 §16.5） | 是 |
 | POST | /api/study/items | 新建学习卡（手动加入 / 报告页「加入学习清单」） | 是 |
-| POST | /api/study/items/{id}/review | 提交复习 `{result: again|hard|good}`，推进 `due_at` | 是 |
+| POST | /api/study/items/{id}/review | 提交复习 `{grade: again|hard|good}` 或拼写卡 `{answer}`，推进 `due_at` | 是 |
 | DELETE | /api/study/items/{id} | 删学习卡（只能删自己的） | 是 |
 | GET | /api/notes | 笔记列表 | 是 |
 | POST | /api/notes | 新建笔记（标题可选，可挂会话） | 是 |
@@ -456,7 +457,8 @@ System prompt 模板：
 | `DELETE /api/admin/users/{id}` | 同上 | 管理员删单个用户及其全部练习数据 |
 | `PATCH /api/admin/users/{id}` | 同上 | 管理员改单个用户的昵称 / 密码（不需要旧密码） |
 
-- `/api/me/data` 响应：`{"deleted_sessions": 3, "deleted_turns": 12, "deleted_reports": 3, "deleted_account": 0, "scope": "records"}`。
+- `/api/me/data` 响应：`{"deleted_sessions": 3, "deleted_turns": 12, "deleted_reports": 3, "deleted_drill_attempts": 2, "deleted_study_items": 4, "deleted_notes": 1, "deleted_account": 0, "scope": "records"}`。
+  **`study_items` / `notes` 必须在这条路径上一起删**，否则「清空我的数据」之后学习卡和笔记还留着（§16.5 末尾）。
   传 `scope=account` 要回 **400** 并指向 `/api/me/account`——**注销只有一个入口**，不要两条路各做一套。
 - `/api/admin/data`：body `{"confirm": "删除", "scope": "records" | "account"}`，`confirm` 不对返 400；`scope=account` 会连 `users` 一起删
   （响应 `{deleted_users, deleted_sessions, deleted_turns, deleted_reports, scope}`）。**删行不删 `.db` 文件**：engine 握着旧文件，删文件会让新连接建出空库、表都没有。
@@ -563,7 +565,7 @@ System prompt 模板：
 | `context` | TEXT | 出现的那句话（语境学习的关键，别丢） |
 | `meaning_zh` | TEXT | 中文释义 |
 | `example` | TEXT | 例句 |
-| `related_json` | TEXT | 近义词 / 反义词 / 同类词，`{"synonyms":[],"antonyms":[],"similar":[]}` |
+| `related_json` | TEXT | 近义词 / 反义词 / 同类词。**接口出参必须是 `synonyms` / `antonyms` / `related` 三个数组**（前端按这三个名字读），库里怎么打包不管 |
 | `source_session_id` | INTEGER 可空 | 来自哪次练习 |
 | `ease` | REAL | SM-2 的难度因子，初值 2.5 |
 | `interval_days` | REAL | 当前间隔（天） |
@@ -582,10 +584,11 @@ System prompt 模板：
 | `good` | `max(1, interval × 2.5)` | now + 新间隔 | +0.1 |
 
 - `ease` 初值 2.5、**下限 1.3**；既然存了就必须参与调度，否则评审会问「存着不用是为什么」。
-- 上限 **60 天**；`hard` 明确用 `max(1, …)` 兜底，新卡 `interval=0` 时不能算出 0 天。
+- 上限 **60 天**（`MAX_INTERVAL_DAYS = 60`）；`hard` 明确用 `max(1, …)` 兜底，新卡 `interval=0` 时不能算出 0 天。
 - `reps` 每次 +1；`again` 另加 `lapses` +1。
-- **到期判定按「今天结束前」而不是「此刻之前」**：`due_at < 今天 23:59:59`（本地时区）就算到期，否则凌晨打开首页会看到 0 个待复习。
-- 为什么 `again` 用 10 分钟而不是 1 天：改成 1 天等于「点了忘了，卡当天消失」，首页计数会直接掉下去，用户会以为卡丢了。10 分钟 + 本场重排到队尾，才符合「再练一遍」的直觉。
+- **到期判定按日期，不按时刻**：`date(due_at) <= today`（本地时区）就算今天到期。所以 `again +10 分钟` 的卡当天还会出现、首页计数不会立刻 -1；凌晨打开首页也不会是 0。
+- 首页文案是「**今天要复习 N 个**」，不是「现在可以复习 N 个」——两者对同一张早/晚到期的卡会给出不同数字，评审一眼能看出对不上。
+- `again` 用 10 分钟而不是 1 天：1 天等于「点了忘了，卡当天消失」，用户会以为卡丢了；10 分钟 + 本场重排到队尾才符合「再练一遍」的直觉。
 - 验收（定稿）：三档必须真的改 `due_at` —— `again` 当次会再出现（不是消失）、`good` 间隔明显变长；首页「今天要复习 N 个」的 N 必须等于 `GET /api/study/due` 的条数。
 
 ### 16.3 `notes`（笔记）
@@ -621,14 +624,18 @@ System prompt 模板：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/study/due` | 今天到期的卡（`due_at <= now`，按到期时间升序） |
+| GET | `/api/study/due` | 今天到期的卡（`date(due_at) <= today`，按到期时间升序） |
+| GET | `/api/study/summary` | **聚合接口**（不是第十个业务操作）：一次返回首页卡片要的数字 `{due_count, notes_count}`，省掉两次请求。口径与 `/study/due` 一致，N 必须等于它的条数 |
 | POST | `/api/study/items` | 新建卡（手动加入 / 报告页「加入学习清单」） |
-| POST | `/api/study/items/{id}/review` | 提交一次复习：body `{result?: "again"|"hard"|"good", answer?: "用户默写的文本"}`；传 `answer` 时由后端判档（拼写卡），否则按 `result`（句型卡自评） |
+| POST | `/api/study/items/{id}/review` | 提交一次复习：body `{grade?: "again"|"hard"|"good", answer?: "用户默写的文本"}`；传 `answer` 时由后端判档（拼写卡），否则按 `grade`（单词/句型卡自评） |
 | DELETE | `/api/study/items/{id}` | 删卡（只能删自己的） |
 | GET/POST | `/api/notes` | 笔记列表 / 新建 |
-| GET/PATCH/DELETE | `/api/notes/{id}` | 读取 / 修改 / 删除 |
+| GET/PATCH/DELETE | `/api/notes/{id}` | 读取 / 修改 / 删除；**PATCH 必做**，只有增删查不叫笔记功能，改标题/正文都要校验 `user_id` |
 
-约定：全部按 `user_id` 隔离，别人的 id 一律 404（不 403，避免探测存在性）；复习结果不是三档之一返 400；`due` 只返本用户、只返已到期的。
+约定：全部按 `user_id` 隔离，别人的 id 一律 404（不 403，避免探测存在性）；`grade` 不是三档之一返 400；`due` 只返本用户、只返已到期的；`notes.session_id` 必须校验归属，不能挂到别人的会话上。
+
+**删除路径必须带上这两张表**：`DELETE /api/me/data`、`DELETE /api/me/account`、`DELETE /api/admin/users/{id}`、`DELETE /api/admin/data` 四个入口都要删 `study_items` 和 `notes`，
+响应里分别报 `deleted_study_items` / `deleted_notes`。上次 `drill_attempts` 漏删过一次，这次漏了「清空数据」就没法向评委解释。
 
 ### 16.6 前端落点（ui 做，依赖上面的接口）
 
