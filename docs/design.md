@@ -568,6 +568,7 @@ System prompt 模板：
 | `id` | INTEGER PK | |
 | `user_id` | INTEGER FK → users | 按用户隔离，跨账号不可见 |
 | `kind` | VARCHAR(8) | `word`（单词）/ `phrase`（句型）/ `spelling`（拼写错） |
+| `source` | VARCHAR(8) | `report`（报告自动建卡）/ `vocab`（词库新词）/ `review`（用户手动加入）——清数据只删卡、词库本身不受影响 |
 | `term` | VARCHAR(128) | 卡片正面：要学的词或句型 |
 | `context` | TEXT | 出现的那句话（语境学习的关键，别丢） |
 | `meaning_zh` | TEXT | 中文释义 |
@@ -690,22 +691,28 @@ System prompt 模板：
 
 存 `users` 表两列（启动时 `_ensure_schema` 补列），因为换设备要跟着走；不要只放 localStorage。
 接口：`GET /api/me/settings` → `{practice_difficulty, word_scope}`；`PATCH /api/me/settings` 局部更新，取值不在枚举内返 400。
+**`POST /api/sessions` 不传 `difficulty` 就用设置里的值**——首页、历史「再练一次」、报告「按推荐再练」三个开练入口都不用自己传难度，口径自动一致；`GET /sessions/{id}` 回的就是实际用的那个难度。
 
 ### 18.2 词库
 
-- 内置静态词表，每档一个文件（`backend/app/data/wordbanks/{gaokao|cet4|cet6}.json`），条目至少含 `term`、`meaning_zh`、`example`、`pos`、`related`。
+- 内置静态词表，每档一个文件：`backend/app/data/wordbanks/{gaokao,cet4,cet6}.json`，条目字段固定 `term` / `meaning_zh` / `example` / `pos` / `related`（`related` 仍是 `{synonyms, antonyms, similar}` 嵌套）。
   **不联网取词、不引第三方词典依赖**——要能在断网机器上跑。
-- 每档 200–500 词起（够演示即可），词表进仓库；不提交音频。
+- 每档 **60 词**（精选，不是全量词表）；词表进仓库，不提交音频。加一档只是多一个 JSON，考研/雅思这次没做，别在界面上摆空档位。
 - 词库只放单词（`kind=word`），词组/句型不进去。
+- 界面文案写「**精选 60 词**」，不要写「四级词汇」——它不是考试大纲全量，写大了会被追问覆盖率。
 
 ### 18.3 学新词流程（复用 §16 的 SRS，不另起一套）
 
-1. `GET /api/study/vocab?scope=<scope>&limit=20` → 该档中**用户还没有卡**的词，用于「今天学 N 个新词」。
-2. `POST /api/study/vocab/add` body `{terms: [...]}`（或 `{scope, count}`）→ 落成 `study_items(kind=word, source='vocab')`，
-   `due_at` 设当天、`ease=2.5 / interval=0 / reps=0`；**按 `user_id + term + kind` 去重**，重复词不建第二张卡。
-3. 之后完全走 §16.2 的调度和 §5 复习页——**不新增「新词专用复习逻辑」**，两套调度迟早对不上。
-4. 学习页顶部两段：「今天要复习 N 个」（到期队列）与「学几个新词」（词库取词，取完可直接加）。
-5. 每日新词上限 **20**；用户手动加不设上限。
+1. `GET /api/study/vocab?scope=<scope>&limit=10`（不传 `scope` 用设置里的范围）→
+   `{scope, name, desc, total, learned, remaining, daily_limit, used_today, remaining_today, items, scopes}`。
+   `scopes` 就是三档按钮的数据（`{id, name, desc, total}`），`remaining_today` 就是「今天还能学 N 个」；`items` 只给**用户还没有卡**的词。
+2. `POST /api/study/vocab/add` body `{scope, terms: [...]}`（或 `{scope, count: 10}`）→
+   `{added, skipped, limited, daily_limit, used_today, remaining_today}`：`skipped` = 已在清单，`limited` = 今天额度用完没加上的数。
+   **一次批量加，不要循环单条 POST**；落库为 `study_items(kind=word, source='vocab')`，`due_at` 设当天、`ease=2.5 / interval=0 / reps=0`。
+3. 去重按 `user_id + term + kind`，**不分大小写**；重复词不建第二张卡。
+4. 之后完全走 §16.2 的调度和 §5 复习页——**不新增「新词专用复习逻辑」**，两套调度迟早对不上。
+5. 学习页顶部两段：「今天要复习 N 个」（到期队列）与「学几个新词」（词库取词，取完可直接加）；加完当天就进 `/study/due`，首页数字会涨。
+6. 每日新词上限 **20**；用户手动加不设上限。清数据/注销只删 `study_items`，**词库不动**，清完还能重新学。
 
 ### 18.4 页面导航（用户要求）
 
@@ -715,6 +722,6 @@ System prompt 模板：
 
 ### 18.5 待确认（不要按这版直接写死）
 
-- 词库文件名与字段名沿用 §16 的 `meaning_zh`，实现时和前端对齐一次。
 - 「学新词」放学习页顶部还是单独 `/study/new` 路由，等 ui 出图定。
 - 难度是否允许练习页临时覆盖：目前定「设置里改、练习页只读」；要允许临时改得多一个 `override` 参数。
+- 词库只有三档 60 词；若要加考研/雅思，先补 JSON 再放开选项，别先摆按钮。
