@@ -136,6 +136,8 @@ speakpal/
 - 对话区：AI 气泡在左、用户气泡在右，逐条出现
 - 麦克风按钮：点击开始录音，实时显示转写文字；再点结束。识别结果先进**输入条**确认再发送，失败给中文文案（如「没有麦克风权限」），不裸露 `not-allowed` 这类英文码
 - 手动输入：切到「手动输入」后，用**页面内的输入条**提交。交互约定：自动聚焦、Enter 发送、Shift+Enter 换行、Esc 收起并保留草稿（另给清空草稿）。
+  **空着 8 秒没打字**就在输入框**上方**显示「不知道怎么说？试试这些用法：」+ 三条可用句式（数据取 `GET /api/scenes/{id}/frames`），用户一开始打字立刻收起。
+  这是提示，不是教学旁白：别写成「点这里可以…」。
   **禁止用 `window.prompt` / `alert` / `confirm`**——浏览器弹窗会打断对话流，看起来也很突兀（`Practice.vue:111` 原来就是 `window.prompt`，已改掉）
 - 无可用模型密钥时，点「开始练习」或「发送」都会被拦下并引导到 `/settings`（见 §13.1），不进入一段注定 mock 的对话
 - 每句 AI 气泡带「播放」按钮（speechSynthesis）
@@ -173,15 +175,16 @@ speakpal/
 - 卡片右侧相应显示「进行中」药丸 +「继续练习」/ 衬线综合分 +「看报告」。**未出分 / 降级 / 未完成的会话都必须能点开**——点不开等于用户看不到自己那次练习；`History.vue:21` 原来只给有分的会话绑跳转，是 bug。
 - 空状态：还没练过时给「去练一次」，不写「暂无数据」。
 
-### Study 复习页（需登录，`/study`）
+### Study 学习页（需登录，`/study`）——**四个板块，不是「学习=复习」**
 
-- 一次只出现一张卡。**两类卡不一样**：
-  - 拼写卡（`kind=spelling`）：正面只给中文释义 + 出处语境，**不显示 `term`**，给一个默写输入框；提交后由后端判档（全对 `good` / 差 1–2 字母 `hard` / 更多 `again`），用户不选三档。显示正确答案与常见混淆点。
-  - 句型卡（`kind=phrase`）：正面 `term` + `context`，翻面给释义、例句、近反义/同类词；三档「忘了 / 模糊 / 认识」自评。
-- 朗读按钮（喇叭）常驻在卡片上：词和句型都能听（走 TTS，失败回落浏览器朗读，见 §13.4）——学新词第一件事是听发音。
-- 今日队列走完给完成状态，并说**下次什么时候再来**（「明天还有 N 个到期」；接口暂时给不出时给「去笔记看看」），不要只留一句「今天没有要复习的」。
-- 空状态：今天没有到期卡时说明现状 + 「去练一次」，不摆空卡片。
-- 不写「点一下看释义」「想好之后点卡片」这类操作旁白（§17）——可点的地方用图标/按钮表达，别用文字教。
+顶部四个 tab，各自只显示自己的内容；从首页对应卡片直接进到对应 tab（`/study?tab=review|new|grammar|speaking`，tab 缺失时默认复习）。
+
+- **复习**：到期队列，一次一张卡。卡分三类：拼写卡（只给中文释义 + 语境，默写判档，不显示 `term`）、单词/句型/口语卡（正面 `term` + `context`，翻面给释义、例句、近近义/同类词，三档自评）、语法卡（语法点 + 规则一句 + 正误对照，自评）。
+- **学新词**：选范围（高考 / 四级 / 六级，各「精选 200 词」）→ 取一批 → 批量加入 → 当天进复习队列。**没有每日数量上限**，选多少加多少；`daily_limit` 字段保留但不再限制（见 §18.3）。
+- **语法**：四组（时态 / 冠词 / 介词 / 从句，各 15 张），一次批加入，进同一套 SRS。
+- **口语**：60 张「书面说法 → 更自然口语说法 + 为什么」，同样可批量加入、走同一套 SRS。
+- 朗读按钮（喇叭）常驻在卡上：单词/句型/口语卡都能听（TTS 失败回落浏览器朗读，见 §13.4）。
+- 队列走完给完成状态 + 下次什么时候再来；空状态说明现状 + 「去练一次」，不摆空卡片，不写「点一下看释义」这类旁白（§17）。
 
 ### Notes 笔记页（需登录，`/notes`）
 
@@ -196,6 +199,8 @@ speakpal/
   新手引导从头部撤掉（设置页底部与欢迎页都有入口）；「退出」收进设置页底部。
 - **移动端用底部 tab 栏**（首页 / 学习 / 笔记 / 我的），头部只留 logo：宽 390 的版心只有 358px，6 个链接必然挤爆，别再往头部加东西。
 - 底部 tab 规格：高 56px + `env(safe-area-inset-bottom)`；图标 20px 线性 + 11px 文字；选中态 `brand-600` 文字 + `brand-50` 药丸底（不用下划线）；未选中 `ink-mute`；间距走 8px 刻度。
+- **返回键统一（用户明确要求）**：学习 / 笔记 / 历史 / 设置这四个二级页面，返回都放在**页头左上角**，同一个图标、同一尺寸、同一种行为——「回上一级」（`router.back()`，没有历史回首页）。
+  不允许一半在左一半在右、也不允许有的页面没有返回（`BackLink.vue` 统一实现，别各页自己写一个）。
 - 为什么不在头部堆：按 390 屏算 6 项约 418px，溢出 60px，藏字标也救不回来——这是布局约束，不是审美偏好。
 
 ### Settings 设置页（需登录）
@@ -239,7 +244,7 @@ speakpal/
 | POST | /api/pronunciation/check | 判一次最小对立对（`correct` / `partner_heard` / `reason`） | 是 |
 | GET | /api/me/recommendation | 按最近报告给的难度建议 | 是 |
 | POST | /api/config/llm/test | 验证用户自带 API key（见 §13） | 是 |
-| GET | /api/config/llm | 服务端兜底 key 是否配置（不回显 key） | 是 |
+| GET | /api/config/llm | 默认 base_url / model；**`env_configured` 恒 false**（服务端不再提供兜底 key） | 是 |
 | GET | /api/system/storage | 数据目录/库文件/可写性（运维用，网页不展示，见 §13.3） | 是 |
 | PATCH | /api/me/profile | 改昵称 / 密码（改密码要带 `current_password`，见 §5 设置页） | 是 |
 | POST | /api/tts | 语音合成（可选；无 key 409，key 被拒/不可达 502，见 §13.4） | 是 |
@@ -247,7 +252,11 @@ speakpal/
 | GET | /api/study/due | 今天到期的学习卡（`date(due_at) <= today`，见 §16.5） | 是 |
 | GET | /api/study/summary | 首页聚合：`{due_count, notes_count, total, word_count, phrase_count, spelling_count}`（不是单独的业务操作，见 §16.5） | 是 |
 | GET | /api/study/vocab | 词库取词：`?scope=gaokao|cet4|cet6&limit=`，只返还没建卡的词（见 §18.3） | 是 |
-| POST | /api/study/vocab/add | 把选中的词落成学习卡（按 user+term+kind 去重） | 是 |
+| POST | /api/study/vocab/add | 把选中的词落成学习卡（按 user+term+kind 去重，**无每日上限**） | 是 |
+| GET | /api/study/grammar | 语法卡：四组（时态/冠词/介词/从句）+ 未学列表（见 §18.4） | 是 |
+| POST | /api/study/grammar/add | 批量加入语法卡（`kind=grammar, source=grammar`） | 是 |
+| GET | /api/study/spoken | 口语卡：书面说法 → 更自然说法 + 为什么（60 张） | 是 |
+| POST | /api/study/spoken/add | 批量加入口语卡（`kind=phrase, source=spoken`） | 是 |
 | GET | /api/me/settings | 用户偏好：`{practice_difficulty, word_scope}`（见 §18.1） | 是 |
 | PATCH | /api/me/settings | 改偏好（局部更新，枚举外返 400） | 是 |
 | POST | /api/study/items | 新建学习卡（手动加入 / 报告页「加入学习清单」） | 是 |
@@ -420,40 +429,38 @@ System prompt 模板：
 
 ### 13.1 用户自带 API key
 
-- 存储位置：**只存浏览器 localStorage**，随请求走 `X-LLM-Key`（另有 `X-LLM-Base-URL` / `X-LLM-Model`）头；后端 `settings.llm_api_key` 为兜底，优先级「浏览器 > `.env`」。
+- 存储位置：**只存浏览器 localStorage**，随请求走 `X-LLM-Key`（另有 `X-LLM-Base-URL` / `X-LLM-Model`）头。
+  **服务端不再提供兜底 key**（用户 10-31 明确要求）：`.env` 的 `LLM_API_KEY` 清空、代码不再用它兜底，`GET /api/config/llm` 的 `env_configured` 恒为 `false`（字段保留兼容，别再据此显示任何「用服务端密钥」入口）。
 - key 只走请求头，**不进 body**：放 body 就多一份可能被访问日志记下的明文。
 - 不写 `.env`、不入库、不打日志。验证接口不回显 key。
 - 前端已用 `allow_headers=["*"]`（`backend/app/main.py:58`），自定义头不会触发 CORS 预检失败，无需额外放行。
 - 登录后进 `/settings` 引导页，**必须可跳过**：评委没有 key 不能卡在配置页。
-- **但跳过不等于可以免 key 开练**（用户已确认）：浏览器与 `.env` 都没有可用 key 时，**`POST /api/sessions` 和 `POST /api/sessions/{id}/turn`**
-  返回 `409 {"kind": "llm_not_configured", "detail": "还没有接入模型密钥"}`，由前端引导到 `/settings`（前端 `ab505f0` 起读 `kind`，不看 `detail`）。
-  `llm_key_required`、`key_required` 两个字面值作废，验收只认 `kind=llm_not_configured`。
+- **跳过不等于可以免 key 开练**：本浏览器没有 key 时，`POST /api/sessions` 和 `POST /api/sessions/{id}/turn` 返回
+  `409 {"kind": "llm_not_configured", "detail": "还没有接入模型密钥"}`；前端在场景列表上方展开页内面板，**只给「去设置填密钥 / 取消」两个出口**。
+  没有「用服务端密钥继续（演示）」——服务端没有 key 可借。
   **不能用 401**——前端 `client.js` 拦截器把任何 401 当登录失效并清 token 跳登录页。
-- **门禁的交互定稿（本轮）**：本浏览器没填 key 时，点场景**不出弹窗**，在场景列表上方展开页内面板「去设置填密钥 / 取消」；
-  只有 `GET /api/config/llm` 返回 `env_configured=true` 时，面板才多一个「用服务端密钥继续（演示）」。
-  没有兜底 key 就必须填，连「演练一下」都进不去——这是用户明确要的，别为了好走演示而放宽。
+- **自动化测试注意**：服务端兜底拿掉后，所有脚本必须自己在 `X-LLM-Key` 头里带真实 key，否则会一路 `409`/示例报告；
+  不要为了测试方便把兜底加回来。
 - 失败分类（定稿口径），**不是所有失败都降级成示例报告**：
 
   | 情形 | 返回 | 界面 |
   |---|---|---|
   | 用户请求头里的 key 被拒（401/403） | **502** `{"kind": "key_invalid"}`，不生成报告、会话保持 active，换 key 可重试；**这一轮用户发言也不落库**（模型调用成功后才写 `turns`），重试不会出现两条一样的发言 | 「key 无效，去设置里换」+ 重试 |
-  | `.env` 兜底密钥失效（请求头没带 key） | 200 + `source=mock` + `mock_reason=invalid_key` | 「服务端密钥失效，本次不计分」 |
   | 超时 / 不可达 / 返回无法解析 | 200 + `source=mock` + `mock_reason=unavailable` | 「模型服务暂时不可用，稍后重试」 |
   | 会话中途失去全部 key 再 finish | 200 + `source=mock` + `mock_reason=not_configured` | 「本次未接入模型，示例报告不计分」 |
 
-- `mock_reason` 保留三个值，但 `invalid_key` 只代表**服务端 `.env` 兜底密钥失效**（运维问题），不代表用户 key 无效——
-  用户 key 是 502 且不产生报告。这两件事别混，验收也不能拿 `invalid_key` 当用户 key 的证据。
+- `mock_reason` 现在只有 `unavailable` / `not_configured` 两个活值；`invalid_key` 此前专指「服务端 `.env` 兜底密钥失效」，兜底取消后**不再产生**，历史数据里出现时按 `unavailable` 展示。
 - **`finish` 不拦**：练习已经做完，用户中途把 key 删了，也应该拿到一份 `not_configured` 的示例报告。
   拦截点只有「建会话」和「每轮对话」（`create_session` / `add_turn`）。这是预期行为，不是 bug，别改。
 
-`GET /api/config/llm`（登录）→ `{"env_configured": true, "default_base_url": "https://api.deepseek.com/v1", "default_model": "deepseek-chat"}`
-——前端用它判断服务端有没有兜底 key，**不回显 key 本身**。
+`GET /api/config/llm`（登录）→ `{"env_configured": false, "default_base_url": "https://api.deepseek.com/v1", "default_model": "deepseek-chat"}`
+——只用于「去设置」页显示默认值，**不回显 key，也不再表示服务端有可用 key**。
 
 `POST /api/config/llm/test`（登录，key 取自 `X-LLM-Key` 头）→ `{"ok": true, "model": "deepseek-chat", "latency_ms": 812}`；
 失败 `{"ok": false, "error_kind": "invalid_key" | "timeout" | "unreachable", "error": "..."}`。
 
-> 两个字段别混：`error_kind` 属测试接口（`invalid_key` / `timeout` / `unreachable`，设置页 `Settings.vue:95` 按它出文案），
-> `mock_reason` 属报告（`invalid_key` / `unavailable` / `not_configured`）。同名不同义：前者=「你填的 key 不行」，后者=「服务端兜底 key 不行」。
+> 两个字段别混：`error_kind` 属测试接口（`invalid_key` / `timeout` / `unreachable`，设置页按它出文案），
+> `mock_reason` 属报告（现在只有 `unavailable` / `not_configured`）。
 
 ### 13.2 清除数据
 
@@ -568,8 +575,8 @@ System prompt 模板：
 |---|---|---|
 | `id` | INTEGER PK | |
 | `user_id` | INTEGER FK → users | 按用户隔离，跨账号不可见 |
-| `kind` | VARCHAR(8) | `word`（单词）/ `phrase`（句型）/ `spelling`（拼写错） |
-| `source` | VARCHAR(8) | `report`（报告自动建卡）/ `vocab`（词库新词）/ `review`（用户手动加入）——清数据只删卡、词库本身不受影响 |
+| `kind` | VARCHAR(8) | `word` / `phrase`（句型或口语说法）/ `spelling` / **`grammar`**（语法卡，v0.6 新增） |
+| `source` | VARCHAR(8) | `report`（报告自动建卡）/ `vocab`（词库新词）/ `grammar`（语法模块）/ `spoken`（口语模块）/ `review`（用户手动加入）——清数据只删卡，内置内容库不受影响 |
 | `term` | VARCHAR(128) | 卡片正面：要学的词或句型 |
 | `context` | TEXT | 出现的那句话（语境学习的关键，别丢） |
 | `meaning_zh` | TEXT | 中文释义 |
@@ -667,6 +674,9 @@ System prompt 模板：
   `Settings.vue:446` 「语音合成密钥（可选）」→「语音合成」；`:409/413/483/487/491` 五个「（可留空用默认）」改成把默认值放进 placeholder；`:382/:465` 两段机制说明各缩到一句（隐私承诺「只存在这个浏览器里」保留）；
   `Study.vue:110` 「点一下看释义」、`:124` 「想好之后点卡片，再选记得的程度」——两句操作旁白都删；
   `Report.vue:416` 「在下面「逐句纠错」里点「重说这句」」删，只留「相似度 ≥85% 算过」。
+`Home.vue:142` 「和 AI 角色多轮对话，结束后拿到评分和逐句纠错。」整段删；`Home.vue:149-151` 整块「推荐 中等 · 还没有带分数的记录，先从中等开始」删（`rec` 变量别删，`usedDifficulty` 还要用它兜底）；`Home.vue:258-260` 页脚「每一轮都由 AI 角色追问，结束后按 CEFR / 雅思量表出分」整段删。
+`Practice.vue:493` 「点下面的麦克风开口说，或者说不了就点「手动输入」」→ 只留麦克风那半句（后半句与 8 秒提示重复）。
+**别误删**：`Report.vue:475` 的「逐句纠错」是真标题；`Welcome.vue:25-26` 那句「按 CEFR、雅思量表给分…」是公开门面页唯一说明评分依据的地方，**是否删要 Chief 拍板**（删了首页就完全不提怎么打分）。
 - **边界（别一刀切）**：`Report.vue:531/549-553` 的评分依据说明是给评委复算用的承诺，不是操作旁白，**保留**；
   降级横幅、密钥门禁的说明也属于「用户必须知道才能继续」，保留。判断标准是：这句话是在教人点按钮，还是在解释分数/失败怎么来的。
 - 第二人称、动词开头、不堆形容词；错误提示说清「发生了什么 + 下一步能做什么」。
@@ -698,35 +708,44 @@ System prompt 模板：
 
 - 内置静态词表，每档一个文件：`backend/app/data/wordbanks/{gaokao,cet4,cet6}.json`，条目字段固定 `term` / `meaning_zh` / `example` / `pos` / `related`（`related` 仍是 `{synonyms, antonyms, similar}` 嵌套）。
   **不联网取词、不引第三方词典依赖**——要能在断网机器上跑。
-- 每档 **60 词**（精选，不是全量词表）；词表进仓库，不提交音频。加一档只是多一个 JSON，考研/雅思这次没做，别在界面上摆空档位。
+- 每档 **200 词**（精选，不是全量词表）；词表进仓库，不提交音频。加一档只是多一个 JSON，考研/雅思这次没做，别在界面上摆空档位。
 - 词库只放单词（`kind=word`），词组/句型不进去。
-- 界面文案写「**精选 60 词**」，不要写「四级词汇」——它不是考试大纲全量，写大了会被追问覆盖率。
+- 界面文案写「**精选 200 词**」，不要写「四级词汇」——它不是考试大纲全量，写大了会被追问覆盖率。
 
 ### 18.3 学新词流程（复用 §16 的 SRS，不另起一套）
 
 1. `GET /api/study/vocab?scope=<scope>&limit=10`（不传 `scope` 用设置里的范围）→
    `{scope, name, desc, total, learned, remaining, daily_limit, used_today, remaining_today, items, scopes}`。
-   `scopes` 就是三档按钮的数据（`{id, name, desc, total}`），`remaining_today` 就是「今天还能学 N 个」；`items` 只给**用户还没有卡**的词。
+   `scopes` 就是三档按钮的数据（`{id, name, desc, total}`）；`items` 只给**用户还没有卡**的词。
+   `daily_limit` / `used_today` / `remaining_today` 字段**保留但不再限制**（用户要求取消每日数量限制），前端不要据此禁用按钮。
 2. `POST /api/study/vocab/add` body `{scope, terms: [...]}`（或 `{scope, count: 10}`）→
-   `{added, skipped, limited, daily_limit, used_today, remaining_today}`：`skipped` = 已在清单，`limited` = 今天额度用完没加上的数。
+   `{added, skipped, limited}`（兼容字段保留，`limited` 恒为 0）：`skipped` = 已在清单。
    **一次批量加，不要循环单条 POST**；落库为 `study_items(kind=word, source='vocab')`，`due_at` 设当天、`ease=2.5 / interval=0 / reps=0`。
 3. 去重按 `user_id + term + kind`，**不分大小写**；重复词不建第二张卡。
-4. 之后完全走 §16.2 的调度和 §5 复习页——**不新增「新词专用复习逻辑」**，两套调度迟早对不上。
-5. 学习页顶部两段：「今天要复习 N 个」（到期队列）与「学几个新词」（词库取词，取完可直接加）；加完当天就进 `/study/due`，首页数字会涨。
-6. 每日新词上限 **20**；用户手动加不设上限。清数据/注销只删 `study_items`，**词库不动**，清完还能重新学。
+4. 之后完全走 §16.2 的调度和 §5 学习页——**不新增「新词专用复习逻辑」**，两套调度迟早对不上。
+5. 学习页顶部四段（复习 / 新词 / 语法 / 口语，见 §5 Study）；加完当天就进 `/study/due`，首页数字会涨。
+6. **没有每日新词上限**：选多少加多少（用户明确要求）。清数据/注销只删 `study_items`，**内置内容库不动**，清完还能重新学。
 
-**到期数与列表必须同源同量**：`/api/study/due` 默认全量返回，`summary.due_count` 统计全量，两边永远相等（总量最多三档各 60 词 + 报告卡，远不到需要封顶的量级）。
+**到期数与列表必须同源同量**：`/api/study/due` 默认全量返回，`summary.due_count` 统计全量，两边永远相等（总量是三档各 200 词 + 语法 60 + 口语 60 + 报告卡，仍然远不到需要封顶的量级）。
 `limit` 参数留作调试，**界面不允许拿它分页**——一旦传了，列表条数就会小于首页数字，又变成「首页说 60、点进去只有 50」。
 如果要封顶，必须两处同时截断（`summary` 用 `min(总数, 上限)`），只截单边就是 bug。
 
-### 18.4 页面导航（用户要求）
+### 18.4 语法卡与口语卡（v0.6 新增，复用 `study_items`）
 
-- 除首页、登录页、欢迎页外，**每个页面顶部左侧都有返回**：学习 / 笔记 / 历史 / 设置 / 报告 / 复习。返回上一页（`router.back()`），没有历史回首页。
-- 移动端底部 tab 常驻（首页 / 学习 / 笔记 / 设置，见 §5 导航）；**学习入口在底部**，不在页头——用户明确要求过。
-- 桌面页头保持「学习 / 笔记 / 历史 / 设置」，与移动端四个主入口一致（历史在移动端收进学习页）。
+两套内置内容都走同一张表、同一套 SRS，只是 `kind` / `source` 不同；**不新建表**。
+
+| 模块 | `kind` | `source` | 数量 | 字段落法 |
+|---|---|---|---|---|
+| 语法 | `grammar` | `grammar` | 四组各 15：时态 / 冠词 / 介词 / 从句 | `term`=语法点名（≤6 字，如「一般过去时」）；`meaning_zh`=规则一句话（能独立读懂）；`context`=错例句；`example`=正确例句；`related`=相关语法点 |
+| 口语 | `phrase` | `spoken` | 60 | `term`=书面说法；`example`=更自然的口语说法；`meaning_zh`=「为什么」一句话（讲语域/语气差别，如「太正式」「更客气」）；`context`=使用场景 |
+
+- 接口与词库同构：`GET /api/study/grammar` → `{groups:[{id,name,total}], items, learned}`；`POST /api/study/grammar/add {group, count?}` 或 `{items:[...]}`；
+  口语 `GET /api/study/spoken`、`POST /api/study/spoken/add`。同样批量加、同样按 `user_id+term+kind` 去重、同样当天到期。
+- 内容放仓库里的 JSON（`backend/app/data/grammar/*.json`、`backend/app/data/spoken/*.json`），**不联网**。
+- 文案要求：语法卡一张只教一个点，错句要真错、改句只动错的那个点；口语卡箭头两边都得是完整句子，口语侧得是母语者真会说的，别把书面句加个 "you know" 当口语。
 
 ### 18.5 待确认（不要按这版直接写死）
 
-- 「学新词」放学习页顶部还是单独 `/study/new` 路由，等 ui 出图定。
+- 学习页用 `/study?tab=review|new|grammar|spoken` 共用一个路由，还是四个独立路由——目前按查询参数写，ui 出图后可改，但**默认落复习**这条不变。
 - 难度是否允许练习页临时覆盖：目前定「设置里改、练习页只读」；要允许临时改得多一个 `override` 参数。
-- 词库只有三档 60 词；若要加考研/雅思，先补 JSON 再放开选项，别先摆按钮。
+- 词库 200 词/档、语法 60、口语 60 是首批量；扩充时只换 JSON，接口不变。
