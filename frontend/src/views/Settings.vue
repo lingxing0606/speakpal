@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
+import BackLink from '../components/BackLink.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 import TabBar from '../components/TabBar.vue'
 import { useAuthStore } from '../stores/auth'
@@ -15,6 +16,16 @@ const auth = useAuthStore()
 const settings = useSettingsStore()
 
 const onboarding = computed(() => route.query.onboarding === '1')
+
+const DIFFICULTIES = [
+  { value: 'easy', label: '简单' },
+  { value: 'medium', label: '中等' },
+  { value: 'hard', label: '困难' },
+]
+
+function diffLabel(value) {
+  return DIFFICULTIES.find((d) => d.value === value)?.label || '中等'
+}
 
 const keyInput = ref(settings.apiKey)
 const baseInput = ref(settings.baseUrl)
@@ -162,7 +173,48 @@ async function loadServerStatus() {
   }
 }
 
+const SCOPES = [
+  { id: 'gaokao', label: '高考' },
+  { id: 'cet4', label: '四级' },
+  { id: 'cet6', label: '六级' },
+]
+const prefsTip = ref({ running: false, message: '' })
+
+// 偏好存服务端（换设备跟着走），localStorage 只当兜底缓存
+async function loadPrefs() {
+  try {
+    const { data } = await api.get('/me/settings')
+    if (data?.practice_difficulty) settings.setPrefDifficulty(data.practice_difficulty)
+    if (data?.word_scope) settings.setWordScope(data.word_scope)
+  } catch {
+    // 接口不可用就用本地缓存
+  }
+}
+
+async function pickDifficulty(value) {
+  prefsTip.value = { running: true, message: '' }
+  try {
+    await api.patch('/me/settings', { practice_difficulty: value })
+    settings.setPrefDifficulty(value)
+    prefsTip.value = { running: false, message: `已设为${diffLabel(value)}` }
+  } catch (e) {
+    prefsTip.value = { running: false, message: '保存失败：' + (e?.response?.data?.detail || e.message) }
+  }
+}
+
+async function pickScope(id) {
+  prefsTip.value = { running: true, message: '' }
+  try {
+    await api.patch('/me/settings', { word_scope: id })
+    settings.setWordScope(id)
+    prefsTip.value = { running: false, message: `新词范围已设为${SCOPES.find((s) => s.id === id)?.label || id}` }
+  } catch (e) {
+    prefsTip.value = { running: false, message: '保存失败：' + (e?.response?.data?.detail || e.message) }
+  }
+}
+
 onMounted(async () => {
+  await loadPrefs()
   await loadServerStatus()
   // 从「去设置填密钥」跳进来时，直接滚到模型密钥那块，别让人对着个人资料找
   if (onboarding.value) {
@@ -313,7 +365,7 @@ function logout() {
           <div class="font-semibold text-ink">设置</div>
         </div>
         <div class="flex items-center gap-1">
-          <router-link to="/" class="sp-btn-ghost">返回首页</router-link>
+          <BackLink :desktop-only="true" fallback="/" />
           <button class="sp-btn-ghost" @click="logout">退出</button>
         </div>
       </div>
@@ -330,6 +382,7 @@ function logout() {
       <nav class="flex flex-wrap items-center gap-1.5 text-[11px]" aria-label="设置分区">
         <span class="text-ink-mute">跳到：</span>
         <a href="#profile" class="sp-chip-line hover:bg-brand-50">个人资料</a>
+        <a href="#prefs" class="sp-chip-line hover:bg-brand-50">练习偏好</a>
         <a href="#key" class="sp-chip-line hover:bg-brand-50">对话密钥</a>
         <a href="#tts" class="sp-chip-line hover:bg-brand-50">语音合成</a>
         <a href="#data" class="sp-chip-line hover:bg-brand-50">账号与数据</a>
@@ -375,6 +428,44 @@ function logout() {
           <p v-if="pwdState.tip" class="mt-2 text-xs text-good">{{ pwdState.tip }}</p>
           <p v-if="pwdState.error" class="mt-2 text-xs text-danger">{{ pwdState.error }}</p>
         </div>
+      </section>
+
+      <section id="prefs" class="sp-card scroll-mt-20 p-6">
+        <h2 class="font-semibold text-ink">练习偏好</h2>
+        <p class="mt-1 text-xs leading-5 text-ink-soft">新开的练习用这一档，历史和报告里的「再练一次」也用这一档。</p>
+        <div class="mt-4 inline-flex rounded-xl bg-canvas p-1 ring-1 ring-line">
+          <button
+            v-for="d in DIFFICULTIES"
+            :key="d.value"
+            class="rounded-lg px-4 py-1.5 text-sm transition"
+            :class="settings.prefDifficulty === d.value ? 'bg-white font-medium text-brand-700 shadow-sm' : 'text-ink-mute hover:text-ink-soft'"
+            :disabled="prefsTip.running"
+            @click="pickDifficulty(d.value)"
+          >
+            {{ d.label }}
+          </button>
+        </div>
+
+        <div class="mt-6">
+          <div class="text-xs font-medium text-ink-mute">新词范围</div>
+          <p class="mt-1 text-[11px] leading-5 text-ink-mute">学新单词从这一档里挑。</p>
+          <div class="mt-2 inline-flex rounded-xl bg-canvas p-1 ring-1 ring-line">
+            <button
+              v-for="s in SCOPES"
+              :key="s.id"
+              class="rounded-lg px-4 py-1.5 text-sm transition"
+              :class="settings.wordScope === s.id ? 'bg-white font-medium text-brand-700 shadow-sm' : 'text-ink-mute hover:text-ink-soft'"
+              :disabled="prefsTip.running"
+              @click="pickScope(s.id)"
+            >
+              {{ s.label }}
+            </button>
+          </div>
+        </div>
+
+        <p class="mt-3 text-xs leading-5 text-ink-mute">
+          {{ prefsTip.message || (settings.prefDifficulty ? `当前：${diffLabel(settings.prefDifficulty)}` : '还没选，开练时按上次成绩推荐') }}
+        </p>
       </section>
 
 <section id="key" class="sp-card scroll-mt-20 p-6">
@@ -576,5 +667,7 @@ function logout() {
         <button class="sp-btn-ghost text-xs" @click="router.push('/welcome?again=1')">再看一遍新手引导</button>
       </div>
     </main>
+
+    <TabBar />
   </div>
 </template>

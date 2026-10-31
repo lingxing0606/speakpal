@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import api from '../api/client'
@@ -16,19 +16,19 @@ const session = useSessionStore()
 const settings = useSettingsStore()
 
 const scenes = ref([])
-const difficulty = ref('medium')
 const loading = ref(false)
 const error = ref('')
 const needKey = ref(false)
 const envFallback = ref(false)
 const pendingScene = ref(null)
 const rec = ref(null)
-const pickedDifficulty = ref(false)
 const dueCount = ref(0)
 const notesCount = ref(0)
 const summaryError = ref(false)
 
 const DIFF_LABELS = { easy: '简单', medium: '中等', hard: '困难' }
+// 本次会用的难度：设置里的偏好 > 上次成绩推荐 > 中等
+const usedDifficulty = computed(() => settings.prefDifficulty || rec.value?.recommended_difficulty || 'medium')
 
 onMounted(async () => {
   try {
@@ -41,9 +41,6 @@ onMounted(async () => {
   try {
     const { data } = await api.get('/me/recommendation')
     rec.value = data
-    if (!pickedDifficulty.value && data?.recommended_difficulty) {
-      difficulty.value = data.recommended_difficulty
-    }
   } catch {
     rec.value = null
   }
@@ -60,21 +57,20 @@ onMounted(async () => {
   }
 })
 
-function pickRecommended() {
-  if (!rec.value?.recommended_difficulty) return
-  difficulty.value = rec.value.recommended_difficulty
-  pickedDifficulty.value = true
-}
-
 async function begin(scene) {
   loading.value = true
   error.value = ''
   try {
-    const { data } = await api.post('/sessions', {
-      scene_id: scene.id,
-      difficulty: difficulty.value,
-    })
-    session.start(data.session_id, scene, difficulty.value, data.opening_question)
+    // 不传 difficulty：服务端会用「设置 → 练习偏好」里的值
+    const { data } = await api.post('/sessions', { scene_id: scene.id })
+    let diff = usedDifficulty.value
+    try {
+      const detail = await api.get(`/sessions/${data.session_id}`)
+      diff = detail?.data?.difficulty || diff
+    } catch {
+      // 读不到就用本地偏好兜底
+    }
+    session.start(data.session_id, scene, diff, data.opening_question)
     router.push(`/practice/${data.session_id}`)
   } catch (e) {
     error.value = '开始失败：' + (e?.response?.data?.detail || e.message)
@@ -144,31 +140,15 @@ function logout() {
             选一个场景，开始说英语
           </h1>
           <p class="mt-1.5 text-sm text-ink-soft">和 AI 角色多轮对话，结束后拿到评分和逐句纠错。</p>
+          <p class="mt-2 text-xs text-ink-mute">本次难度 {{ DIFF_LABELS[usedDifficulty] || '中等' }}，可在设置里调整</p>
           <p class="mt-1 text-xs text-ink-mute sm:hidden">
             你好，{{ auth.user?.nickname || auth.user?.username }}
           </p>
         </div>
 
-        <div class="flex flex-col gap-1.5">
-          <label class="flex items-center gap-2 text-sm text-ink-soft">
-            <span class="text-xs font-medium text-ink-mute">难度</span>
-            <select v-model="difficulty" class="sp-select" @change="pickedDifficulty = true">
-              <option value="easy">简单</option>
-              <option value="medium">中等</option>
-              <option value="hard">困难</option>
-            </select>
-          </label>
-          <p v-if="rec" class="text-[11px] leading-5 text-ink-mute sm:text-right">
-            推荐 {{ DIFF_LABELS[rec.recommended_difficulty] || rec.recommended_difficulty }} · {{ rec.reason }}
-            <button
-              v-if="difficulty !== rec.recommended_difficulty"
-              class="ml-1 font-medium text-brand-700 underline-offset-2 hover:underline"
-              @click="pickRecommended"
-            >
-              用推荐
-            </button>
-          </p>
-        </div>
+        <p v-if="rec" class="text-[11px] leading-5 text-ink-mute sm:text-right">
+          推荐 {{ DIFF_LABELS[rec.recommended_difficulty] || rec.recommended_difficulty }} · {{ rec.reason }}
+        </p>
       </div>
 
       <p v-if="error" class="sp-alert-error mt-5">{{ error }}</p>
@@ -186,7 +166,7 @@ function logout() {
               <span v-if="!summaryError" class="text-sm text-ink-soft">个词</span>
             </div>
             <p class="mt-1.5 text-xs leading-5 text-ink-mute">
-              {{ summaryError ? '过一会儿再刷一次' : dueCount ? '之前错过的，今天再来一遍' : '练完一次，报告里的错词会进来' }}
+              {{ summaryError ? '过一会儿再刷一次' : dueCount ? '到期的词，今天过一遍' : '练完一次或学几个新词，这里就会有内容' }}
             </p>
           </div>
           <span class="sp-icon-tile shrink-0 text-brand-700">

@@ -3,12 +3,15 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import api from '../api/client'
+import BackLink from '../components/BackLink.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
+import { useSettingsStore } from '../stores/settings'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
 
 const router = useRouter()
 const session = useSessionStore()
+const settings = useSettingsStore()
 const items = ref([])
 const error = ref('')
 const rec = ref(null)
@@ -59,14 +62,18 @@ async function replay(item) {
     return
   }
   try {
-    const { data } = await api.post('/sessions', {
-      scene_id: item.scene_id,
-      difficulty: rec.value?.recommended_difficulty || 'medium',
-    })
+    const { data } = await api.post('/sessions', { scene_id: item.scene_id })
+    let diff = settings.prefDifficulty || rec.value?.recommended_difficulty || 'medium'
+    try {
+      const detail = await api.get(`/sessions/${data.session_id}`)
+      diff = detail?.data?.difficulty || diff
+    } catch {
+      // 读不到就用本地偏好兜底
+    }
     session.start(
       data.session_id,
       { id: item.scene_id, name: item.scene_name },
-      rec.value?.recommended_difficulty || 'medium',
+      diff,
       data.opening_question
     )
     router.push(`/practice/${data.session_id}`)
@@ -180,15 +187,15 @@ function open(item) {
     <header class="sp-header">
       <div class="sp-shell flex items-center justify-between py-3">
         <div class="flex items-center gap-3">
-          <router-link to="/" aria-label="返回首页">
+          <BackLink fallback="/" />
+          <span class="h-4 w-px bg-line"></span>
+          <router-link to="/" aria-label="首页">
             <BrandLogo :size="30" />
           </router-link>
-          <span class="h-4 w-px bg-line"></span>
           <div class="font-semibold text-ink">历史记录</div>
         </div>
         <div class="flex items-center gap-1">
           <router-link to="/settings" class="sp-btn-ghost">设置</router-link>
-          <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
         </div>
       </div>
     </header>

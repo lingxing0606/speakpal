@@ -22,6 +22,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const ttsBaseUrl = ref(saved.tts_base_url || '')
   const ttsModel = ref(saved.tts_model || '')
   const ttsVoice = ref(saved.tts_voice || '')
+  // 练习难度偏好：设置页里改，首页/历史/报告开练时统一读这里
+  const prefDifficulty = ref(saved.pref_difficulty || '')
+  // 新词范围（gaokao/cet4/cet6）：服务端为准，本地只做兜底缓存
+  const wordScope = ref(saved.word_scope || '')
 
   /** 本浏览器是否已配置对话模型密钥 */
   const configured = computed(() => !!apiKey.value.trim())
@@ -48,6 +52,8 @@ export const useSettingsStore = defineStore('settings', () => {
         tts_base_url: ttsBaseUrl.value.trim(),
         tts_model: ttsModel.value.trim(),
         tts_voice: ttsVoice.value.trim(),
+        pref_difficulty: prefDifficulty.value,
+        word_scope: wordScope.value,
       })
     )
   }
@@ -64,6 +70,16 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsBaseUrl.value = base || ''
     ttsModel.value = name || ''
     ttsVoice.value = voice || ''
+    persist()
+  }
+
+  function setPrefDifficulty(value) {
+    prefDifficulty.value = value || ''
+    persist()
+  }
+
+  function setWordScope(value) {
+    wordScope.value = value || ''
     persist()
   }
 
@@ -99,6 +115,10 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsBaseUrl,
     ttsModel,
     ttsVoice,
+    prefDifficulty,
+    setPrefDifficulty,
+    wordScope,
+    setWordScope,
     configured,
     ttsConfigured,
     masked,

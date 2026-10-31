@@ -5,11 +5,13 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
+import { useSettingsStore } from '../stores/settings'
 import { createRecognizer, speakSmart } from '../utils/speech'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
+const settings = useSettingsStore()
 
 const report = ref(null)
 const error = ref('')
@@ -194,16 +196,23 @@ async function nextPractice() {
   try {
     const rec = await api.get('/me/recommendation')
     const sceneId = rec?.data?.last_scene_id || meta.value?.scene_id
-    const difficulty = rec?.data?.recommended_difficulty || 'medium'
+    const difficulty = settings.prefDifficulty || rec?.data?.recommended_difficulty || 'medium'
     if (!sceneId) {
       router.push('/')
       return
     }
-    const { data } = await api.post('/sessions', { scene_id: sceneId, difficulty })
+    const { data } = await api.post('/sessions', { scene_id: sceneId })
+    let usedDiff = difficulty
+    try {
+      const detail = await api.get(`/sessions/${data.session_id}`)
+      usedDiff = detail?.data?.difficulty || usedDiff
+    } catch {
+      // 读不到就用本地偏好兜底
+    }
     session.start(
       data.session_id,
       { id: sceneId, name: meta.value?.scene_name || '练习' },
-      difficulty,
+      usedDiff,
       data.opening_question
     )
     router.push(`/practice/${data.session_id}`)
