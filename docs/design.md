@@ -118,7 +118,8 @@ speakpal/
 - 6 张场景卡（图标、场景名、一句描述）：求职面试 `job_interview` / 咖啡店点单 `cafe_order` / 雅思 Part 1 `ielts_part1` / 酒店入住 `hotel_checkin` / 机场值机 `airport_checkin` / 餐厅点餐 `restaurant_order`
 - 难度选择（简单 / 中等 / 困难）
 - 开始按钮
-- 「历史记录」入口
+- **「今天要复习 N 个词」卡片**：N 来自 `GET /api/study/due`；N=0 时给空状态（不摆一张空卡）。点进 `/study`
+- 「历史记录」「笔记」入口
 
 ### Practice 练习页（需登录）
 - 路由 `/practice/:id`，会话 id 在地址栏里——刷新不丢，能从历史「继续练习」回到同一场
@@ -132,12 +133,14 @@ speakpal/
 - 每句 AI 气泡带「播放」按钮（speechSynthesis）
 - 底部：只有一个「结束并生成报告」
 - **作答方式要分开记**：每轮存 `input_mode`（`voice` / `typed`）。前端能显式传就传，不传则后端按「有没有 audio_json」推断（`sessions.py:107-109`）。
-  录音轮和打字轮在报告里算不同维度，气泡上也应标出「打字 / 录音」，别让人分不清自己哪句是说的。入口
+  录音轮和打字轮在报告里算不同维度，气泡上也应标出「打字 / 录音」，别让人分不清自己哪句是说的。
 
 ### Report 复盘页（需登录）
 - 综合分大数字（衬线、等宽，切报告时不抖），旁边是「B1 · 雅思 5.5」这类档位文字；**分数不配红绿灯**，红绿只给错误/成功
 - 4 个维度：分数 + 各自 band
 - 逐句纠错列表：原句 → 更地道说法 → 原因（中文原因，英文原句与改写保持英文）；无改写的不显示删除线
+- **每条纠错带错误类型标签**（`error_type`：拼写 / 语法 / 僵硬 / 啰嗦，见 §16.4）和「加入学习清单」；`stiffness` 的卡额外显示 `natural`（更自然的说法 + 为什么）。
+  拼写类、僵硬类由后端自动落成学习卡草稿，用户不必手动点；语法/啰嗦类由用户自己决定加不加。
 - 「评分依据（可复现）」默认收起，展开看每维模型分/规则分/最终分/钳制原因/输入特征
 - **顶卡不要出现「分数由 AI 估算」**：那是降级/mock 的兜底文案。正常报告顶卡显示 `scoring_note`（「分数由模型分与可测指标融合得出」），
   否则同一张卡上「AI 估算」和「模型分与可测指标融合」并存，等于自己打自己。
@@ -160,6 +163,22 @@ speakpal/
 - **按 `status` / `report_id` 分支，不做 404 试探**（`HistoryItem` 里这两个字段就是为它加的）：
   `report_id` 非空 → 报告页（降级报告也能看）；`status=active` → `/practice/{id}` 接着练；只有「已完成却没有报告」这种罕见情况才落报告页的空报告说明。
 - 卡片右侧相应显示「进行中」药丸 +「继续练习」/ 衬线综合分 +「看报告」。**未出分 / 降级 / 未完成的会话都必须能点开**——点不开等于用户看不到自己那次练习；`History.vue:21` 原来只给有分的会话绑跳转，是 bug。
+- 空状态：还没练过时给「去练一次」，不写「暂无数据」。
+
+### Study 复习页（需登录，`/study`）
+
+- 一次只出现一张卡，正反面翻转：正面 `term`（词/句型）+ 出处 `context`；翻面给释义、例句、近反义/同类词、来源场景。
+- 三档反馈按钮：「忘了 / 模糊 / 认识」→ `POST /api/study/items/{id}/review`（`again / hard / good`），调度规则见 §16.2。
+- 今日队列走完给完成状态（今天还剩 0 张），**不要让人无限往下滑**。
+- 空状态：今天没有到期的卡时说明「今天没有要复习的」，并给「去练一次」；不摆空卡片。
+- 拼写类卡（`kind=spelling`）显示正确拼写与常见混淆点；句型类（`kind=phrase`）显示「原句 → 更自然说法 → 为什么」。
+
+### Notes 笔记页（需登录，`/notes`）
+
+- 列表：标题（没填就用正文首行）、更新时间、来源练习（若挂了会话）；点开编辑。
+- 编辑：标题可选、正文纯文本保留换行、可关联某次练习（从报告页「记一条笔记」带入）。
+- 空状态给「新建第一条笔记」；搜索无结果单独给状态，不要和「一条都没有」混用同一句。
+- 删除要就地确认，不跳页。
 
 ### Settings 设置页（需登录）
 
@@ -205,6 +224,15 @@ speakpal/
 | PATCH | /api/me/profile | 改昵称 / 密码（改密码要带 `current_password`，见 §5 设置页） | 是 |
 | POST | /api/tts | 语音合成（可选；无 key 409，key 被拒/不可达 502，见 §13.4） | 是 |
 | DELETE | /api/me/data | 清除自己的练习记录（只接受 `scope=records`，见 §13.2） | 是 |
+| GET | /api/study/due | 今天到期的学习卡（`due_at <= now`，见 §16.5） | 是 |
+| POST | /api/study/items | 新建学习卡（手动加入 / 报告页「加入学习清单」） | 是 |
+| POST | /api/study/items/{id}/review | 提交复习 `{result: again|hard|good}`，推进 `due_at` | 是 |
+| DELETE | /api/study/items/{id} | 删学习卡（只能删自己的） | 是 |
+| GET | /api/notes | 笔记列表 | 是 |
+| POST | /api/notes | 新建笔记（标题可选，可挂会话） | 是 |
+| GET | /api/notes/{id} | 读取笔记 | 是 |
+| PATCH | /api/notes/{id} | 修改笔记 | 是 |
+| DELETE | /api/notes/{id} | 删除笔记 | 是 |
 | DELETE | /api/me/account | 注销账号：删记录 + 删用户，`confirm="注销"`（见 §13.2） | 是 |
 | DELETE | /api/admin/data | 清空全库（ADMIN_KEY，`confirm="删除"`，`scope=account` 连用户） | 否（管理密钥） |
 | PUT | /api/admin/storage | 改数据目录，重启生效（运维用，网页不展示） | 否（管理密钥） |
@@ -288,7 +316,13 @@ turns(id, session_id, role, content, audio_json, input_mode, created_at)        
 reports(id, session_id, total_score, band, cefr, bands_json, dimensions_json,
         fixes_json, comment, source, mock_reason, scoring_json,
         answer_mode, comparable_band, created_at)                        -- answer_mode: voice | typed | mixed
+drill_attempts(id, report_id, item_index, transcript, similarity, created_at)   -- 跟读重说
+study_items(id, user_id, kind, term, context, meaning_zh, example, related_json,
+            source_session_id, ease, interval_days, due_at, reps, lapses, created_at)  -- 见 §16.1
+notes(id, user_id, title, body, session_id, created_at, updated_at)              -- 见 §16.3
 ```
+
+> 学习卡与笔记的字段语义、调度规则、错误类型枚举在 **§16**；这里只列表名，避免两处各写一份。
 
 ## 8. AI 设计
 
@@ -497,3 +531,101 @@ System prompt 模板：
 - 跨模式比较一律用 `comparable_band`：只取两种作答都会评的共享维度（`grammar_vocab` + `task_completion`）求平均再换 band（`bands.py:94-103`，`rules.py:426` 起写库）。
   报告与历史接口都带这个字段；**成长曲线纵轴用它，且全部会话都画**（本轮定稿推翻「只画录音」），打字会话用空心点区分、行内标 `answer_mode`。
 - `written_expression` 没有规则分，权重 0 : 1（只有模型判断，`rules.py:394-402`）；它的 CEFR/雅思锚点仍待补，别在别处另造一套评分。
+
+## 16. 学习闭环：单词本 / 笔记 / 针对性方案（v0.5 新增，接口已定稿）
+
+一次练习结束不是终点：报告里挑出来的错误要能变成**下次能复习的卡片**。三块数据 + 一个复习调度，全部挂在当前用户名下。
+
+### 16.1 `study_items`（学习卡）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `user_id` | INTEGER FK → users | 按用户隔离，跨账号不可见 |
+| `kind` | VARCHAR(8) | `word`（单词）/ `phrase`（句型）/ `spelling`（拼写错） |
+| `term` | VARCHAR(128) | 卡片正面：要学的词或句型 |
+| `context` | TEXT | 出现的那句话（语境学习的关键，别丢） |
+| `meaning_zh` | TEXT | 中文释义 |
+| `example` | TEXT | 例句 |
+| `related_json` | TEXT | 近义词 / 反义词 / 同类词，`{"synonyms":[],"antonyms":[],"similar":[]}` |
+| `source_session_id` | INTEGER 可空 | 来自哪次练习 |
+| `ease` | REAL | SM-2 的难度因子，初值 2.5 |
+| `interval_days` | REAL | 当前间隔（天） |
+| `due_at` | DATETIME | 下次到期时间 |
+| `reps` / `lapses` | INTEGER | 复习次数 / 忘记次数 |
+| `created_at` | DATETIME | |
+
+### 16.2 间隔重复规则（简化 SM-2，按此实现）
+
+三档反馈：`again`（忘了）/ `hard`（模糊）/ `good`（认识）。
+
+| 反馈 | `interval_days` | `due_at` |
+|---|---|---|
+| `again` | 置 1 | **落在当天**（今天内还会再出现） |
+| `hard` | `max(1, interval × 1.2)` | now + 新间隔 |
+| `good` | `max(1, interval × 2.5)` | now + 新间隔 |
+
+- 上限 **60 天**，超过按 60 算（`good` 连按十几次也不会把间隔拉到一年后）。
+- `reps` 每次 +1；`again` 另加 `lapses` +1。
+- `ease` 的更新公式**尚未定**（真实 SM-2 里 again −0.2、hard −0.15、good 不变，下限 1.3），等功能建议落代码后回填本节，别先在文档里编。
+- 验收口径（Chief 已定）：三档必须真的推进 `due_at`——`again` 今天再来、`good` 间隔明显变长；首页「今天要复习 N 个」的 N 必须等于库里 `due_at <= now` 的条数。
+
+### 16.3 `notes`（笔记）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` / `user_id` | INTEGER | 按用户隔离 |
+| `title` | VARCHAR(128) 可空 | 不填就取正文首行前 N 字，别强制用户起标题 |
+| `body` | TEXT | 正文（Markdown 不做渲染，纯文本保留换行） |
+| `session_id` | INTEGER 可空 | 可挂在某次练习上，从报告页一键新建 |
+| `created_at` / `updated_at` | DATETIME | |
+
+### 16.4 报告里的错误分类（`error_type` + `natural`）
+
+每个 `sentence_fix` 增加两个字段：
+
+| 字段 | 取值 | 用途 |
+|---|---|---|
+| `error_type` | `spelling` / `grammar` / `stiffness` / `wordiness` | 决定给什么方案、落不落学习卡 |
+| `natural` | 更自然的说法（英文） | 「语言太僵硬」的针对性方案，和 `better` 并存：`better` 改错，`natural` 换说法 |
+
+- 枚举固定这四个，别自创第五种；模型给了表外的值按 `grammar` 兜底并记日志。
+- **自动建卡**：`spelling` → `study_items(kind=spelling)`；`stiffness` → `study_items(kind=phrase)`（`term` 取 `better`/`natural`，`context` 取原句）。
+  `grammar` / `wordiness` **不自动建卡**，只在报告里给「加入学习清单」按钮由用户决定——错题本该有取舍，不然复习队列会被语法错灌满。
+- 自动建卡写入的是**草稿**（`due_at = 现在`，`reps=0`），用户第一次复习才算正式开始。
+
+### 16.5 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/study/due` | 今天到期的卡（`due_at <= now`，按到期时间升序） |
+| POST | `/api/study/items` | 新建卡（手动加入 / 报告页「加入学习清单」） |
+| POST | `/api/study/items/{id}/review` | 提交一次复习：body `{result: "again"|"hard"|"good"}` → 返回新的 `interval_days` / `due_at` |
+| DELETE | `/api/study/items/{id}` | 删卡（只能删自己的） |
+| GET/POST | `/api/notes` | 笔记列表 / 新建 |
+| GET/PATCH/DELETE | `/api/notes/{id}` | 读取 / 修改 / 删除 |
+
+约定：全部按 `user_id` 隔离，别人的 id 一律 404（不 403，避免探测存在性）；复习结果不是三档之一返 400；`due` 只返本用户、只返已到期的。
+
+### 16.6 前端落点（ui 做，依赖上面的接口）
+
+- 首页一张「今天要复习 N 个词」卡片（N=0 时给空状态，不显示一块空卡片）；点进 `/study` 做翻转卡片复习，三档按钮就是「忘了 / 模糊 / 认识」。
+- `/notes` 笔记列表 + 编辑（空状态、搜索无结果状态都要有）；报告页每条纠错旁给「加入学习清单」，拼写类给单词讲解 + 近反义/同类词，句型类给「原句 → 更自然说法 → 为什么」。
+- 文案遵守 §17：不写「（可选）」「点击后…」这类旁白，不解释机制本身。
+
+## 17. 文案与设计准则（v0.5 起强制）
+
+用户明确要求：「前端不要写一些不必要的文字，不要专门用括号告诉用户要干什么」。
+
+**文案**
+- 界面**不解释自身机制**：删掉「这段引导只出现一次」「（可选）」「点击后会自动保存」这类自述与操作旁白。用户要的是能干什么，不是它怎么运作。
+- 括号只用于**必要澄清**（单位、必填标记），不用来补一句说明；一句话只传达一个用户需要的信息。
+- 已知要清理的三处：`Welcome.vue` 的「这段引导只出现一次」、设置页的「（可选）」「留空用默认」、练习页的「（已说 1 句）」。
+- 第二人称、动词开头、不堆形容词；错误提示说清「发生了什么 + 下一步能做什么」。
+
+**设计**
+- 留白优先：间距用 **8px 刻度**，组间距 **24/32**；层级靠字号、字重、留白，不靠一层层加边框。
+- 卡片要有 **hover 抬升 + 按下微反馈**；可点的东西看起来就该能点。
+- **每个列表都要空状态**（历史、今日复习、笔记、搜索无结果），空状态给一句下一步，不写「暂无数据」。
+- 配色克制：青玉绿主色 + 珊瑚只给录音；分数不配红绿灯（见 §5 报告页）。
+- 参照 figma / claude / canva 那类克制排版：大留白、清晰网格、少量装饰；不做炫技动效。
