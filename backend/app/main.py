@@ -66,6 +66,23 @@ def _ensure_schema():
                 conn.execute(
                     text("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0")
                 )
+    if "notes" in tables:
+        cols = {c["name"] for c in insp.get_columns("notes")}
+        # 早期版本的笔记表用 content 存正文，现在的模型叫 body，查列表会直接 500（用户截图报过）
+        if "body" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE notes ADD COLUMN body TEXT DEFAULT ''"))
+                if "content" in cols:
+                    conn.execute(text("UPDATE notes SET body = COALESCE(content, '')"))
+        if "updated_at" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE notes ADD COLUMN updated_at DATETIME"))
+                conn.execute(text("UPDATE notes SET updated_at = created_at WHERE updated_at IS NULL"))
+    if "study_items" in tables:
+        cols = {c["name"] for c in insp.get_columns("study_items")}
+        if "related_json" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE study_items ADD COLUMN related_json TEXT DEFAULT '{}'"))
 
 
 _ensure_schema()
