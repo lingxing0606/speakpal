@@ -15,6 +15,9 @@ class User(Base):
     nickname = Column(String(64), default="")
     # 改密码时 +1，让其他设备上签发的 token 立即失效
     token_version = Column(Integer, default=0, nullable=False)
+    # 设置页的偏好：练习难度（easy|medium|hard）、新词词库范围（gaokao|cet4|cet6）
+    practice_difficulty = Column(String(16), default="medium")
+    word_scope = Column(String(16), default="cet4")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     sessions = relationship("PracticeSession", back_populates="user")
@@ -118,6 +121,8 @@ class StudyItem(Base):
         Text, default='{"synonyms":[],"antonyms":[],"similar":[]}'
     )
     source_session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
+    # vocab = 词库学来的新词（计入每日新词上限）；'' = 报告自动建卡 / 手动加入
+    source = Column(String(16), default="")
     ease = Column(Float, default=2.5)
     interval_days = Column(Float, default=0)
     due_at = Column(DateTime, default=datetime.utcnow, index=True)

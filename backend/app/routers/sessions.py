@@ -65,7 +65,10 @@ def create_session(
     scene = get_scene(body.scene_id)
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在")
-    difficulty = (body.difficulty or "medium").strip().lower()
+    # 不传难度就用设置里的偏好（难度从首页搬进设置后，练习页不再单独选）
+    difficulty = (body.difficulty or "").strip().lower() or (
+        user.practice_difficulty or "medium"
+    ).strip().lower()
     if difficulty not in ("easy", "medium", "hard"):
         raise HTTPException(status_code=400, detail="难度只能是 easy / medium / hard")
     sess = PracticeSession(

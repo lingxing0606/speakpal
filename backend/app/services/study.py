@@ -58,6 +58,7 @@ def item_out(row: StudyItem, now: datetime | None = None) -> StudyItemOut:
         example=row.example or "",
         related=_loads(row.related_json, dict(EMPTY_RELATED)),
         source_session_id=row.source_session_id,
+        source=(row.source or ""),
         reps=int(row.reps or 0),
         lapses=int(row.lapses or 0),
         interval_days=float(row.interval_days or 0),
@@ -161,6 +162,7 @@ def create_cards(db: OrmSession, user_id: int, session_id: int | None, cards):
             example=card.get("example") or "",
             related_json=json.dumps(card.get("related") or EMPTY_RELATED, ensure_ascii=False),
             source_session_id=session_id,
+            source="report",  # 报告自动建卡，见 docs/design.md §16.1
             due_at=datetime.utcnow(),  # 草稿：立即可复习
         )
         db.add(row)

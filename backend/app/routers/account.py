@@ -13,11 +13,21 @@ from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
 from ..models import PracticeSession, Report, User
-from ..schemas import ProfileOut, ProfileUpdateIn, RecommendationOut, UserOut
+from ..schemas import (
+    PreferencesIn,
+    PreferencesOut,
+    ProfileOut,
+    ProfileUpdateIn,
+    RecommendationOut,
+    UserOut,
+)
 from ..security import create_token, get_current_user, hash_password, verify_password
+from ..services import wordbank
 from ..services.user_data import delete_user_data
 
 router = APIRouter(prefix="/api/me", tags=["me"])
+
+DIFFICULTIES = ("easy", "medium", "hard")
 
 
 class DeleteDataIn(BaseModel):
@@ -63,6 +73,40 @@ def update_my_profile(
     if password_changed:
         out.token = create_token(user.id, user.token_version)
     return out
+
+
+@router.get("/settings", response_model=PreferencesOut)
+def get_my_settings(user: User = Depends(get_current_user)):
+    """设置页偏好：练习难度、新词词库范围。跟着账号走，换设备也在。"""
+    return PreferencesOut(
+        practice_difficulty=(user.practice_difficulty or "medium"),
+        word_scope=(user.word_scope or wordbank.default_scope()),
+    )
+
+
+@router.patch("/settings", response_model=PreferencesOut)
+def update_my_settings(
+    body: PreferencesIn,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """局部更新；取值不在枚举内返 400。切换词库只影响之后取的新词，已学的卡不动。"""
+    if body.practice_difficulty is not None:
+        difficulty = body.practice_difficulty.strip().lower()
+        if difficulty not in DIFFICULTIES:
+            raise HTTPException(status_code=400, detail="难度只能是 easy / medium / hard")
+        user.practice_difficulty = difficulty
+    if body.word_scope is not None:
+        scope = body.word_scope.strip().lower()
+        if scope not in wordbank.scope_ids():
+            raise HTTPException(status_code=400, detail="单词范围不存在")
+        user.word_scope = scope
+    db.commit()
+    db.refresh(user)
+    return PreferencesOut(
+        practice_difficulty=(user.practice_difficulty or "medium"),
+        word_scope=(user.word_scope or wordbank.default_scope()),
+    )
 
 
 @router.get("/recommendation", response_model=RecommendationOut)

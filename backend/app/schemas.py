@@ -58,7 +58,8 @@ class SceneOut(BaseModel):
 
 class CreateSessionIn(BaseModel):
     scene_id: str
-    difficulty: str = "medium"
+    # 不传就用设置里的偏好难度，见 PATCH /api/me/preferences
+    difficulty: str | None = None
 
 
 class CreateSessionOut(BaseModel):
@@ -109,6 +110,8 @@ class StudyItemOut(BaseModel):
     example: str = ""
     related: Dict[str, Any] = {}
     source_session_id: int | None = None
+    # vocab = 从词库学的新词（计入每日新词上限）；空 = 报告/手动加的卡
+    source: str = ""
     reps: int = 0
     lapses: int = 0
     interval_days: float = 0
@@ -237,6 +240,8 @@ class StudyItemIn(BaseModel):
     example: str = ""
     related: Dict[str, Any] = {}
     source_session_id: int | None = None
+    # report | vocab | review，不传按 report（报告页「加入学习清单」）
+    source: str | None = None
 
 
 class StudyReviewIn(BaseModel):
@@ -259,3 +264,63 @@ class NoteOut(BaseModel):
     session_id: int | None = None
     created_at: str
     updated_at: str
+
+
+class PreferencesOut(BaseModel):
+    """设置页的偏好（跟着账号走，换设备也还在）。难度从首页搬进设置后由这里提供。"""
+
+    practice_difficulty: str = "medium"  # easy | medium | hard
+    word_scope: str = "cet4"  # 新词从哪个词库取：gaokao | cet4 | cet6
+
+
+class PreferencesIn(BaseModel):
+    practice_difficulty: str | None = None
+    word_scope: str | None = None
+
+
+class VocabWordOut(BaseModel):
+    scope: str
+    term: str
+    phonetic: str = ""
+    pos: str = ""
+    meaning_zh: str = ""
+    example: str = ""
+    example_zh: str = ""
+    level: str = ""
+    related: Dict[str, Any] = {}
+
+
+class VocabOut(BaseModel):
+    """「今天学几个新词」：范围和进度一起给，前端不用再发一次范围请求。"""
+
+    scope: str
+    name: str = ""
+    desc: str = ""
+    total: int = 0
+    learned: int = 0
+    remaining: int = 0
+    daily_limit: int = 20
+    used_today: int = 0
+    remaining_today: int = 20
+    items: List[VocabWordOut] = []
+    scopes: List[Dict[str, Any]] = []
+
+
+class VocabAddIn(BaseModel):
+    """两种加法：给出具体词（terms），或按范围直接取 count 个。"""
+
+    terms: List[str] | None = None
+    scope: str | None = None
+    count: int | None = None
+
+
+class VocabAddOut(BaseModel):
+    """added=新建了几张卡；skipped=已经在清单里；limited=今天新词额度用完没加。"""
+
+    added: int = 0
+    skipped: int = 0
+    limited: int = 0
+    daily_limit: int = 20
+    used_today: int = 0
+    remaining_today: int = 20
+    items: List[StudyItemOut] = []

@@ -66,6 +66,15 @@ def _ensure_schema():
                 conn.execute(
                     text("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0")
                 )
+        # 设置页偏好（难度 / 新词范围），旧库补列
+        user_prefs = {
+            "practice_difficulty": "VARCHAR(16) DEFAULT 'medium'",
+            "word_scope": "VARCHAR(16) DEFAULT 'cet4'",
+        }
+        for name, ddl in user_prefs.items():
+            if name not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
     if "notes" in tables:
         cols = {c["name"] for c in insp.get_columns("notes")}
         # 早期版本的笔记表用 content 存正文，现在的模型叫 body，查列表会直接 500（用户截图报过）
@@ -78,11 +87,50 @@ def _ensure_schema():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE notes ADD COLUMN updated_at DATETIME"))
                 conn.execute(text("UPDATE notes SET updated_at = created_at WHERE updated_at IS NULL"))
+        # 迁完之后旧列 content / learning_item_id 仍留在表里：同一个正文两个列并存，
+        # 还挂着一个已删表（learning_items）的外键，翻库说不清哪个是真身。
+        # 数据为空或有值都能重建，正文取 body（没有就退回 content）。
+        if "content" in cols or "learning_item_id" in cols:
+            body_expr = (
+                "COALESCE(body, content, '')"
+                if {"body", "content"} <= cols
+                else ("COALESCE(body, '')" if "body" in cols else "COALESCE(content, '')")
+            )
+            with engine.begin() as conn:
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
+                conn.execute(
+                    text(
+                        "CREATE TABLE notes_clean ("
+                        "id INTEGER NOT NULL PRIMARY KEY, "
+                        "user_id INTEGER NOT NULL, "
+                        "title VARCHAR(128), "
+                        "body TEXT, "
+                        "session_id INTEGER, "
+                        "created_at DATETIME, "
+                        "updated_at DATETIME, "
+                        "FOREIGN KEY(user_id) REFERENCES users (id), "
+                        "FOREIGN KEY(session_id) REFERENCES sessions (id))"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO notes_clean (id, user_id, title, body, session_id, created_at, updated_at) "
+                        f"SELECT id, user_id, title, {body_expr}, session_id, created_at, "
+                        "COALESCE(updated_at, created_at) FROM notes"
+                    )
+                )
+                conn.execute(text("DROP TABLE notes"))
+                conn.execute(text("ALTER TABLE notes_clean RENAME TO notes"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notes_user_id ON notes (user_id)"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
     if "study_items" in tables:
         cols = {c["name"] for c in insp.get_columns("study_items")}
         if "related_json" not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE study_items ADD COLUMN related_json TEXT DEFAULT '{}'"))
+        if "source" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE study_items ADD COLUMN source VARCHAR(16) DEFAULT ''"))
 
 
 _ensure_schema()
