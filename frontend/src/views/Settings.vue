@@ -358,14 +358,15 @@ function logout() {
     <header class="sp-header">
       <div class="sp-shell flex items-center justify-between py-3">
         <div class="flex items-center gap-3">
-          <router-link to="/" aria-label="返回首页">
+          <BackLink fallback="/" />
+          <span class="h-4 w-px bg-line"></span>
+          <router-link to="/" aria-label="首页">
             <BrandLogo :size="30" />
           </router-link>
           <span class="h-4 w-px bg-line"></span>
           <div class="font-semibold text-ink">设置</div>
         </div>
         <div class="flex items-center gap-1">
-          <BackLink :desktop-only="true" fallback="/" />
           <button class="sp-btn-ghost" @click="logout">退出</button>
         </div>
       </div>
@@ -374,8 +375,6 @@ function logout() {
     <main class="sp-shell space-y-5 py-8">
       <p v-if="onboarding" class="sp-alert-warn">
         配一下你自己的模型密钥，之后每次练习都用它调用评分模型。
-        <template v-if="server.env_configured === true">没有密钥也可以先跳过，用服务端的兜底密钥。</template>
-        <template v-else-if="server.env_configured === false">服务端没有配兜底密钥，不填就开不了练习。</template>
         <button class="ml-2 font-medium underline" @click="router.push('/')">先跳过</button>
       </p>
 
@@ -464,14 +463,14 @@ function logout() {
         </div>
 
         <p class="mt-3 text-xs leading-5 text-ink-mute">
-          {{ prefsTip.message || (settings.prefDifficulty ? `当前：${diffLabel(settings.prefDifficulty)}` : '还没选，开练时按上次成绩推荐') }}
+          {{ prefsTip.message || '换台电脑登录，这一档也跟着你。' }}
         </p>
       </section>
 
 <section id="key" class="sp-card scroll-mt-20 p-6">
         <h2 class="font-semibold text-ink">模型密钥</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
-          只存在这个浏览器里，不上传、不写数据库、不写日志；不填就用服务端的兜底密钥。
+          只存在这个浏览器里，不上传、不写数据库、不写日志。
         </p>
         <p class="mt-1 text-xs leading-5 text-ink-mute">
           没有 key？
@@ -527,8 +526,6 @@ function logout() {
           </p>
           <p class="text-xs leading-5 text-ink-mute">
             当前：{{ settings.configured ? `已配置 ${settings.masked}` : '本浏览器未配置' }}
-            <span v-if="server.env_configured === true">· 服务端已配置兜底密钥</span>
-            <span v-else-if="server.env_configured === false">· 服务端未配置兜底密钥</span>
             <span v-if="server.error">· 读取服务端状态失败：{{ server.error }}</span>
           </p>
         </div>

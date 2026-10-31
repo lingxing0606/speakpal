@@ -19,7 +19,6 @@ const scenes = ref([])
 const loading = ref(false)
 const error = ref('')
 const needKey = ref(false)
-const envFallback = ref(false)
 const pendingScene = ref(null)
 const rec = ref(null)
 const dueCount = ref(0)
@@ -79,27 +78,14 @@ async function begin(scene) {
   }
 }
 
-async function start(scene) {
-  // 用户要求：点场景开练就要先有密钥。本浏览器没填时，先停下来问清楚，
-  // 而不是拿服务端兜底 key 悄悄放行
+function start(scene) {
+  // 点场景开练必须先有密钥：服务端不提供，本浏览器没填就只给「去设置填密钥」这一条路
   if (!settings.configured) {
     pendingScene.value = scene
     needKey.value = true
-    try {
-      const { data } = await api.get('/config/llm')
-      envFallback.value = !!data?.env_configured
-    } catch {
-      envFallback.value = false
-    }
     return
   }
-  await begin(scene)
-}
-
-function useServerKey() {
-  const scene = pendingScene.value
-  needKey.value = false
-  if (scene) begin(scene)
+  begin(scene)
 }
 
 function logout() {
@@ -139,23 +125,18 @@ function logout() {
           <h1 class="text-[26px] font-bold leading-tight tracking-tight text-ink">
             选一个场景，开始说英语
           </h1>
-          <p class="mt-1.5 text-sm text-ink-soft">和 AI 角色多轮对话，结束后拿到评分和逐句纠错。</p>
           <p class="mt-2 text-xs text-ink-mute">本次难度 {{ DIFF_LABELS[usedDifficulty] || '中等' }}，可在设置里调整</p>
           <p class="mt-1 text-xs text-ink-mute sm:hidden">
             你好，{{ auth.user?.nickname || auth.user?.username }}
           </p>
         </div>
-
-        <p v-if="rec" class="text-[11px] leading-5 text-ink-mute sm:text-right">
-          推荐 {{ DIFF_LABELS[rec.recommended_difficulty] || rec.recommended_difficulty }} · {{ rec.reason }}
-        </p>
       </div>
 
       <p v-if="error" class="sp-alert-error mt-5">{{ error }}</p>
 
       <div class="mt-8 grid gap-3 sm:grid-cols-2">
         <router-link
-          to="/study"
+          to="/study?tab=review"
           class="sp-card group flex items-center justify-between gap-4 p-5 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lift active:translate-y-0"
         >
           <div class="min-w-0">
@@ -163,10 +144,10 @@ function logout() {
             <div class="mt-1.5 flex items-baseline gap-1.5">
               <span v-if="!summaryError" class="sp-num text-[26px] font-semibold leading-none text-ink">{{ dueCount }}</span>
               <span v-else class="text-sm font-medium text-ink-mute">暂时取不到</span>
-              <span v-if="!summaryError" class="text-sm text-ink-soft">个词</span>
+              <span v-if="!summaryError" class="text-sm text-ink-soft">张卡</span>
             </div>
             <p class="mt-1.5 text-xs leading-5 text-ink-mute">
-              {{ summaryError ? '过一会儿再刷一次' : dueCount ? '到期的词，今天过一遍' : '练完一次或学几个新词，这里就会有内容' }}
+              {{ summaryError ? '过一会儿再刷一次' : dueCount ? '到期的卡，今天过一遍' : '练完一次或学几个新词，这里就会有内容' }}
             </p>
           </div>
           <span class="sp-icon-tile shrink-0 text-brand-700">
@@ -214,11 +195,9 @@ function logout() {
             <div class="font-semibold text-ink">先接入一个模型密钥</div>
             <p class="mt-1 text-xs leading-5 text-ink-soft">
               练习要靠模型陪聊和评分。密钥只存在你自己的浏览器里，不上传、不写数据库。
-              <template v-if="!envFallback">服务端目前也没有兜底密钥，所以必须自己填。</template>
             </p>
             <div class="mt-3 flex flex-wrap items-center gap-2">
               <button class="sp-btn-primary" @click="router.push('/settings?onboarding=1')">去设置填密钥</button>
-              <button v-if="envFallback" class="sp-btn-secondary" @click="useServerKey">用服务端密钥继续</button>
               <button class="sp-btn-ghost" @click="needKey = false">取消</button>
             </div>
           </div>
@@ -254,10 +233,6 @@ function logout() {
           <div class="mt-2 h-3 w-full rounded bg-slate-100"></div>
         </div>
       </div>
-
-      <p class="mt-8 text-center text-xs text-ink-mute">
-        每一轮都由 AI 角色追问，结束后按 CEFR / 雅思量表出分
-      </p>
     </main>
 
     <TabBar />

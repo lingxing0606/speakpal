@@ -46,13 +46,8 @@ const error = ref('')
 const loading = ref(false)
 
 async function firstStop() {
-  // 没配密钥且服务端也没有兜底密钥时才引导去设置页；接口不可用时放行，别挡住演示
-  try {
-    const { data } = await api.get('/config/llm')
-    return data?.env_configured ? '/' : '/settings?onboarding=1'
-  } catch {
-    return '/'
-  }
+  // 服务端不再提供密钥：本浏览器填过就直接进首页，没填就去设置页
+  return settings.configured ? '/' : '/settings?onboarding=1'
 }
 
 async function submit() {

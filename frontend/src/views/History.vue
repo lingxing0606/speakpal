@@ -16,7 +16,6 @@ const items = ref([])
 const error = ref('')
 const rec = ref(null)
 const needKey = ref(false)
-const envFallback = ref(false)
 const pendingItem = ref(null)
 
 onMounted(async () => {
@@ -34,15 +33,9 @@ onMounted(async () => {
   }
 })
 
-async function askKey(item) {
+function askKey(item) {
   pendingItem.value = item
   needKey.value = true
-  try {
-    const { data } = await api.get('/config/llm')
-    envFallback.value = !!data?.env_configured
-  } catch {
-    envFallback.value = false
-  }
 }
 
 // 继续练 / 再练一次都要先确认有密钥，别让人听完开场白、录完一句才被拒
@@ -80,12 +73,6 @@ async function replay(item) {
   } catch (e) {
     error.value = '开始失败：' + (e?.response?.data?.detail || e.message)
   }
-}
-
-function useServerKey() {
-  const item = pendingItem.value
-  needKey.value = false
-  if (item) resume(item)
 }
 
 // 成长曲线用可比 band（语言复杂度 + 语用得体性），打字和录音都能进同一条线；
@@ -192,6 +179,7 @@ function open(item) {
           <router-link to="/" aria-label="首页">
             <BrandLogo :size="30" />
           </router-link>
+          <span class="h-4 w-px bg-line"></span>
           <div class="font-semibold text-ink">历史记录</div>
         </div>
         <div class="flex items-center gap-1">
@@ -207,11 +195,9 @@ function open(item) {
         <div class="font-semibold text-ink">先接入一个模型密钥</div>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           继续练习会调用模型陪聊和评分。密钥只存在你自己的浏览器里，不上传、不写数据库。
-          <template v-if="!envFallback">服务端目前也没有兜底密钥，所以必须自己填。</template>
         </p>
         <div class="mt-3 flex flex-wrap items-center gap-2">
           <button class="sp-btn-primary" @click="router.push('/settings?onboarding=1')">去设置填密钥</button>
-          <button v-if="envFallback" class="sp-btn-secondary" @click="useServerKey">用服务端密钥继续</button>
           <button class="sp-btn-ghost" @click="needKey = false">取消</button>
         </div>
       </div>

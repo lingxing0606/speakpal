@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
@@ -40,12 +40,7 @@ const frames = ref([])
 const framesOpen = ref(false)
 const framesLoading = ref(false)
 
-async function toggleFrames() {
-  if (framesOpen.value) {
-    framesOpen.value = false
-    return
-  }
-  framesOpen.value = true
+async function ensureFrames() {
   if (frames.value.length) return
   const sceneId = session.scene?.id
   if (!sceneId) return
@@ -60,6 +55,15 @@ async function toggleFrames() {
   }
 }
 
+async function toggleFrames() {
+  if (framesOpen.value) {
+    framesOpen.value = false
+    return
+  }
+  framesOpen.value = true
+  await ensureFrames()
+}
+
 function useFrame(f) {
   manualText.value = f.en
   recognizedText.value = ''
@@ -72,6 +76,62 @@ function useFrame(f) {
 // 用户改过文字就不带录音了，免得「语速/停顿」指标和文字对不上
 const recognizedText = ref('')
 let pendingAudio = null
+
+// 手动输入条打开后 8 秒没动键盘，就在输入框上方递三条可用说法；每次进练习页只递一次
+const hintVisible = ref(false)
+const hintOffered = ref(false)
+const hintFrames = computed(() => frames.value.slice(0, 3))
+let hintTimer = null
+
+function clearHintTimer() {
+  if (hintTimer) {
+    clearTimeout(hintTimer)
+    hintTimer = null
+  }
+}
+
+async function offerHint() {
+  if (hintOffered.value || !manualOpen.value || manualText.value.trim()) return
+  hintOffered.value = true
+  await ensureFrames()
+  // 场景没有句型提示时不要挂一行空提示
+  if (frames.value.length && manualOpen.value && !manualText.value.trim()) hintVisible.value = true
+}
+
+function scheduleHint() {
+  clearHintTimer()
+  if (hintOffered.value) return
+  hintTimer = setTimeout(offerHint, 8000)
+}
+
+function hideHint() {
+  hintVisible.value = false
+  clearHintTimer()
+}
+
+watch([manualOpen, manualText], ([open, text]) => {
+  // 一打字就收起；关掉输入条也收起
+  if (!open || text.trim()) {
+    hideHint()
+    return
+  }
+  scheduleHint()
+})
+
+// 点一条就把句式填进输入框，光标放末尾
+function useHintFrame(f) {
+  manualText.value = f.en
+  recognizedText.value = ''
+  pendingAudio = null
+  hintVisible.value = false
+  nextTick(() => {
+    const el = manualInput.value
+    if (!el) return
+    el.focus()
+    const len = el.value.length
+    el.setSelectionRange(len, len)
+  })
+}
 
 let recognizer = null
 let capturer = null
@@ -93,7 +153,6 @@ const progressHint = computed(() => {
 
 // 进对话前先确认有密钥：不让人听完开场白、录完一句才被拒
 const blocked = ref(false)
-const envFallback = ref(false)
 const blockReason = ref('')
 
 // 进页缺密钥 / 发送时被 502 拒，都落到同一张页内面板
@@ -122,12 +181,6 @@ onMounted(async () => {
   if (!gate.ok) {
     blocked.value = true
     blockReason.value = ''
-    try {
-      const { data } = await api.get('/config/llm')
-      envFallback.value = !!data?.env_configured
-    } catch {
-      envFallback.value = false
-    }
     return
   }
   await loadSession(id)
@@ -167,14 +220,9 @@ async function loadSession(id) {
   if (last && last.role === 'ai') speakSmart(last.content, { rate: speechRate.value })
 }
 
-function continueWithServer() {
-  blockReason.value = ''
-  blocked.value = false
-  loadSession(Number(route.params.id))
-}
-
 onUnmounted(() => {
   stopTimer()
+  clearHintTimer()
   if (recognizer) recognizer.abort?.()
 })
 
@@ -420,11 +468,9 @@ async function finish() {
         </p>
         <p v-else class="mt-1.5 text-sm leading-6 text-ink-soft">
           练习要调用模型陪聊和评分，没有密钥会中途卡住。密钥只存在你自己的浏览器里，不上传、不写数据库。
-          <template v-if="!envFallback">服务端目前也没有兜底密钥，所以必须自己填。</template>
         </p>
         <div class="mt-4 flex flex-wrap items-center gap-2">
           <button class="sp-btn-primary" @click="router.push('/settings?onboarding=1')">去设置填密钥</button>
-          <button v-if="envFallback" class="sp-btn-secondary" @click="continueWithServer">用服务端密钥继续</button>
           <button v-if="blockReason" class="sp-btn-ghost" @click="blocked = false">返回练习</button>
           <button v-else class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
         </div>
@@ -490,7 +536,7 @@ async function finish() {
 
       <p v-if="loadingSession" class="text-center text-xs text-ink-mute">正在恢复这次对话…</p>
       <p v-else-if="!session.turns.length" class="text-center text-xs text-ink-mute">
-        点下面的麦克风开口说，或者说不了就点「手动输入」
+        点下面的麦克风开口说
       </p>
     </main>
 
@@ -543,6 +589,19 @@ async function finish() {
         </div>
 
         <div v-if="manualOpen" class="space-y-2">
+          <div class="min-h-[26px]">
+            <div v-if="hintVisible" class="flex flex-wrap items-center gap-1.5">
+              <span class="text-xs text-ink-mute">不知道怎么说？试试这些用法：</span>
+              <button
+                v-for="f in hintFrames"
+                :key="f.en"
+                class="sp-chip-line transition hover:bg-brand-50"
+                @click="useHintFrame(f)"
+              >
+                {{ f.en }}
+              </button>
+            </div>
+          </div>
           <p v-if="recognizedText" class="text-xs text-brand-700">
             这是识别到的内容，确认或改一下，按 Enter 发送。
           </p>

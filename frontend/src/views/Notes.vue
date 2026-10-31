@@ -104,7 +104,7 @@ function when(iso) {
     <header class="sp-header">
       <div class="sp-shell flex items-center justify-between py-3">
         <div class="flex items-center gap-3">
-          <BackLink :desktop-only="true" />
+          <BackLink fallback="/" />
           <span class="h-4 w-px bg-line"></span>
           <router-link to="/" aria-label="首页">
             <BrandLogo :size="30" />
