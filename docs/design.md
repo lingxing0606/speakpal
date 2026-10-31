@@ -122,7 +122,7 @@ speakpal/
 ### Home 首页 / 场景选择（需登录）
 - 顶部：昵称 + 退出登录
 - 6 张场景卡（图标、场景名、一句描述）：求职面试 `job_interview` / 咖啡店点单 `cafe_order` / 雅思 Part 1 `ielts_part1` / 酒店入住 `hotel_checkin` / 机场值机 `airport_checkin` / 餐厅点餐 `restaurant_order`
-- 难度选择（简单 / 中等 / 困难）
+- **难度选择已移出首页**（用户要求）：进「设置 → 练习」改，首页不再摆这个控件；练习页顶部只显示当前难度（只读）
 - 开始按钮
 - **「今天要复习 N 个」卡片**：`N` 来自 `GET /api/study/summary`（**只调一次**，别再分别打 `/study/due` 和 `/notes`）；N=0 时给空状态（不摆一张空卡）。
   **取不到时不要静默当 0**：显示「暂时取不到」，否则「后端挂了」和「今天没卡」在界面上一样，用户会以为学习计划空了。点进 `/study`
@@ -199,7 +199,9 @@ speakpal/
 
 ### Settings 设置页（需登录）
 
-四块（「数据存储位置」已按用户要求从网页移除，见 §13.3）：
+五块（「数据存储位置」已按用户要求从网页移除，见 §13.3）：
+
+- **练习**：难度（简单 / 中等 / 困难，默认中等）+ 词库范围（高考 / 四级 / 六级，默认四级）。存在服务端，换设备跟着走（§18.1）。
 
 - **模型密钥（对话）**：输入 → 「测试连接」→ 成功显示脱敏结果（只露后四位）→ 可删除本地密钥。key 只存 localStorage，不落库、不打日志。旁边要有「怎么拿 key」的说明和**真实可用**的官方链接。
 - **语音合成密钥（可选）**：`key / base_url / model / voice` 四项；说明写清「不填就用浏览器内置朗读，填了走第三方计费」，同样附官方链接与获取步骤。
@@ -243,6 +245,10 @@ speakpal/
 | DELETE | /api/me/data | 清除自己的练习记录（只接受 `scope=records`，见 §13.2） | 是 |
 | GET | /api/study/due | 今天到期的学习卡（`date(due_at) <= today`，见 §16.5） | 是 |
 | GET | /api/study/summary | 首页聚合：`{due_count, notes_count, total, word_count, phrase_count, spelling_count}`（不是单独的业务操作，见 §16.5） | 是 |
+| GET | /api/study/vocab | 词库取词：`?scope=gaokao|cet4|cet6&limit=`，只返还没建卡的词（见 §18.3） | 是 |
+| POST | /api/study/vocab/add | 把选中的词落成学习卡（按 user+term+kind 去重） | 是 |
+| GET | /api/me/settings | 用户偏好：`{practice_difficulty, word_scope}`（见 §18.1） | 是 |
+| PATCH | /api/me/settings | 改偏好（局部更新，枚举外返 400） | 是 |
 | POST | /api/study/items | 新建学习卡（手动加入 / 报告页「加入学习清单」） | 是 |
 | POST | /api/study/items/{id}/review | 提交复习 `{grade: again|hard|good}` 或拼写卡 `{answer}`，推进 `due_at` | 是 |
 | DELETE | /api/study/items/{id} | 删学习卡（只能删自己的） | 是 |
@@ -669,3 +675,46 @@ System prompt 模板：
 - **每个列表都要空状态**（历史、今日复习、笔记、搜索无结果），空状态给一句下一步，不写「暂无数据」。
 - 配色克制：青玉绿主色 + 珊瑚只给录音；分数不配红绿灯（见 §5 报告页）。
 - 参照 figma / claude / canva 那类克制排版：大留白、清晰网格、少量装饰；不做炫技动效。
+
+
+## 18. 新词学习与用户偏好（v0.6 需求，契约待确认）
+
+用户要的三条：① 能系统学**新单词**，可选词库范围（高考 / 四级 / 六级）；② 难度选项从首页移到**设置**；③ 学习 / 笔记 / 历史 / 设置四个页面都要有**返回**。
+
+### 18.1 用户偏好（服务端存，跟着账号走）
+
+| 字段 | 取值 | 默认 | 说明 |
+|---|---|---|---|
+| `practice_difficulty` | `easy` / `medium` / `hard` | `medium` | 首页不再选难度，进设置改；练习页顶部显示当前难度（只读） |
+| `word_scope` | `gaokao` / `cet4` / `cet6` | `cet4` | 新词学习从哪个词库取；切换只影响**之后**取的新词，已学的卡不动 |
+
+存 `users` 表两列（启动时 `_ensure_schema` 补列），因为换设备要跟着走；不要只放 localStorage。
+接口：`GET /api/me/settings` → `{practice_difficulty, word_scope}`；`PATCH /api/me/settings` 局部更新，取值不在枚举内返 400。
+
+### 18.2 词库
+
+- 内置静态词表，每档一个文件（`backend/app/data/wordbanks/{gaokao|cet4|cet6}.json`），条目至少含 `term`、`meaning_zh`、`example`、`pos`、`related`。
+  **不联网取词、不引第三方词典依赖**——要能在断网机器上跑。
+- 每档 200–500 词起（够演示即可），词表进仓库；不提交音频。
+- 词库只放单词（`kind=word`），词组/句型不进去。
+
+### 18.3 学新词流程（复用 §16 的 SRS，不另起一套）
+
+1. `GET /api/study/vocab?scope=<scope>&limit=20` → 该档中**用户还没有卡**的词，用于「今天学 N 个新词」。
+2. `POST /api/study/vocab/add` body `{terms: [...]}`（或 `{scope, count}`）→ 落成 `study_items(kind=word, source='vocab')`，
+   `due_at` 设当天、`ease=2.5 / interval=0 / reps=0`；**按 `user_id + term + kind` 去重**，重复词不建第二张卡。
+3. 之后完全走 §16.2 的调度和 §5 复习页——**不新增「新词专用复习逻辑」**，两套调度迟早对不上。
+4. 学习页顶部两段：「今天要复习 N 个」（到期队列）与「学几个新词」（词库取词，取完可直接加）。
+5. 每日新词上限 **20**；用户手动加不设上限。
+
+### 18.4 页面导航（用户要求）
+
+- 除首页、登录页、欢迎页外，**每个页面顶部左侧都有返回**：学习 / 笔记 / 历史 / 设置 / 报告 / 复习。返回上一页（`router.back()`），没有历史回首页。
+- 移动端底部 tab 常驻（首页 / 学习 / 笔记 / 设置，见 §5 导航）；**学习入口在底部**，不在页头——用户明确要求过。
+- 桌面页头保持「学习 / 笔记 / 历史 / 设置」，与移动端四个主入口一致（历史在移动端收进学习页）。
+
+### 18.5 待确认（不要按这版直接写死）
+
+- 词库文件名与字段名沿用 §16 的 `meaning_zh`，实现时和前端对齐一次。
+- 「学新词」放学习页顶部还是单独 `/study/new` 路由，等 ui 出图定。
+- 难度是否允许练习页临时覆盖：目前定「设置里改、练习页只读」；要允许临时改得多一个 `override` 参数。
