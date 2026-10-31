@@ -1,0 +1,22 @@
+{
+  "group": "articles",
+  "name": "冠词",
+  "desc": "a/an、the 与零冠词",
+  "items": [
+    { "id": "articles-01", "point": "a 与 an 的选择", "rule": "看后面词的读音：元音音素前用 an，辅音音素前用 a。", "wrong": "I saw a apple on the table.", "right": "I saw an apple on the table." },
+    { "id": "articles-02", "point": "再次提到用 the", "rule": "第一次用 a/an，第二次提同一个东西用 the。", "wrong": "I bought a book. A book is interesting.", "right": "I bought a book. The book is interesting." },
+    { "id": "articles-03", "point": "特指用 the", "rule": "双方都知道的那个东西前用 the。", "wrong": "Please close door.", "right": "Please close the door." },
+    { "id": "articles-04", "point": "独一无二的事物用 the", "rule": "太阳、月亮、地球这类唯一的用 the。", "wrong": "Sun rises in east.", "right": "The sun rises in the east." },
+    { "id": "articles-05", "point": "泛指复数不加 the", "rule": "泛指一类东西的复数形式不加冠词。", "wrong": "I like the dogs.", "right": "I like dogs." },
+    { "id": "articles-06", "point": "不可数名词不加 a", "rule": "advice、information、news 这类不可数词不加 a/an。", "wrong": "She gave me a good advice.", "right": "She gave me good advice." },
+    { "id": "articles-07", "point": "三餐不加冠词", "rule": "breakfast、lunch、dinner 前面通常不加冠词。", "wrong": "I have a breakfast at seven.", "right": "I have breakfast at seven." },
+    { "id": "articles-08", "point": "语言与学科不加冠词", "rule": "说某种语言或学某门学科时不加 the。", "wrong": "I study the English.", "right": "I study English." },
+    { "id": "articles-09", "point": "乐器前加 the", "rule": "弹奏乐器用 play the + 乐器。", "wrong": "She plays piano.", "right": "She plays the piano." },
+    { "id": "articles-10", "point": "球类前不加 the", "rule": "踢球、打球用 play + 球类，不加 the。", "wrong": "He plays the football.", "right": "He plays football." },
+    { "id": "articles-11", "point": "最高级前加 the", "rule": "形容词最高级前加 the。", "wrong": "He is tallest in the class.", "right": "He is the tallest in the class." },
+    { "id": "articles-12", "point": "序数词前加 the", "rule": "first、second 这类序数词前加 the。", "wrong": "This is first time I fly.", "right": "This is the first time I have flown." },
+    { "id": "articles-13", "point": "国名与地名一般不加 the", "rule": "China、Beijing 这类名字不加 the（the UK、the USA 除外）。", "wrong": "I visited the China last year.", "right": "I visited China last year." },
+    { "id": "articles-14", "point": "固定搭配：in the morning", "rule": "上午、下午、晚上用 in the morning / afternoon / evening。", "wrong": "I run in morning.", "right": "I run in the morning." },
+    { "id": "articles-15", "point": "职业前用 a/an", "rule": "说一个人是什么职业，单数要用 a/an。", "wrong": "She is teacher.", "right": "She is a teacher." }
+  ]
+}

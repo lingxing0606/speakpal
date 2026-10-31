@@ -1,7 +1,9 @@
-"""每个请求的模型配置：浏览器带来的 key 优先，`.env` 兜底。
+"""每个请求的模型配置：只用浏览器带来的 key。
 
-密钥只在内存里用一次，不落库、不打日志。base_url / model 同样支持请求头覆盖，
-这样用户可以用自己的中转或别的 OpenAI 兼容服务。
+用户要求服务端不再提供密钥，所以这里**没有 `.env` 兜底**：
+没有 `X-LLM-Key` 就是未配置，接口按 409 `llm_not_configured` 拦住，
+前端只留「去设置填密钥」这一条路。密钥只在内存里用一次，不落库、不打日志。
+base_url / model 仍支持请求头覆盖，用户可以用自己的中转或别的 OpenAI 兼容服务。
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ class LLMConfig:
     api_key: str
     base_url: str
     model: str
-    key_source: str  # user | env | none
+    key_source: str  # user | none（服务端密钥已下线，不再有 env）
 
     @property
     def from_user(self) -> bool:
@@ -48,13 +50,8 @@ def build_llm_config(
     model: str | None = None,
 ) -> LLMConfig:
     user_key = _clean(api_key)
-    env_key = (settings.llm_api_key or "").strip()
-    if user_key:
-        key, source = user_key, "user"
-    elif env_key:
-        key, source = env_key, "env"
-    else:
-        key, source = "", "none"
+    # 服务端不再提供密钥：没有浏览器带来的 key 就是未配置，不做 `.env` 兜底
+    key, source = (user_key, "user") if user_key else ("", "none")
     return LLMConfig(
         api_key=key,
         base_url=_clean(base_url) or settings.llm_base_url,

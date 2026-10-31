@@ -291,7 +291,11 @@ class VocabWordOut(BaseModel):
 
 
 class VocabOut(BaseModel):
-    """「今天学几个新词」：范围和进度一起给，前端不用再发一次范围请求。"""
+    """「今天学几个新词」：范围和进度一起给，前端不用再发一次范围请求。
+
+    每日新词上限已取消：`daily_limit` / `remaining_today` 保留字段但为 null，
+    前端不要再据此禁用按钮。
+    """
 
     scope: str
     name: str = ""
@@ -299,9 +303,9 @@ class VocabOut(BaseModel):
     total: int = 0
     learned: int = 0
     remaining: int = 0
-    daily_limit: int = 20
+    daily_limit: int | None = None
     used_today: int = 0
-    remaining_today: int = 20
+    remaining_today: int | None = None
     items: List[VocabWordOut] = []
     scopes: List[Dict[str, Any]] = []
 
@@ -315,12 +319,84 @@ class VocabAddIn(BaseModel):
 
 
 class VocabAddOut(BaseModel):
-    """added=新建了几张卡；skipped=已经在清单里；limited=今天新词额度用完没加。"""
+    """added=新建了几张卡；skipped=已经在清单里；limited 保留但恒为 0（不再限每日数量）。"""
 
     added: int = 0
     skipped: int = 0
     limited: int = 0
-    daily_limit: int = 20
+    daily_limit: int | None = None
     used_today: int = 0
-    remaining_today: int = 20
+    remaining_today: int | None = None
     items: List[StudyItemOut] = []
+
+
+class GrammarCardOut(BaseModel):
+    id: str
+    group: str
+    group_name: str = ""
+    point: str
+    rule: str = ""
+    wrong: str = ""
+    right: str = ""
+    blank: str = ""
+    answer: str = ""
+    learned: bool = False
+
+
+class GrammarGroupOut(BaseModel):
+    id: str
+    name: str
+    desc: str = ""
+    total: int = 0
+    learned: int = 0
+    items: List[GrammarCardOut] = []
+
+
+class GrammarOut(BaseModel):
+    groups: List[GrammarGroupOut] = []
+    total: int = 0
+    learned: int = 0
+
+
+class SpokenCardOut(BaseModel):
+    id: str
+    formal: str
+    natural: str
+    why: str = ""
+    learned: bool = False
+
+
+class SpokenOut(BaseModel):
+    total: int = 0
+    learned: int = 0
+    items: List[SpokenCardOut] = []
+
+
+class LibraryAddIn(BaseModel):
+    """语法/口语加卡：`ids` 指定卡；只给 `group` 就加整组；口语可以只给 `count`。"""
+
+    ids: List[str] | None = None
+    group: str | None = None
+    count: int | None = None
+
+
+class LibraryAddOut(BaseModel):
+    added: int = 0
+    skipped: int = 0
+    remaining: int = 0
+    items: List[StudyItemOut] = []
+
+
+class TodayGroupOut(BaseModel):
+    key: str
+    label: str
+    count: int = 0
+    items: List[StudyItemOut] = []
+
+
+class TodayOut(BaseModel):
+    """「今天」合并队列：组内按到期时间，组间固定顺序（单词 → 拼写 → 语法 → 口语 → 句型）。"""
+
+    groups: List[TodayGroupOut] = []
+    total: int = 0
+    notes_count: int = 0

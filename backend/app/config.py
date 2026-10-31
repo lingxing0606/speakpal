@@ -54,7 +54,8 @@ class Settings:
     database_url: str = _DATABASE_URL
     database_source: str = _DATABASE_SOURCE
     location_file: str = str(LOCATION_FILE)
-    llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    # 对话密钥不再由服务端保存（用户要求）：只认浏览器带来的 X-LLM-Key，
+    # 所以这里没有 llm_api_key；.env 里就算写了 LLM_API_KEY 也不会被读取。
     llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     llm_model: str = os.getenv("LLM_MODEL", "deepseek-chat")
     # 语音合成（可选）：用的是 OpenAI 兼容的 /audio/speech，不填就走浏览器内置朗读

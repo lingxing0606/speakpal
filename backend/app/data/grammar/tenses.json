@@ -1,0 +1,22 @@
+{
+  "group": "tenses",
+  "name": "时态",
+  "desc": "一般时、进行时、完成时与被动",
+  "items": [
+    { "id": "tenses-01", "point": "一般现在时：第三人称单数", "rule": "主语是 he/she/it 或单数名词时，动词加 -s / -es。", "wrong": "He go to school by bus.", "right": "He goes to school by bus." },
+    { "id": "tenses-02", "point": "一般现在时：否定与疑问", "rule": "否定和疑问用 does，后面的动词回到原形。", "wrong": "She doesn't likes coffee.", "right": "She doesn't like coffee." },
+    { "id": "tenses-03", "point": "一般过去时：规则动词", "rule": "过去发生的事用动词过去式，常见加 -ed。", "wrong": "I walk to the park yesterday.", "right": "I walked to the park yesterday." },
+    { "id": "tenses-04", "point": "一般过去时：be 动词", "rule": "I/he/she/it 用 was，you/we/they 用 were。", "wrong": "I were tired last night.", "right": "I was tired last night." },
+    { "id": "tenses-05", "point": "现在进行时", "rule": "am/is/are + 动词 -ing，表示正在发生。", "wrong": "He is work now.", "right": "He is working now." },
+    { "id": "tenses-06", "point": "过去进行时", "rule": "was/were + 动词 -ing，表示过去某一刻正在进行。", "wrong": "I was cook when you called.", "right": "I was cooking when you called." },
+    { "id": "tenses-07", "point": "现在完成时", "rule": "have/has + 过去分词，强调对现在的影响。", "wrong": "I have finish my homework.", "right": "I have finished my homework." },
+    { "id": "tenses-08", "point": "现在完成时：for 与 since", "rule": "for 接一段时间，since 接时间点。", "wrong": "I have lived here since three years.", "right": "I have lived here for three years." },
+    { "id": "tenses-09", "point": "过去完成时", "rule": "had + 过去分词，表示比另一个过去动作更早。", "wrong": "She had left before I arrive.", "right": "She had left before I arrived." },
+    { "id": "tenses-10", "point": "一般将来时：will", "rule": "will 后面永远接动词原形。", "wrong": "I will went tomorrow.", "right": "I will go tomorrow." },
+    { "id": "tenses-11", "point": "一般将来时：be going to", "rule": "be going to 后面接动词原形，表示打算。", "wrong": "We are going to visited the museum.", "right": "We are going to visit the museum." },
+    { "id": "tenses-12", "point": "现在完成进行时", "rule": "have/has been + 动词 -ing，表示一直持续到刚才。", "wrong": "I have been wait for an hour.", "right": "I have been waiting for an hour." },
+    { "id": "tenses-13", "point": "被动语态：一般现在时", "rule": "am/is/are + 过去分词。", "wrong": "English is speak in many countries.", "right": "English is spoken in many countries." },
+    { "id": "tenses-14", "point": "被动语态：一般过去时", "rule": "was/were + 过去分词。", "wrong": "The building was build in 1990.", "right": "The building was built in 1990." },
+    { "id": "tenses-15", "point": "条件句：主将从现", "rule": "if 从句用一般现在时，主句用将来时。", "wrong": "If it will rain, we will stay home.", "right": "If it rains, we will stay home." }
+  ]
+}

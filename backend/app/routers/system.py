@@ -18,12 +18,14 @@ router = APIRouter(prefix="/api", tags=["system"])
 
 @router.get("/config/llm")
 def get_llm_settings(user: User = Depends(get_current_user)):
-    """只告诉前端“服务端有没有兜底密钥”和默认地址，绝不回显密钥。"""
+    """默认地址与是否配置了服务端密钥；绝不回显任何密钥。"""
     return {
-        "env_configured": bool((settings.llm_api_key or "").strip()),
+        # 服务端不再提供对话密钥（用户要求）：恒为 false，
+        # 前端据此去掉「用服务端密钥继续」，只留「去设置填密钥」。
+        "env_configured": False,
         "default_base_url": settings.llm_base_url,
         "default_model": settings.llm_model,
-        # 服务端有没有兜底 TTS key：前端据此决定要不要试 /api/tts
+        # 语音合成仍可有服务端兜底 key：前端据此决定要不要试 /api/tts
         "tts_env_configured": bool((settings.tts_api_key or "").strip()),
         "default_tts_base_url": settings.tts_base_url,
         "default_tts_model": settings.tts_model,

@@ -16,7 +16,7 @@ from ..models import StudyItem
 from ..schemas import StudyItemOut
 from ..timeutil import utc_iso
 
-KINDS = ("word", "phrase", "spelling")
+KINDS = ("word", "phrase", "spelling", "grammar")
 AUTO_KINDS = {"spelling": "spelling", "stiffness": "phrase"}
 MAX_TERM = 128
 

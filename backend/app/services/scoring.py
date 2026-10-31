@@ -256,7 +256,7 @@ def generate_report(scene: dict, difficulty: str, history, llm: LLMConfig | None
     """
     llm = llm or build_llm_config()
     if not llm.configured:
-        return _fallback_report(history, MOCK_NOT_CONFIGURED, "未配置 LLM_API_KEY，也没有用户密钥")
+        return _fallback_report(history, MOCK_NOT_CONFIGURED, "没有检测到模型密钥")
 
     try:
         text = _request_report(llm, scene, difficulty, history)

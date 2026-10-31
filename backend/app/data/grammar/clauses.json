@@ -1,0 +1,22 @@
+{
+  "group": "clauses",
+  "name": "从句",
+  "desc": "宾语、定语与状语从句",
+  "items": [
+    { "id": "clauses-01", "point": "宾语从句用陈述语序", "rule": "从句里主语在前、动词在后，不用疑问语序。", "wrong": "Can you tell me where is the station?", "right": "Can you tell me where the station is?" },
+    { "id": "clauses-02", "point": "宾语从句的时态一致", "rule": "主句是过去时，从句一般也用过去时。", "wrong": "He said he will come.", "right": "He said he would come." },
+    { "id": "clauses-03", "point": "whether 与 or not", "rule": "和 or not 连用时只用 whether。", "wrong": "I don't know if he comes or not.", "right": "I don't know whether he comes or not." },
+    { "id": "clauses-04", "point": "定语从句：人用 who", "rule": "先行词是人时，关系代词用 who 或 that。", "wrong": "The man which called you is my uncle.", "right": "The man who called you is my uncle." },
+    { "id": "clauses-05", "point": "定语从句：物用 which", "rule": "先行词是物时，关系代词用 which 或 that。", "wrong": "The book who I bought is good.", "right": "The book which I bought is good." },
+    { "id": "clauses-06", "point": "定语从句：地点用 where", "rule": "先行词是地点，且从句缺地点状语，用 where。", "wrong": "The city where I born is small.", "right": "The city where I was born is small." },
+    { "id": "clauses-07", "point": "介词后用 which", "rule": "介词后面指物只能用 which，不能用 that。", "wrong": "The house in that he lives is old.", "right": "The house in which he lives is old." },
+    { "id": "clauses-08", "point": "时间状语从句用一般现在时", "rule": "when 从句说将来时，用一般现在时代替 will。", "wrong": "When I will finish, I will call you.", "right": "When I finish, I will call you." },
+    { "id": "clauses-09", "point": "unless 已经含否定", "rule": "unless 相当于 if not，从句里不再加 don't。", "wrong": "Unless you don't hurry, we will be late.", "right": "Unless you hurry, we will be late." },
+    { "id": "clauses-10", "point": "because 与 so 不连用", "rule": "because 和 so 只用其中一个，不能同时出现。", "wrong": "Because it rained, so we stayed home.", "right": "Because it rained, we stayed home." },
+    { "id": "clauses-11", "point": "主语从句用 it 占位", "rule": "真正的主语太长时，用 it 放在句首占位。", "wrong": "Is important that we start early.", "right": "It is important that we start early." },
+    { "id": "clauses-12", "point": "although 与 but 不连用", "rule": "although 和 but 只能留一个。", "wrong": "Although he is young, but he is wise.", "right": "Although he is young, he is wise." },
+    { "id": "clauses-13", "point": "so...that 前后时态一致", "rule": "so...that 的结果从句时态要和主句一致。", "wrong": "He was so tired that he can't walk.", "right": "He was so tired that he couldn't walk." },
+    { "id": "clauses-14", "point": "表语从句用 that", "rule": "The problem is that... 不用 because 引导表语从句。", "wrong": "The problem is because we have no time.", "right": "The problem is that we have no time." },
+    { "id": "clauses-15", "point": "疑问词从句用陈述语序", "rule": "I wonder / I don't know 后面接陈述语序。", "wrong": "I wonder what time is it.", "right": "I wonder what time it is." }
+  ]
+}

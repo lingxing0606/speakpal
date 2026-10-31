@@ -10,17 +10,26 @@ from sqlalchemy.orm import Session as OrmSession
 from ..db import get_db
 from ..models import Note, PracticeSession, StudyItem, User
 from ..schemas import (
+    GrammarCardOut,
+    GrammarGroupOut,
+    GrammarOut,
+    LibraryAddIn,
+    LibraryAddOut,
     NoteIn,
     NoteOut,
+    SpokenCardOut,
+    SpokenOut,
     StudyItemIn,
     StudyItemOut,
     StudyReviewIn,
+    TodayGroupOut,
+    TodayOut,
     VocabAddIn,
     VocabAddOut,
     VocabOut,
 )
 from ..security import get_current_user
-from ..services import wordbank
+from ..services import library, wordbank
 from ..services.srs import schedule
 from ..services.study import KINDS, is_due, item_out, judge_spelling, normalize_related
 from ..timeutil import utc_iso
@@ -28,8 +37,8 @@ from ..timeutil import utc_iso
 router = APIRouter(prefix="/api", tags=["study"])
 
 MAX_TERM = 128
-# 学习卡来源（docs/design.md §16.1）：报告里加的 / 词库学的新词 / 复习时补的
-SOURCES = ("report", "vocab", "review")
+# 学习卡来源（docs/design.md §16.1）：报告里加的 / 词库新词 / 复习补的 / 语法课 / 口语课
+SOURCES = ("report", "vocab", "review", "grammar", "spoken")
 SOURCE_REPORT = "report"
 
 
@@ -67,17 +76,30 @@ def due_items(
 
 @router.get("/study/summary")
 def study_summary(user: User = Depends(get_current_user), db: OrmSession = Depends(get_db)):
-    """首页两张卡的聚合接口：字段名按设计文档（*_count）。"""
+    """首页与四个 tab 的聚合接口：字段名按设计文档（*_count）。
+
+    `due_count` 与 `/study/due` 同源同量；分类型的 due_*_count 给 tab 上的数字用。
+    """
     now = datetime.utcnow()
     rows = db.query(StudyItem).filter(StudyItem.user_id == user.id).all()
     notes_count = db.query(Note).filter(Note.user_id == user.id).count()
+    due = [row for row in rows if is_due(row, now)]
+    due_by_key: dict[str, int] = {}
+    for row in due:
+        due_by_key[_today_key(row)] = due_by_key.get(_today_key(row), 0) + 1
     return {
-        "due_count": sum(1 for row in rows if is_due(row, now)),
+        "due_count": len(due),
         "notes_count": int(notes_count or 0),
         "total": len(rows),
         "word_count": sum(1 for row in rows if row.kind == "word"),
         "phrase_count": sum(1 for row in rows if row.kind == "phrase"),
         "spelling_count": sum(1 for row in rows if row.kind == "spelling"),
+        "grammar_count": sum(1 for row in rows if row.kind == "grammar"),
+        "due_word_count": due_by_key.get("word", 0),
+        "due_spelling_count": due_by_key.get("spelling", 0),
+        "due_grammar_count": due_by_key.get("grammar", 0),
+        "due_spoken_count": due_by_key.get("spoken", 0),
+        "due_phrase_count": due_by_key.get("phrase", 0),
     }
 
 
@@ -143,10 +165,19 @@ def review_item(
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
 ):
-    """句型/单词卡用 grade 自评三档；拼写卡传 answer，由服务端按编辑距离判档。"""
+    """按卡的题型判档：拼写默写、语法填空/整句改写、口语改写走 `answer`；
+    单词卡和报告来的句型卡才用 `grade` 自评。"""
     row = _item_or_404(db, user.id, item_id)
     answer = (body.answer or "").strip()
-    if answer:
+    related = item_out(row).related
+    if row.kind == "grammar" or row.source == "spoken":
+        if not answer:
+            raise HTTPException(status_code=400, detail="这类卡要用 answer 提交改写后的说法")
+        if row.kind == "grammar":
+            result = library.judge_grammar(answer, row.example or "", str(related.get("answer") or ""))
+        else:
+            result = library.judge_spoken(answer, row.example or "")
+    elif answer:
         if row.kind != "spelling":
             raise HTTPException(status_code=400, detail="只有拼写卡需要默写判定")
         result, _distance = judge_spelling(answer, row.term)
@@ -183,8 +214,9 @@ def delete_item(
 
 
 # ---------------------------------------------------------------- 新词词库
-# 每日新词上限（docs/design.md §18.3）；手动加入 / 报告自动建卡不计入
-DAILY_NEW_WORDS = 20
+# 每日新词上限已取消（用户要求「选多少加多少」）：保留 used_today 供展示，
+# 但不再有 DAILY_NEW_WORDS 常量，也不再用它截断 added / 禁用按钮。
+MAX_VOCAB_PULL = 200  # 一次最多取多少个词，防手滑传个 99999
 
 
 def _learned_word_terms(db: OrmSession, user_id: int) -> set[str]:
@@ -198,7 +230,7 @@ def _learned_word_terms(db: OrmSession, user_id: int) -> set[str]:
 
 
 def _vocab_used_today(db: OrmSession, user_id: int) -> int:
-    """今天已经用词库加了几张新词卡（按 UTC 日期，和到期判定同一口径）。"""
+    """今天用词库加了几张新词卡（只用于展示，不再限制）。"""
     today = datetime.utcnow().date()
     rows = (
         db.query(StudyItem.created_at)
@@ -231,10 +263,9 @@ def vocab_next(
     if scope_id and scope_id not in wordbank.scope_ids():
         raise HTTPException(status_code=400, detail="单词范围不存在")
     scope_id = _scope_or_default(scope_id, user)
-    limit = max(1, min(limit, DAILY_NEW_WORDS))
+    limit = max(1, min(limit, MAX_VOCAB_PULL))
     learned = _learned_word_terms(db, user.id)
     info = wordbank.totals(scope_id, learned)
-    used_today = _vocab_used_today(db, user.id)
     return VocabOut(
         scope=scope_id,
         name=info["name"],
@@ -242,9 +273,7 @@ def vocab_next(
         total=info["total"],
         learned=info["learned"],
         remaining=info["remaining"],
-        daily_limit=DAILY_NEW_WORDS,
-        used_today=used_today,
-        remaining_today=max(0, DAILY_NEW_WORDS - used_today),
+        used_today=_vocab_used_today(db, user.id),
         items=wordbank.next_words(scope_id, learned, limit),
         scopes=wordbank.scopes_out(),
     )
@@ -273,17 +302,13 @@ def vocab_add(
         if term:
             requested.append(term)
     if not requested and body.count:
-        count = max(1, min(int(body.count), DAILY_NEW_WORDS))
+        count = max(1, min(int(body.count), MAX_VOCAB_PULL))
         requested = [w["term"] for w in wordbank.next_words(scope_id, learned, count)]
     if not requested:
         raise HTTPException(status_code=400, detail="没有要加入的新词")
 
-    used_today = _vocab_used_today(db, user.id)
-    remaining_today = max(0, DAILY_NEW_WORDS - used_today)
-
     added_rows = []
     skipped = 0
-    limited = 0
     seen = set()
     for term in requested:
         key = term.lower()
@@ -294,9 +319,6 @@ def vocab_add(
         found = wordbank.find(term, scope_id)
         if not found:
             skipped += 1
-            continue
-        if len(added_rows) >= remaining_today:
-            limited += 1
             continue
         entry, found_scope = found
         card = wordbank.word_out(entry, found_scope)
@@ -314,7 +336,7 @@ def vocab_add(
         db.add(row)
         added_rows.append(row)
 
-    if not added_rows and not skipped and not limited:
+    if not added_rows and not skipped:
         raise HTTPException(status_code=404, detail="词库里没有这些词")
     db.commit()
     for row in added_rows:
@@ -322,12 +344,261 @@ def vocab_add(
     return VocabAddOut(
         added=len(added_rows),
         skipped=skipped,
-        limited=limited,
-        daily_limit=DAILY_NEW_WORDS,
-        used_today=used_today + len(added_rows),
-        remaining_today=max(0, remaining_today - len(added_rows)),
+        limited=0,
+        used_today=_vocab_used_today(db, user.id),
         items=[item_out(row) for row in added_rows],
     )
+
+
+# ---------------------------------------------------------------- 语法卡 / 口语卡
+def _learned_keys(db: OrmSession, user_id: int, kind: str) -> set[str]:
+    rows = (
+        db.query(StudyItem.term)
+        .filter(StudyItem.user_id == user_id, StudyItem.kind == kind)
+        .all()
+    )
+    return {str(row[0]).strip().lower() for row in rows if row[0]}
+
+
+def _add_cards(db: OrmSession, user_id: int, cards: list[dict]) -> tuple[list[StudyItem], int]:
+    """按 (user_id, kind, term) 去重后建卡；返回 (新建的卡, 跳过数)。"""
+    existing = {
+        (row.kind, (row.term or "").strip().lower())
+        for row in db.query(StudyItem).filter(StudyItem.user_id == user_id).all()
+    }
+    added: list[StudyItem] = []
+    skipped = 0
+    for card in cards:
+        key = (card["kind"], card["term"].strip().lower())
+        if key in existing:
+            skipped += 1
+            continue
+        existing.add(key)
+        row = StudyItem(
+            user_id=user_id,
+            kind=card["kind"],
+            term=card["term"][:MAX_TERM],
+            context=card.get("context") or "",
+            meaning_zh=card.get("meaning_zh") or "",
+            example=card.get("example") or "",
+            related_json=__import__("json").dumps(card.get("related") or {}, ensure_ascii=False),
+            source=card["source"],
+            due_at=datetime.utcnow(),  # 加进来当天就能复习
+        )
+        db.add(row)
+        added.append(row)
+    return added, skipped
+
+
+@router.get("/study/grammar", response_model=GrammarOut)
+def grammar_library(
+    group: str | None = None,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """四组语法卡（时态/冠词/介词/从句），带 learned 标记和挖空。"""
+    wanted = (group or "").strip().lower() or None
+    if wanted and wanted not in library.GRAMMAR_GROUP_ORDER:
+        raise HTTPException(status_code=400, detail="语法分组不存在")
+    learned = _learned_keys(db, user.id, "grammar")
+    groups = []
+    total = learned_count = 0
+    for data in library.grammar_groups():
+        if wanted and data["group"] != wanted:
+            continue
+        cards = []
+        for item in data["items"]:
+            blank, answer = library.blank_and_answer(item.get("wrong") or "", item.get("right") or "")
+            done = item["point"].strip().lower() in learned
+            cards.append(
+                GrammarCardOut(
+                    id=str(item["id"]),
+                    group=data["group"],
+                    group_name=data["name"],
+                    point=str(item.get("point") or "").strip(),
+                    rule=str(item.get("rule") or "").strip(),
+                    wrong=str(item.get("wrong") or "").strip(),
+                    right=str(item.get("right") or "").strip(),
+                    blank=blank,
+                    answer=answer,
+                    learned=done,
+                )
+            )
+        done_in_group = sum(1 for c in cards if c.learned)
+        total += len(cards)
+        learned_count += done_in_group
+        groups.append(
+            GrammarGroupOut(
+                id=data["group"],
+                name=data["name"],
+                desc=data["desc"],
+                total=len(cards),
+                learned=done_in_group,
+                items=cards,
+            )
+        )
+    return GrammarOut(groups=groups, total=total, learned=learned_count)
+
+
+@router.post("/study/grammar/add", response_model=LibraryAddOut)
+def grammar_add(
+    body: LibraryAddIn,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """加语法卡：给 group 加整组，给 ids 加指定卡。"""
+    group = (body.group or "").strip().lower() or None
+    if group and group not in library.GRAMMAR_GROUP_ORDER:
+        raise HTTPException(status_code=400, detail="语法分组不存在")
+    ids = {str(x).strip() for x in (body.ids or []) if str(x).strip()}
+    if not group and not ids:
+        raise HTTPException(status_code=400, detail="给出 group 或 ids")
+    cards = []
+    for card in library.grammar_cards():
+        if ids and card["id"] not in ids:
+            continue
+        if group and card["group"] != group:
+            continue
+        cards.append(
+            {
+                "kind": "grammar",
+                "term": card["point"],
+                "context": card["wrong"],
+                "meaning_zh": card["rule"],
+                "example": card["right"],
+                "related": {"blank": card["blank"], "answer": card["answer"]},
+                "source": "grammar",
+            }
+        )
+    if not cards:
+        raise HTTPException(status_code=404, detail="没有找到这些语法卡")
+    added, skipped = _add_cards(db, user.id, cards)
+    db.commit()
+    for row in added:
+        db.refresh(row)
+    return LibraryAddOut(
+        added=len(added),
+        skipped=skipped,
+        remaining=max(0, len(cards) - len(added)),
+        items=[item_out(row) for row in added],
+    )
+
+
+@router.get("/study/spoken", response_model=SpokenOut)
+def spoken_library(user: User = Depends(get_current_user), db: OrmSession = Depends(get_db)):
+    """60 张口语句型卡：书面说法 → 更自然的口语说法 + 为什么。"""
+    learned = _learned_keys(db, user.id, "phrase")
+    items = []
+    for card in library.spoken_items():
+        items.append(
+            SpokenCardOut(
+                id=str(card["id"]),
+                formal=str(card.get("formal") or "").strip(),
+                natural=str(card.get("natural") or "").strip(),
+                why=str(card.get("why") or "").strip(),
+                learned=str(card.get("formal") or "").strip().lower() in learned,
+            )
+        )
+    return SpokenOut(
+        total=len(items),
+        learned=sum(1 for i in items if i.learned),
+        items=items,
+    )
+
+
+@router.post("/study/spoken/add", response_model=LibraryAddOut)
+def spoken_add(
+    body: LibraryAddIn,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """加口语卡：给 ids 加指定卡，或只给 count 加前几张，都不给时加前 10 张。"""
+    ids = {str(x).strip() for x in (body.ids or []) if str(x).strip()}
+    count = max(1, min(int(body.count or 10), MAX_VOCAB_PULL))
+    existing = {
+        (row.term or "").strip().lower()
+        for row in db.query(StudyItem)
+        .filter(StudyItem.user_id == user.id, StudyItem.kind == "phrase")
+        .all()
+    }
+    cards = []
+    for card in library.spoken_items():
+        if ids and card["id"] not in ids:
+            continue
+        if not ids and str(card["formal"]).strip().lower() in existing:
+            continue  # 已经有的不占「这次加几张」的名额
+        cards.append(
+            {
+                "kind": "phrase",
+                "term": card["formal"],
+                "context": "",
+                "meaning_zh": card.get("why") or "",
+                "example": card["natural"],
+                "related": {},
+                "source": "spoken",
+            }
+        )
+        if not ids and len(cards) >= count:
+            break
+    if not cards:
+        raise HTTPException(status_code=404, detail="没有找到这些口语卡")
+    added, skipped = _add_cards(db, user.id, cards)
+    db.commit()
+    for row in added:
+        db.refresh(row)
+    return LibraryAddOut(
+        added=len(added),
+        skipped=skipped,
+        remaining=max(0, len(cards) - len(added)),
+        items=[item_out(row) for row in added],
+    )
+
+
+# ---------------------------------------------------------------- 今天（合并队列）
+TODAY_GROUPS = (
+    ("word", "单词"),
+    ("spelling", "拼写"),
+    ("grammar", "语法"),
+    ("spoken", "口语"),
+    ("phrase", "句型"),
+)
+
+
+def _today_key(row: StudyItem) -> str:
+    if row.kind == "grammar":
+        return "grammar"
+    if row.kind == "phrase":
+        return "spoken" if row.source == "spoken" else "phrase"
+    return row.kind or "word"
+
+
+@router.get("/study/today", response_model=TodayOut)
+def today_queue(user: User = Depends(get_current_user), db: OrmSession = Depends(get_db)):
+    """「今天」合并队列：到期卡按类型分组，组内按到期时间升序。"""
+    now = datetime.utcnow()
+    rows = (
+        db.query(StudyItem)
+        .filter(StudyItem.user_id == user.id)
+        .order_by(StudyItem.due_at.asc(), StudyItem.id.asc())
+        .all()
+    )
+    buckets: dict[str, list[StudyItem]] = {}
+    for row in rows:
+        if not is_due(row, now):
+            continue
+        buckets.setdefault(_today_key(row), []).append(row)
+    groups = [
+        TodayGroupOut(
+            key=key,
+            label=label,
+            count=len(buckets.get(key, [])),
+            items=[item_out(row, now) for row in buckets.get(key, [])],
+        )
+        for key, label in TODAY_GROUPS
+        if buckets.get(key)
+    ]
+    notes_count = db.query(Note).filter(Note.user_id == user.id).count()
+    return TodayOut(groups=groups, total=sum(g.count for g in groups), notes_count=int(notes_count or 0))
 
 
 # ------------------------------------------------------------------ 笔记
