@@ -500,6 +500,9 @@ System prompt 模板：
   旧的 `/admin/stats`、`/admin/users`、`/admin/sessions` 仍用 `require_admin`（`admin.py:23-25`，401），两者别混。
 - 两个确认词别串：清记录是「删除」（`Settings.vue:112`，也用于 `/admin/data`），注销是「注销」（`Settings.vue:158`）。
 - 注销不可恢复，前端二次确认要显示账号名与影响范围（`Settings.vue:320` 已做）。
+- **「演示前清空所有用户数据」连账号一起清**（用户 11-01 要求）：7 张表全 0 行，`users` 也清空 → 打开站点就是登录页，需要重新注册，不再有预置账号。
+  要删得干净：连接启用 `secure_delete`，删完 `VACUUM`（`freelist_count=0` 表示没有可恢复的空闲页）；残留的 `.tmp` 测试库、`backend/backups` 备份都不该留。
+- **库清了不等于这台机器干净**：`localStorage` 里的模型 key、难度、词库范围不跟着数据库清空，属于浏览器数据；要「从头演示」得清一次站点数据，或退出登录 + 设置页删本地密钥。
 
 ### 13.3 数据位置：显示与更改（**网页不再提供**，仅运维用）
 
