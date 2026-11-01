@@ -23,6 +23,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "backend" / "app" / "data"
 
+sys.path.insert(0, str(ROOT / "backend"))
+try:  # 判档逻辑本身只有标准库依赖，可以直接 import 来断言
+    from app.services import library as cardlib  # noqa: E402
+except Exception as exc:  # pragma: no cover - 只在这份脚本里兜底
+    cardlib = None
+    print(f"WARN  无法导入判档逻辑（app.services.library）：{exc}")
+
 EXPECTED_WORDS = 200
 EXPECTED_GRAMMAR_GROUPS = ("tenses", "articles", "prepositions", "clauses")
 EXPECTED_PER_GROUP = 15
@@ -287,10 +294,49 @@ def check_spoken() -> None:
             fail(f"[spoken] {cid} 的口语说法太短，不像完整句子：{natural}")
 
 
+def check_grading() -> None:
+    """判档断言：照抄卡片上显示的提示必须 again，改对了必须 good。
+
+    语法卡显示的是错句，口语卡显示的是书面说法；这两句和正确答案往往只差一个词，
+    不拦的话照抄就能拿 hard/分（rc22 报过这个漏洞）。换内容时这条会第一时间报警。
+    """
+    if cardlib is None:
+        fail("[grading] 判档逻辑没导入，无法验证「照抄提示必须 again」")
+        return
+    for group in EXPECTED_GRAMMAR_GROUPS:
+        path = DATA / "grammar" / f"{group}.json"
+        if not path.exists():
+            continue
+        for item in json.loads(path.read_text(encoding="utf-8")).get("items") or []:
+            cid = str(item.get("id") or "?")
+            wrong = str(item.get("wrong") or "")
+            right = str(item.get("right") or "")
+            blank_answer = cardlib.blank_and_answer(wrong, right)[1]
+            copied = cardlib.judge_card("grammar", wrong, right, wrong, blank_answer)
+            if copied != "again":
+                fail(f"[grading] {cid} 照抄错句被判成 {copied}，应为 again")
+            fixed = cardlib.judge_card("grammar", blank_answer or right, right, wrong, blank_answer)
+            if fixed != "good":
+                fail(f"[grading] {cid} 改对了却判成 {fixed}，应为 good")
+    path = DATA / "spoken.json"
+    if path.exists():
+        for item in json.loads(path.read_text(encoding="utf-8")).get("items") or []:
+            cid = str(item.get("id") or "?")
+            formal = str(item.get("formal") or "")
+            natural = str(item.get("natural") or "")
+            copied = cardlib.judge_card("spoken", formal, natural, formal)
+            if copied != "again":
+                fail(f"[grading] {cid} 照抄书面说法被判成 {copied}，应为 again")
+            fixed = cardlib.judge_card("spoken", natural, natural, formal)
+            if fixed != "good":
+                fail(f"[grading] {cid} 照抄口语说法却判成 {fixed}，应为 good")
+
+
 def main() -> int:
     check_words()
     check_grammar()
     check_spoken()
+    check_grading()
     for warn in warnings:
         print("WARN ", warn)
     for err in errors:

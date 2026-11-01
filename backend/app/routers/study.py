@@ -173,9 +173,17 @@ def review_item(
         if not answer:
             raise HTTPException(status_code=400, detail="这类卡要用 answer 提交改写后的说法")
         if row.kind == "grammar":
-            result = library.judge_grammar(answer, row.example or "", str(related.get("answer") or ""))
+            # 卡片上显示的是错句（row.context）：照抄必须判 again
+            result = library.judge_card(
+                "grammar",
+                answer,
+                row.example or "",
+                row.context or "",
+                str(related.get("answer") or ""),
+            )
         else:
-            result = library.judge_spoken(answer, row.example or "")
+            # 口语卡上显示的是书面说法（row.term）：照抄必须判 again
+            result = library.judge_card("spoken", answer, row.example or "", row.term or "")
     elif answer:
         if row.kind != "spelling":
             raise HTTPException(status_code=400, detail="只有拼写卡需要默写判定")

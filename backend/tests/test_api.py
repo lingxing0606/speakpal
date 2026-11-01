@@ -535,6 +535,64 @@ class DashboardApiTests(SessionTests):
         self.assertEqual(r.status_code, 422)
 
 
+class StudyCardCopyTests(ApiTestCase):
+    """照抄卡片上显示的提示必须判 again（rc23 补的判档保护）。
+
+    语法卡显示的错句存在 `context`，口语卡显示的书面句存在 `term`；
+    两句都和正确答案只差一个词，不拦的话照抄就能拿 hard/分。
+    """
+
+    def _due(self, headers, kind=None, source=None):
+        rows = self.client.get("/api/study/due", headers=headers).json()
+        if kind:
+            rows = [r for r in rows if r["kind"] == kind]
+        if source:
+            rows = [r for r in rows if r["source"] == source]
+        return rows
+
+    def test_copying_grammar_prompt_is_again(self):
+        _, headers = self.register()
+        r = self.client.post("/api/study/grammar/add", json={"group": "tenses"}, headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        item = self._due(headers, "grammar")[0]
+        r = self.client.post(
+            f"/api/study/items/{item['id']}/review",
+            json={"answer": item["context"]},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["last_result"], "again", "照抄错句不能拿分")
+        self.assertGreaterEqual(body["lapses"], 1)
+        self.assertTrue(body["due"], "again 之后今天还在队列里")
+
+        # 真正改对了仍然是 good
+        answer = (item.get("related") or {}).get("answer") or item["example"]
+        r = self.client.post(
+            f"/api/study/items/{item['id']}/review", json={"answer": answer}, headers=headers
+        )
+        self.assertEqual(r.json()["last_result"], "good", r.text)
+
+    def test_copying_spoken_prompt_is_again(self):
+        _, headers = self.register()
+        r = self.client.post("/api/study/spoken/add", json={"count": 3}, headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        item = self._due(headers, source="spoken")[0]
+        r = self.client.post(
+            f"/api/study/items/{item['id']}/review",
+            json={"answer": item["term"]},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["last_result"], "again", "照抄书面说法不能拿分")
+        r = self.client.post(
+            f"/api/study/items/{item['id']}/review",
+            json={"answer": item["example"]},
+            headers=headers,
+        )
+        self.assertEqual(r.json()["last_result"], "good", r.text)
+
+
 class BandTests(unittest.TestCase):
     def test_band_score_roundtrip_monotonic(self):
         names = [n for n in dir(bands) if not n.startswith("_")]

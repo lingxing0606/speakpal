@@ -171,3 +171,18 @@ def judge_spoken(answer: str, natural: str) -> str:
     if score >= 0.5:
         return "hard"
     return "again"
+
+
+def judge_card(kind: str, answer: str, right: str, shown: str, blank_answer: str = "") -> str:
+    """判档入口：先挡「原样抄卡片提示」，再按题型判档。
+
+    `shown` 是卡片上直接显示、用户能照抄的那句：语法卡是错句（`row.context`），
+    口语卡是书面说法（`row.term`）。错句/书面句和正确答案往往只差一个词，
+    照抄本来会命中 hard（语法）或直接得分（口语），等于没练，所以一律 `again`。
+    """
+    said = normalize(answer)
+    if said and said == normalize(shown):
+        return "again"
+    if kind == "grammar":
+        return judge_grammar(answer, right, blank_answer)
+    return judge_spoken(answer, right)

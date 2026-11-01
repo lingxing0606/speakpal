@@ -33,7 +33,7 @@
     { "id": "spoken-29", "formal": "I cannot decide.", "natural": "I'm torn.", "why": "torn 表示左右为难，口语常用。" },
     { "id": "spoken-30", "formal": "Let me check.", "natural": "Let me have a look.", "why": "have a look 比 check 更轻松。" },
     { "id": "spoken-31", "formal": "I am late because of the traffic.", "natural": "Traffic was a nightmare.", "why": "用 nightmare 形容糟糕路况，很生动。" },
-    { "id": "spoken-32", "formal": "The food is delicious.", "natural": "The food is amazing.", "why": "口语里 amazing 比 delicious 更常用来夸。" },
+    { "id": "spoken-32", "formal": "I find this dish very enjoyable.", "natural": "This is delicious.", "why": "当面夸菜用 This is delicious 就够，I find this dish very enjoyable 太书面。" },
     { "id": "spoken-33", "formal": "It is very cold today.", "natural": "It's freezing today.", "why": "freezing 加强冷的程度。" },
     { "id": "spoken-34", "formal": "I am very happy.", "natural": "I'm over the moon.", "why": "over the moon 是英式口语的高兴说法。" },
     { "id": "spoken-35", "formal": "I need a break.", "natural": "I could use a break.", "why": "could use 表示确实需要。" },
