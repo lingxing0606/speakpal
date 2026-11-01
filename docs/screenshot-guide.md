@@ -59,7 +59,7 @@ $env:SP_PAGES = "/>.tmp/home.png,/history>.tmp/history.png,/report/12>.tmp/repor
 | --- | --- |
 | `SP_TOKEN` | 登录 token，注入 `sp_token`；不传就截未登录页面 |
 | `SP_PAGES` | `路径>输出` 用逗号分隔，路径用前端路由（`/history`、`/practice/7`） |
-| `SP_SEED` | 额外 localStorage，JSON：`{"sp_welcomed":"1"}`（不设会先进欢迎页） |
+| `SP_SEED` | 额外 localStorage，JSON 对象，原样合并（例如预置 `sp_llm` 里的难度偏好） |
 | `SP_CLIP` | 长页只用一段：`{"x":200,"y":0,"width":880,"height":1250,"scale":1}` |
 | `SP_WIDTH` / `SP_HEIGHT` | 视口，默认 1280×1000；手机用 `390`/`844` |
 | `SP_CDP_PORT` | 默认 9222，多开 Chrome 时改这个 |
@@ -89,4 +89,4 @@ Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -
    就在 `finish` 之前截，或者新开一个会话只发一轮。
 4. **后端不重启就截不到新行为**：`8000` 上是旧进程时，新接口 404、场景只有 3 个、打字报告还会给发音分。
    截之前先确认 `/openapi.json` 的 `paths` 数量，再开始。
-5. **截图前清 `sp_welcomed`**：新账号第一次登录会进 `/welcome`，不设这个标记截不到首页。
+5. **未登录一律落 `/login`**：欢迎页已删除，未带 `SP_TOKEN` 只能截到登录页；首页、学习、历史这些页必须带 token。
