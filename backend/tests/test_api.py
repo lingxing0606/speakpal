@@ -459,6 +459,82 @@ class StreamTests(SessionTests):
         self.assertEqual(len(self._saved_turns(sid)), 1)
 
 
+from datetime import date, datetime, timedelta  # noqa: E402
+
+from app.services.dashboard import build_dashboard, local_day, streaks  # noqa: E402
+
+
+class DashboardLogicTests(unittest.TestCase):
+    NOW = datetime(2026, 11, 1, 4, 0)  # UTC 04:00 = 北京 12:00，周日
+
+    def test_streak_counts_from_yesterday_when_today_not_practiced(self):
+        today = date(2026, 11, 1)
+        days = {today - timedelta(days=i) for i in (1, 2, 3)}
+        self.assertEqual(streaks(days, today), (3, 3))
+
+    def test_streak_breaks_on_gap_and_tracks_longest(self):
+        today = date(2026, 11, 1)
+        days = {today, today - timedelta(days=1)} | {date(2026, 10, d) for d in (1, 2, 3, 4, 5)}
+        self.assertEqual(streaks(days, today), (2, 5))
+        self.assertEqual(streaks(set(), today), (0, 0))
+
+    def test_local_day_uses_browser_offset(self):
+        late_utc = datetime(2026, 10, 31, 17, 30)  # 北京 11-01 01:30
+        self.assertEqual(local_day(late_utc, -480), date(2026, 11, 1))
+        self.assertEqual(local_day(late_utc, 0), date(2026, 10, 31))
+
+    def test_heatmap_is_12_weeks_monday_aligned_ending_today(self):
+        out = build_dashboard([self.NOW, self.NOW], [], self.NOW, -480)
+        first = date.fromisoformat(out["heatmap"][0]["date"])
+        self.assertEqual(first.weekday(), 0)
+        self.assertEqual(out["heatmap"][-1], {"date": "2026-11-01", "count": 2})
+        self.assertEqual(len(out["heatmap"]), 11 * 7 + 7)
+        self.assertTrue(out["practiced_today"])
+
+    def test_dimensions_skip_mock_reports_and_count_samples(self):
+        reports = [
+            {"created_at": self.NOW, "source": "llm", "comparable_band": 6.0,
+             "dimensions": {"pronunciation": 60, "grammar_vocab": 70, "task_completion": 80}},
+            {"created_at": self.NOW, "source": "llm", "comparable_band": 5.0,
+             "dimensions": {"written_expression": 50, "grammar_vocab": 50, "task_completion": 60}},
+            {"created_at": self.NOW, "source": "mock", "comparable_band": None, "dimensions": {}},
+        ]
+        out = build_dashboard([], reports, self.NOW, -480)
+        dims = {d["name"]: d for d in out["dimensions"]}
+        self.assertEqual(out["scored_reports"], 2)
+        self.assertEqual(dims["grammar_vocab"], {"name": "grammar_vocab", "avg": 60.0, "samples": 2})
+        self.assertEqual(dims["pronunciation"]["samples"], 1)
+        self.assertNotIn("fluency", dims)
+
+    def test_week_delta_needs_both_windows(self):
+        recent = {"created_at": self.NOW, "source": "llm", "comparable_band": 6.0, "dimensions": {}}
+        old = {"created_at": self.NOW - timedelta(days=10), "source": "llm", "comparable_band": 5.0, "dimensions": {}}
+        self.assertIsNone(build_dashboard([], [recent], self.NOW, -480)["week"]["delta"])
+        week = build_dashboard([], [recent, old], self.NOW, -480)["week"]
+        self.assertEqual((week["recent_band"], week["previous_band"], week["delta"]), (6.0, 5.0, 1.0))
+
+
+class DashboardApiTests(SessionTests):
+    def test_dashboard_counts_only_own_user_turns(self):
+        sid = self._start()
+        with mock.patch("app.services.llm.httpx.Client", _FakeClient):
+            self._turn(sid)
+            self._turn(sid, "And I also enjoy reading.")
+        r = self.client.get("/api/me/dashboard?tz_offset=-480", headers=self.headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        data = r.json()
+        self.assertEqual(data["total_turns"], 2)
+        self.assertEqual(data["current_streak"], 1)
+        self.assertTrue(data["practiced_today"])
+        _, other = self.register()
+        empty = self.client.get("/api/me/dashboard", headers=other).json()
+        self.assertEqual((empty["total_turns"], empty["current_streak"], empty["dimensions"]), (0, 0, []))
+
+    def test_dashboard_rejects_bad_offset(self):
+        r = self.client.get("/api/me/dashboard?tz_offset=99999", headers=self.headers)
+        self.assertEqual(r.status_code, 422)
+
+
 class BandTests(unittest.TestCase):
     def test_band_score_roundtrip_monotonic(self):
         names = [n for n in dir(bands) if not n.startswith("_")]

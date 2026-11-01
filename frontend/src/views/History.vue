@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import api from '../api/client'
 import BackLink from '../components/BackLink.vue'
 import BrandLogo from '../components/BrandLogo.vue'
+import StudyDashboard from '../components/StudyDashboard.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
@@ -223,6 +224,7 @@ function open(item) {
       </div>
 
       <div v-else class="space-y-3">
+        <StudyDashboard />
         <div v-if="curve" class="sp-card mb-4 p-5">
           <div class="flex items-baseline justify-between">
             <div class="font-semibold text-ink">成长曲线</div>

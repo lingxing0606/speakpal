@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+import json
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
-from ..models import PracticeSession, Report, User
+from ..models import PracticeSession, Report, Turn, User
 from ..schemas import (
     PreferencesIn,
     PreferencesOut,
@@ -29,6 +31,8 @@ from ..security import (
     verify_password,
 )
 from ..services import wordbank
+from ..services.dashboard import build_dashboard
+from ..timeutil import utcnow
 from ..services.user_data import delete_user_data
 
 router = APIRouter(prefix="/api/me", tags=["me"])
@@ -114,6 +118,38 @@ def update_my_settings(
         practice_difficulty=(user.practice_difficulty or "medium"),
         word_scope=(user.word_scope or wordbank.default_scope()),
     )
+
+
+@router.get("/dashboard")
+def get_my_dashboard(
+    # 与 JS 的 new Date().getTimezoneOffset() 同口径：北京时间传 -480
+    tz_offset: int = Query(default=0, ge=-840, le=840),
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """学习数据面板：连续打卡、近 12 周热力图、各维度均分、近 7 天可比 band 变化。"""
+    turn_times = [
+        row[0]
+        for row in db.query(Turn.created_at)
+        .join(PracticeSession, Turn.session_id == PracticeSession.id)
+        .filter(PracticeSession.user_id == user.id, Turn.role == "user")
+        .all()
+        if row[0] is not None
+    ]
+    reports = [
+        {
+            "created_at": rep.created_at,
+            "source": rep.source or "llm",
+            "dimensions": json.loads(rep.dimensions_json or "{}"),
+            "comparable_band": rep.comparable_band,
+        }
+        for rep in db.query(Report)
+        .join(PracticeSession, Report.session_id == PracticeSession.id)
+        .filter(PracticeSession.user_id == user.id)
+        .all()
+        if rep.created_at is not None
+    ]
+    return build_dashboard(turn_times, reports, utcnow(), tz_offset)
 
 
 @router.get("/recommendation", response_model=RecommendationOut)

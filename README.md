@@ -114,6 +114,7 @@ backend\.venv\Scripts\python.exe -m unittest discover -s backend\tests -t backen
 - 多轮对话 + 追问；AI 回复流式逐字显示（SSE，失败自动回落普通接口）
 - 评分卡（综合 + 视作答方式 3–5 维）
 - 逐句纠错报告
+- 学习数据面板（历史页顶部）：连续打卡、近 12 周热力图、各维度均分雷达、近 7 天档位变化
 - 按用户隔离的历史记录；改密码让其他设备掉线
 
 ## 评分说明
