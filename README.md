@@ -81,7 +81,29 @@ LLM_MODEL=deepseek-chat
 - 最近练习记录（用户、场景、状态、得分、时间）
 - 接口文档入口：<http://127.0.0.1:8000/docs>
 
-默认管理密钥 `admin123`，在 `backend/.env` 里用 `ADMIN_KEY` 修改。
+管理密钥：`ADMIN_KEY` 为空或仍是旧默认值 `admin123` 时，后端首次启动会随机生成一个、写回 `backend/.env`，并打印在后端控制台（`[config] ADMIN_KEY ...`）。之后在 `backend/.env` 里查看或修改。`JWT_SECRET` 同理自动生成（不打印）。
+
+## 安全相关配置（`backend/.env`）
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `CORS_ORIGINS` | `http://127.0.0.1:5173,http://localhost:5173` | 跨域白名单，逗号分隔 |
+| `ALLOW_PRIVATE_LLM_HOSTS` | `0` | 默认拒绝把模型 / 语音地址指向内网或本机（防 SSRF）；用本机 Ollama 时设 `1` |
+| `STORAGE_ROOT` | 空 | 管理台「改数据位置」的目录白名单；留空不限，但始终不覆盖已存在的文件 |
+
+登录同一 IP+账号 5 分钟内失败 5 次会被暂时拒绝（429）。新密码至少 6 位，旧的短密码仍可登录。
+
+## 测试
+
+```powershell
+backend\.venv\Scripts\python.exe -m unittest discover -s backend\tests -t backend -v
+```
+
+测试用 `backend/.tmp-test/` 下的临时库，不碰真实数据，也不访问外网。
+
+## 打包提交
+
+`tools/node/`（便携 Node，约 90MB）、`node_modules/`、`.venv/`、`*.db`、`.env` 都不进仓库。打包作品时同样排除它们，评委机器上运行 `setup.ps1` 会重新安装依赖。
 
 ## 功能
 
