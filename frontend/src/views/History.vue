@@ -177,7 +177,7 @@ function open(item) {
 
 <template>
   <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
-    <AppHeader title="历史记录" back="/" />
+    <AppHeader title="历史记录" />
 
     <main class="sp-shell pb-16 pt-10">
       <p v-if="error" class="sp-alert-error">{{ error }}</p>

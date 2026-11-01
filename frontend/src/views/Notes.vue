@@ -101,7 +101,7 @@ function when(iso) {
 
 <template>
   <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
-    <AppHeader title="笔记" back="/">
+    <AppHeader title="笔记">
       <button class="sp-btn-primary !px-3.5 !py-2 text-[13px]" @click="startNew">新建</button>
     </AppHeader>
 

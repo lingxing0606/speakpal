@@ -396,7 +396,7 @@ function logout() {
 
 <template>
   <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
-    <AppHeader title="设置" back="/">
+    <AppHeader title="设置">
       <button class="sp-btn-ghost sm:hidden" @click="logout">退出</button>
     </AppHeader>
 

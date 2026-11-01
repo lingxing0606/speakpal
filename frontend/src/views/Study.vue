@@ -387,7 +387,7 @@ async function addSpoken() {
 
 <template>
   <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
-    <AppHeader title="学习" back="/">
+    <AppHeader title="学习">
       <router-link to="/notes" class="sp-btn-ghost sm:hidden">笔记</router-link>
     </AppHeader>
 
