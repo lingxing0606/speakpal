@@ -1,10 +1,9 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
-import BackLink from '../components/BackLink.vue'
-import BrandLogo from '../components/BrandLogo.vue'
+import AppHeader from '../components/AppHeader.vue'
 import TabBar from '../components/TabBar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
@@ -15,6 +14,35 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 const settings = useSettingsStore()
+
+// 左侧分区导航：滚动时高亮当前分区
+const SECTIONS = [
+  { id: 'profile', label: '个人资料' },
+  { id: 'prefs', label: '练习偏好' },
+  { id: 'key', label: '对话密钥' },
+  { id: 'tts', label: '语音合成' },
+  { id: 'data', label: '清除记录' },
+  { id: 'account', label: '注销账号' },
+]
+const activeSection = ref('profile')
+let sectionObserver = null
+
+function watchSections() {
+  if (!('IntersectionObserver' in window)) return
+  sectionObserver = new IntersectionObserver(
+    (entries) => {
+      const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+      if (visible.length) activeSection.value = visible[0].target.id
+    },
+    { rootMargin: '-80px 0px -55% 0px' }
+  )
+  for (const sec of SECTIONS) {
+    const el = document.getElementById(sec.id)
+    if (el) sectionObserver.observe(el)
+  }
+}
+
+onBeforeUnmount(() => sectionObserver?.disconnect())
 
 const onboarding = computed(() => route.query.onboarding === '1')
 
@@ -214,6 +242,8 @@ async function pickScope(id) {
   }
 }
 
+onMounted(() => nextTick(watchSections))
+
 onMounted(async () => {
   await loadPrefs()
   await loadServerStatus()
@@ -365,41 +395,45 @@ function logout() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-canvas pb-16 sm:pb-0">
-    <header class="sp-header">
-      <div class="sp-shell flex items-center justify-between py-3">
-        <div class="flex items-center gap-3">
-          <BackLink fallback="/" />
-          <span class="h-4 w-px bg-line"></span>
-          <router-link to="/" aria-label="首页">
-            <BrandLogo :size="30" />
-          </router-link>
-          <span class="h-4 w-px bg-line"></span>
-          <div class="font-semibold text-ink">设置</div>
-        </div>
-        <div class="flex items-center gap-1">
-          <button class="sp-btn-ghost" @click="logout">退出</button>
-        </div>
-      </div>
-    </header>
+  <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
+    <AppHeader title="设置" back="/">
+      <button class="sp-btn-ghost sm:hidden" @click="logout">退出</button>
+    </AppHeader>
 
-    <main class="sp-shell space-y-5 py-8">
+    <main class="sp-shell pb-16 pt-10">
+      <div class="mb-8">
+        <div class="sp-eyebrow">设置</div>
+        <h1 class="sp-title mt-2">账号、密钥与偏好</h1>
+        <p class="sp-lede">密钥只存在你自己的浏览器里；练习数据按账号存在服务端，可以随时自己删掉。</p>
+      </div>
+      <div class="sp-grid items-start">
+      <aside class="lg:sticky lg:top-24 lg:col-span-3">
+        <nav class="flex gap-1.5 overflow-x-auto pb-1 lg:flex-col lg:gap-0.5 lg:overflow-visible" aria-label="设置分区">
+          <a
+            v-for="sec in SECTIONS"
+            :key="sec.id"
+            :href="`#${sec.id}`"
+            class="whitespace-nowrap rounded-xl px-3.5 py-2 text-sm transition duration-200"
+            :class="activeSection === sec.id
+              ? 'bg-white font-medium text-ink shadow-soft ring-1 ring-line/80'
+              : 'text-ink-mute hover:bg-white/70 hover:text-ink'"
+            @click="activeSection = sec.id"
+          >
+            {{ sec.label }}
+          </a>
+        </nav>
+        <button class="sp-btn-ghost mt-4 hidden w-full justify-start lg:inline-flex" @click="logout">退出登录</button>
+      </aside>
+
+      <div class="min-w-0 space-y-5 lg:col-span-9">
       <p v-if="onboarding" class="sp-alert-warn">
         配一下你自己的模型密钥，之后每次练习都用它调用评分模型。
         <button class="ml-2 font-medium underline" @click="router.push('/')">先跳过</button>
       </p>
 
-      <nav class="flex flex-wrap items-center gap-1.5 text-[11px]" aria-label="设置分区">
-        <span class="text-ink-mute">跳到：</span>
-        <a href="#profile" class="sp-chip-line hover:bg-brand-50">个人资料</a>
-        <a href="#prefs" class="sp-chip-line hover:bg-brand-50">练习偏好</a>
-        <a href="#key" class="sp-chip-line hover:bg-brand-50">对话密钥</a>
-        <a href="#tts" class="sp-chip-line hover:bg-brand-50">语音合成</a>
-        <a href="#data" class="sp-chip-line hover:bg-brand-50">账号与数据</a>
-      </nav>
 
-      <section id="profile" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">个人资料</h2>
+      <section id="profile" class="sp-card scroll-mt-24 p-6 sm:p-7">
+        <h2 class="sp-section-title">个人资料</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           昵称只影响显示，不影响登录账号<span v-if="auth.user?.username">（{{ auth.user.username }}）</span>。
         </p>
@@ -440,8 +474,8 @@ function logout() {
         </div>
       </section>
 
-      <section id="prefs" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">练习偏好</h2>
+      <section id="prefs" class="sp-card scroll-mt-24 p-6 sm:p-7">
+        <h2 class="sp-section-title">练习偏好</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">新开的练习用这一档，历史和报告里的「再练一次」也用这一档。</p>
         <div class="mt-4 inline-flex rounded-xl bg-canvas p-1 ring-1 ring-line">
           <button
@@ -478,8 +512,8 @@ function logout() {
         </p>
       </section>
 
-<section id="key" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">模型密钥</h2>
+<section id="key" class="sp-card scroll-mt-24 p-6 sm:p-7">
+        <h2 class="sp-section-title">模型密钥</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           只存在这个浏览器里，不上传、不写数据库、不写日志。
         </p>
@@ -542,8 +576,8 @@ function logout() {
         </div>
       </section>
 
-<section id="tts" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">语音合成</h2>
+<section id="tts" class="sp-card scroll-mt-24 p-6 sm:p-7">
+        <h2 class="sp-section-title">语音合成</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           <span class="font-medium text-ink">这是朗读用的 key，和上面的对话密钥不是同一把</span>；填错不影响评分，只会让声音不自然。
           不填就用浏览器自带的朗读，不需要任何 key；填了会走第三方语音合成，按你自己的额度计费。
@@ -617,8 +651,8 @@ function logout() {
         </div>
       </section>
 
-<section id="data" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">清除练习记录</h2>
+<section id="data" class="sp-card scroll-mt-24 p-6 ring-rose-100 sm:p-7">
+        <h2 class="sp-section-title">清除练习记录</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           只删除你自己的练习记录和报告，账号保留，别人的数据不受影响。删除后不可恢复。
         </p>
@@ -641,8 +675,8 @@ function logout() {
         <p v-if="dataState.error" class="mt-3 text-xs text-danger">{{ dataState.error }}</p>
       </section>
 
-<section id="account" class="sp-card scroll-mt-20 p-6">
-        <h2 class="font-semibold text-ink">注销账号</h2>
+<section id="account" class="sp-card scroll-mt-24 p-6 ring-rose-100 sm:p-7">
+        <h2 class="sp-section-title">注销账号</h2>
         <p class="mt-1 text-xs leading-5 text-ink-soft">
           会删除账号本身，以及这个账号名下的全部练习记录、对话和报告，之后无法登录、无法恢复。
           只清记录不删账号的话，用上面那段。
@@ -673,6 +707,8 @@ function logout() {
 
       <div class="pb-6 text-center">
         <button class="sp-btn-ghost text-xs" @click="router.push('/welcome?again=1')">再看一遍新手引导</button>
+      </div>
+      </div>
       </div>
     </main>
 

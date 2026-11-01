@@ -43,6 +43,8 @@ export async function startAudioCapture() {
   let silenceStart = null
   let hadSpeech = false
   const pauses = []
+  // 最近一次的音量（RMS），录音按钮的音量圈用
+  let lastRms = 0
 
   const timer = setInterval(() => {
     analyser.getByteTimeDomainData(buffer)
@@ -52,6 +54,7 @@ export async function startAudioCapture() {
       sum += v * v
     }
     const rms = Math.sqrt(sum / buffer.length)
+    lastRms = rms
     const now = performance.now()
     const dt = (now - lastAt) / 1000
     lastAt = now
@@ -91,6 +94,10 @@ export async function startAudioCapture() {
         speech_time_sec: Number(speechTime.toFixed(2)),
         pauses: pauses.map((p) => Number(p.toFixed(2))),
       }
+    },
+    /** 当前音量，0–1 左右（说话时常见 0.02–0.2） */
+    level() {
+      return lastRms
     },
     /** stop() 之后调用：拿到这一句的录音 Blob（拿不到为 null） */
     blob() {

@@ -3,8 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
-import BackLink from '../components/BackLink.vue'
-import BrandLogo from '../components/BrandLogo.vue'
+import AppHeader from '../components/AppHeader.vue'
+import EmptyState from '../components/EmptyState.vue'
 import TabBar from '../components/TabBar.vue'
 import { speakSmart } from '../utils/speech'
 
@@ -386,40 +386,35 @@ async function addSpoken() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-canvas pb-16 sm:pb-0">
-    <header class="sp-header">
-      <div class="sp-shell flex items-center justify-between py-3">
-        <div class="flex items-center gap-3">
-          <BackLink fallback="/" />
-          <span class="h-4 w-px bg-line"></span>
-          <router-link to="/" aria-label="首页">
-            <BrandLogo :size="30" />
-          </router-link>
-          <span class="h-4 w-px bg-line"></span>
-          <div class="font-semibold text-ink">学习</div>
-        </div>
-        <div class="flex items-center gap-1">
-          <router-link to="/history" class="sp-btn-ghost">历史</router-link>
-        </div>
-      </div>
-    </header>
+  <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
+    <AppHeader title="学习" back="/">
+      <router-link to="/notes" class="sp-btn-ghost sm:hidden">笔记</router-link>
+    </AppHeader>
 
-    <main class="sp-shell py-8">
-      <nav class="flex flex-wrap items-end gap-5 border-b border-line" aria-label="学习板块">
-        <button
-          v-for="t in TABS"
-          :key="t.id"
-          class="-mb-px inline-flex items-baseline gap-1 border-b-2 pb-2.5 pt-1 text-sm transition"
-          :class="tab === t.id ? 'border-brand-600 font-medium text-ink' : 'border-transparent text-ink-mute hover:text-ink-soft'"
-          @click="switchTab(t.id)"
-        >
-          {{ t.label }}
-          <span v-if="counts[t.id]" class="text-[11px] font-normal text-ink-mute">{{ counts[t.id] }}</span>
-        </button>
-      </nav>
+    <main class="sp-shell pb-16 pt-10">
+      <div class="flex flex-wrap items-end justify-between gap-5">
+        <div>
+          <div class="sp-eyebrow">学习</div>
+          <h1 class="sp-title mt-2">把说错的，练成会的</h1>
+          <p class="sp-lede">报告里的错句会变成卡片，按间隔重复回到这里；也可以从词库、语法和口语卡里挑新的学。</p>
+        </div>
+        <nav class="sp-segment max-w-full overflow-x-auto" aria-label="学习板块">
+          <button
+            v-for="t in TABS"
+            :key="t.id"
+            class="sp-segment-item"
+            :class="tab === t.id ? 'sp-segment-item-active' : ''"
+            :aria-pressed="tab === t.id"
+            @click="switchTab(t.id)"
+          >
+            {{ t.label }}
+            <span v-if="counts[t.id]" class="rounded-full bg-brand-50 px-1.5 text-[11px] font-semibold text-brand-700">{{ counts[t.id] }}</span>
+          </button>
+        </nav>
+      </div>
 
       <!-- 新词 -->
-      <div v-if="tab === 'new'" class="mt-6">
+      <div v-if="tab === 'new'" class="mx-auto mt-10 max-w-4xl">
         <div class="sp-card p-5">
           <div class="font-semibold text-ink">学新单词</div>
           <p class="mt-0.5 text-xs leading-5 text-ink-mute">
@@ -430,7 +425,7 @@ async function addSpoken() {
             <button
               v-for="sc in bankScopes"
               :key="sc.id"
-              class="rounded-xl bg-canvas px-4 py-3 text-left ring-1 transition"
+              class="rounded-2xl bg-paper px-4 py-3.5 text-left ring-1 transition duration-200 hover:-translate-y-0.5 active:scale-[0.99]"
               :class="bankData?.scope === sc.id ? 'ring-brand-300' : 'ring-line/60 hover:ring-brand-200'"
               @click="pickScope(sc.id)"
             >
@@ -452,11 +447,11 @@ async function addSpoken() {
             </button>
           </div>
 
-          <p v-if="bankLoading" class="mt-3 text-xs text-ink-mute">正在取词…</p>
+          <div v-if="bankLoading" class="mt-4 grid gap-2 sm:grid-cols-2" aria-label="正在取词"><div v-for="i in 6" :key="i" class="sp-skeleton h-14"></div></div>
 
           <div v-else-if="bankWords.length" class="mt-3">
             <div class="grid gap-2 sm:grid-cols-2">
-              <div v-for="w in bankWords" :key="w.term" class="rounded-xl bg-canvas px-3 py-2 ring-1 ring-line/60">
+              <div v-for="(w, wi) in bankWords" :key="w.term" :style="{ '--i': wi }" class="sp-reveal rounded-xl bg-paper px-3.5 py-2.5 ring-1 ring-line/70">
                 <div class="flex items-baseline gap-2">
                   <span class="font-medium text-ink">{{ w.term }}</span>
                   <span v-if="w.phonetic" class="text-[11px] text-ink-mute">{{ w.phonetic }}</span>
@@ -469,7 +464,7 @@ async function addSpoken() {
             </button>
           </div>
 
-          <p v-else-if="!bankLoading" class="mt-3 text-xs text-ink-mute">这一档的词都学过了，换一档看看</p>
+          <EmptyState v-else-if="!bankLoading" compact icon="done" title="这一档的词都学过了" text="换一档词库看看，或者去复习已经加进来的词。" />
           <p
             v-if="bankTip"
             class="mt-3 rounded-xl px-3 py-2 text-xs leading-5 ring-1"
@@ -482,7 +477,7 @@ async function addSpoken() {
       </div>
 
       <!-- 语法 -->
-      <div v-else-if="tab === 'grammar'" class="mt-6">
+      <div v-else-if="tab === 'grammar'" class="mt-10">
         <div class="flex items-baseline justify-between gap-3">
           <div>
             <div class="text-sm font-medium text-ink">语法卡</div>
@@ -495,10 +490,10 @@ async function addSpoken() {
           </button>
         </div>
 
-        <p v-if="grammarLoading" class="mt-6 text-sm text-ink-mute">正在加载…</p>
+        <div v-if="grammarLoading" class="mt-6 grid gap-4 sm:grid-cols-2" aria-label="正在加载"><div v-for="i in 4" :key="i" class="sp-skeleton h-32"></div></div>
 
-        <div v-else-if="grammarLib" class="mt-4 grid gap-3 sm:grid-cols-2">
-          <div v-for="g in grammarLib.groups" :key="g.id" class="sp-card p-5">
+        <div v-else-if="grammarLib" class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div v-for="(g, gi) in grammarLib.groups" :key="g.id" :style="{ '--i': gi }" class="sp-reveal sp-hover sp-card p-5">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <div class="font-medium text-ink">{{ g.name }}</div>
@@ -522,10 +517,10 @@ async function addSpoken() {
           </div>
         </div>
 
-        <div v-if="grammarLib && !grammarLib.groups.length" class="flex flex-col items-center py-12 text-center">
-          <div class="mt-2 text-lg font-semibold text-ink">今天没有要练的语法</div>
-          <p class="mt-1 max-w-xs text-sm leading-6 text-ink-soft">去练一次对话，报告里的语法点会回到这里。</p>
-          <router-link to="/" class="sp-btn-primary mt-6">去练一次</router-link>
+        <div v-if="grammarLib && !grammarLib.groups.length" class="sp-card mt-6">
+          <EmptyState icon="cards" title="今天没有要练的语法" text="去练一次对话，报告里的语法点会回到这里。">
+            <router-link to="/" class="sp-btn-primary">去练一次</router-link>
+          </EmptyState>
         </div>
 
         <p v-if="grammarTip" class="mt-3 text-xs leading-5 text-ink-soft">{{ grammarTip }}</p>
@@ -533,7 +528,7 @@ async function addSpoken() {
       </div>
 
       <!-- 口语 -->
-      <div v-else-if="tab === 'phrase'" class="mt-6">
+      <div v-else-if="tab === 'phrase'" class="mx-auto mt-10 max-w-4xl">
         <div class="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <div class="text-sm font-medium text-ink">口语卡</div>
@@ -551,13 +546,13 @@ async function addSpoken() {
           </button>
         </div>
 
-        <p v-if="spokenLoading" class="mt-6 text-sm text-ink-mute">正在加载…</p>
+        <div v-if="spokenLoading" class="mt-6 space-y-3" aria-label="正在加载"><div class="sp-skeleton h-24"></div><div class="sp-skeleton h-24"></div><div class="sp-skeleton h-24 w-2/3"></div></div>
 
-        <div v-else-if="spokenLib" class="mt-4 space-y-2">
+        <div v-else-if="spokenLib" class="mt-6 space-y-2.5">
           <div
             v-for="c in spokenLib.items"
             :key="c.id"
-            class="sp-card-flat flex items-start justify-between gap-4 p-4"
+            class="sp-card-flat flex items-start justify-between gap-4 p-4 transition duration-200 hover:ring-brand-200"
           >
             <div class="min-w-0">
               <div class="text-sm leading-6 text-ink"><span class="text-ink-mute">书面</span> {{ c.formal }}</div>
@@ -570,39 +565,25 @@ async function addSpoken() {
 
         <p v-if="spokenTip" class="mt-3 text-xs leading-5 text-ink-soft">{{ spokenTip }}</p>
 
-        <div v-if="spokenLib && !spokenLib.items.length" class="flex flex-col items-center py-12 text-center">
-          <div class="sp-icon-tile h-14 w-14 text-brand-700">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="9" y="2.8" width="6" height="11" rx="3" />
-              <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0" />
-              <path d="M12 17.8v3.4" />
-            </svg>
-          </div>
-          <div class="mt-4 text-lg font-semibold text-ink">今天没有要练的口语</div>
-          <p class="mt-1 max-w-xs text-sm leading-6 text-ink-soft">去练一次带口语的对话，报告里的说法会回到这里。</p>
-          <router-link to="/" class="sp-btn-primary mt-6">去练一次</router-link>
+        <div v-if="spokenLib && !spokenLib.items.length" class="sp-card mt-6">
+          <EmptyState icon="practice" title="今天没有要练的口语" text="去练一次带口语的对话，报告里的说法会回到这里。">
+            <router-link to="/" class="sp-btn-primary">去练一次</router-link>
+          </EmptyState>
         </div>
       </div>
 
       <!-- 复习队列 -->
-      <div v-else class="mt-6">
+      <div v-else class="mt-10">
         <p v-if="error" class="sp-alert-error mb-4">{{ error }}</p>
 
-        <p v-if="loading" class="py-10 text-center text-sm text-ink-mute">正在加载…</p>
+        <div v-if="loading" class="mx-auto max-w-xl" aria-label="正在加载"><div class="sp-skeleton h-72 rounded-card"></div><div class="mt-4 grid grid-cols-3 gap-2.5"><div v-for="i in 3" :key="i" class="sp-skeleton h-11"></div></div></div>
 
-        <div v-else-if="done" class="flex flex-col items-center py-10 text-center">
-          <div class="sp-icon-tile h-14 w-14 text-brand-700">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M5 12.5l4.5 4.5L19 7.5" />
-            </svg>
-          </div>
-          <div class="mt-4 text-lg font-semibold text-ink">{{ emptyState.title }}</div>
-          <p class="mt-1 max-w-xs text-sm leading-6 text-ink-soft">{{ emptyState.text }}</p>
-          <div class="mt-6 flex flex-wrap justify-center gap-2">
+        <div v-else-if="done" class="sp-card mx-auto max-w-2xl">
+          <EmptyState icon="done" :title="emptyState.title" :text="emptyState.text">
             <button class="sp-btn-secondary" @click="switchTab('new')">学几个新词</button>
             <button class="sp-btn-secondary" @click="switchTab('grammar')">看语法卡</button>
             <router-link to="/" class="sp-btn-primary">去练一次</router-link>
-          </div>
+          </EmptyState>
         </div>
 
         <div v-else-if="current" class="mx-auto w-full max-w-xl">
@@ -612,7 +593,7 @@ async function addSpoken() {
           </div>
 
           <!-- 拼写 -->
-          <div v-if="isSpelling" class="sp-card p-8">
+          <div v-if="isSpelling" class="sp-card p-8 sm:p-10">
             <div class="text-center">
               <div class="text-xs text-ink-mute">按释义写出单词</div>
               <div class="mt-2 text-lg font-medium leading-7 text-ink">{{ current.meaning_zh || '按提示写出这个词' }}</div>
@@ -649,7 +630,7 @@ async function addSpoken() {
           </div>
 
           <!-- 语法：给错句，补空或整句改写 -->
-          <div v-else-if="isGrammar" class="sp-card p-8">
+          <div v-else-if="isGrammar" class="sp-card p-8 sm:p-10">
             <div class="text-xs text-ink-mute">{{ current.term }}</div>
             <p v-if="current.meaning_zh" class="mt-1.5 text-sm leading-6 text-ink-soft">{{ current.meaning_zh }}</p>
 
@@ -682,7 +663,7 @@ async function addSpoken() {
           </div>
 
           <!-- 口语：书面 → 更自然的口语 -->
-          <div v-else-if="isSpoken" class="sp-card p-8">
+          <div v-else-if="isSpoken" class="sp-card p-8 sm:p-10">
             <div class="text-xs text-ink-mute">换成更自然的口语说法</div>
             <p class="mt-2 text-base font-medium leading-7 text-ink">{{ current.term }}</p>
 

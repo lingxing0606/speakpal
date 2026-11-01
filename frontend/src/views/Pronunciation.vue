@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import api from '../api/client'
-import BrandLogo from '../components/BrandLogo.vue'
+import AppHeader from '../components/AppHeader.vue'
 import { createRecognizer, speakSmart } from '../utils/speech'
 
 const router = useRouter()
@@ -98,40 +98,31 @@ function startCheck(set, idx, side) {
 
 <template>
   <div class="min-h-screen bg-canvas">
-    <header class="sp-header">
-      <div class="sp-shell flex items-center justify-between py-3">
-        <div class="flex items-center gap-3">
-          <router-link to="/" aria-label="返回首页">
-            <BrandLogo :size="30" />
-          </router-link>
-          <span class="h-4 w-px bg-line"></span>
-          <div class="font-semibold text-ink">发音对比 · 最小对立对</div>
-        </div>
-        <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
-      </div>
-    </header>
+    <AppHeader title="发音对比" subtitle="最小对立对" back="/" />
 
-    <main class="sp-shell py-8">
+    <main class="sp-shell pb-16 pt-10">
       <p v-if="error" class="sp-alert-error mb-4">{{ error }}</p>
 
-      <div class="mb-5">
-        <h1 class="text-xl font-bold tracking-tight text-ink">先听，再说，立刻知道听成了哪个词</h1>
-        <p class="mt-1 text-sm leading-6 text-ink-soft">
+      <div class="mb-8">
+        <div class="sp-eyebrow">发音</div>
+        <h1 class="sp-title mt-2">先听，再说，立刻知道听成了哪个词</h1>
+        <p class="sp-lede">
           点 🔊 听标准读音，点「我说」读一遍，系统按识别结果判断你读的是目标词还是对手词。
           不需要声学模型，正确率就是可测的分数。
         </p>
       </div>
 
-      <p v-if="loading" class="text-sm text-ink-mute">正在加载词表…</p>
+      <div v-if="loading" class="grid gap-5 lg:grid-cols-2" aria-label="正在加载词表"><div v-for="i in 2" :key="i" class="sp-skeleton h-72 rounded-card"></div></div>
 
-      <div v-for="set in sets" :key="set.id" class="sp-card mt-4 p-6">
+      <div class="grid items-start gap-5 lg:grid-cols-2">
+      <div v-for="(set, si) in sets" :key="set.id" :style="{ '--i': si }" class="sp-reveal sp-card p-6">
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <div class="font-semibold text-ink">{{ set.focus }}</div>
           <div class="text-xs text-ink-mute">{{ set.zh_focus }}</div>
         </div>
 
         <div class="mt-4 grid gap-2.5 sm:grid-cols-2">
-          <div v-for="(p, i) in set.pairs" :key="i" class="rounded-xl bg-canvas p-3 ring-1 ring-line/60">
+          <div v-for="(p, i) in set.pairs" :key="i" class="rounded-2xl bg-paper p-3.5 ring-1 ring-line/70 transition duration-200 hover:ring-brand-200">
             <div class="flex items-center justify-between gap-2 text-sm">
               <button class="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 font-medium text-ink hover:bg-white" @click="say(p.a)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-brand-600">
@@ -188,7 +179,9 @@ function startCheck(set, idx, side) {
         </div>
       </div>
 
-      <p class="mt-6 text-center text-xs text-ink-mute">
+      </div>
+
+      <p class="mt-8 text-center text-xs text-ink-mute">
         每组 10 对待测词，读对的比例可以直接当作发音练习的通过指标。
       </p>
     </main>

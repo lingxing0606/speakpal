@@ -3,9 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import api from '../api/client'
-import BackLink from '../components/BackLink.vue'
-import BrandLogo from '../components/BrandLogo.vue'
+import AppHeader from '../components/AppHeader.vue'
+import EmptyState from '../components/EmptyState.vue'
 import StudyDashboard from '../components/StudyDashboard.vue'
+import TabBar from '../components/TabBar.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
@@ -18,6 +19,8 @@ const error = ref('')
 const rec = ref(null)
 const needKey = ref(false)
 const pendingItem = ref(null)
+// 列表还没回来时显示骨架，不能先闪一下「还没有练习记录」
+const loading = ref(true)
 
 onMounted(async () => {
   try {
@@ -25,6 +28,8 @@ onMounted(async () => {
     items.value = data
   } catch (e) {
     error.value = '加载失败：' + (e?.response?.data?.detail || e.message)
+  } finally {
+    loading.value = false
   }
   try {
     const { data } = await api.get('/me/recommendation')
@@ -171,25 +176,10 @@ function open(item) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-canvas">
-    <header class="sp-header">
-      <div class="sp-shell flex items-center justify-between py-3">
-        <div class="flex items-center gap-3">
-          <BackLink fallback="/" />
-          <span class="h-4 w-px bg-line"></span>
-          <router-link to="/" aria-label="首页">
-            <BrandLogo :size="30" />
-          </router-link>
-          <span class="h-4 w-px bg-line"></span>
-          <div class="font-semibold text-ink">历史记录</div>
-        </div>
-        <div class="flex items-center gap-1">
-          <router-link to="/settings" class="sp-btn-ghost">设置</router-link>
-        </div>
-      </div>
-    </header>
+  <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
+    <AppHeader title="历史记录" back="/" />
 
-    <main class="sp-shell py-8">
+    <main class="sp-shell pb-16 pt-10">
       <p v-if="error" class="sp-alert-error">{{ error }}</p>
 
       <div v-if="needKey" class="sp-card mb-4 p-5 ring-brand-100">
@@ -203,29 +193,41 @@ function open(item) {
         </div>
       </div>
 
-      <div class="mb-4 flex items-baseline justify-between">
-        <h1 class="text-xl font-bold tracking-tight text-ink">我的练习</h1>
-        <span class="text-xs text-ink-mute">{{ items.length }} 次</span>
-      </div>
-
-      <div v-if="items.length === 0 && !error" class="sp-card flex flex-col items-center px-6 py-14 text-center">
-        <div class="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-brand-100">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="9" y="2.8" width="6" height="11" rx="3" />
-            <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0" />
-            <path d="M12 17.8v3.4" />
-          </svg>
+      <div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <div class="sp-eyebrow">历史</div>
+          <h1 class="sp-title mt-2">我的练习</h1>
+          <p class="sp-lede">每一次对话、分数和纠错都在这里。成长曲线用跨模式可比的档位，打字和录音可以放在一起看。</p>
         </div>
-        <div class="mt-4 font-semibold text-ink">还没有练习记录。</div>
-        <p class="mt-1 max-w-xs text-sm leading-6 text-ink-soft">
-          选一个场景说上几句，结束后就能在这里看到每次的分数和纠错。
-        </p>
-        <button class="sp-btn-primary mt-5" @click="router.push('/')">去练一次</button>
+        <span v-if="!loading" class="sp-chip bg-white text-ink-soft ring-1 ring-line">{{ items.length }} 次练习</span>
       </div>
 
-      <div v-else class="space-y-3">
+      <div v-if="loading" class="sp-grid">
+        <div class="space-y-4 lg:col-span-5">
+          <div class="sp-card-flat space-y-3 p-5">
+            <div class="sp-skeleton h-4 w-1/3"></div>
+            <div class="grid grid-cols-3 gap-2"><div v-for="i in 3" :key="i" class="sp-skeleton h-16"></div></div>
+            <div class="sp-skeleton h-24"></div>
+          </div>
+        </div>
+        <div class="space-y-3 lg:col-span-7">
+          <div v-for="i in 4" :key="i" class="sp-card-flat flex items-center justify-between p-5">
+            <div class="w-1/2 space-y-2"><div class="sp-skeleton h-4 w-2/3"></div><div class="sp-skeleton h-3 w-full"></div></div>
+            <div class="sp-skeleton h-8 w-12"></div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="items.length === 0 && !error" class="sp-card">
+        <EmptyState icon="practice" title="还没有练习记录" text="选一个场景说上几句，结束后这里会出现分数、纠错和你的成长曲线。">
+          <button class="sp-btn-primary" @click="router.push('/')">去练第一次</button>
+        </EmptyState>
+      </div>
+
+      <div v-else-if="items.length" class="sp-grid items-start">
+        <aside class="space-y-5 lg:sticky lg:top-24 lg:col-span-5">
         <StudyDashboard />
-        <div v-if="curve" class="sp-card mb-4 p-5">
+        <div v-if="curve" class="sp-card p-5">
           <div class="flex items-baseline justify-between">
             <div class="font-semibold text-ink">成长曲线</div>
             <div class="text-xs text-ink-mute">{{ curve.count }} 次</div>
@@ -268,11 +270,14 @@ function open(item) {
             <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full border border-brand-500 bg-white"></span>打字</span>
           </div>
         </div>
+        </aside>
 
+        <section class="space-y-3 lg:col-span-7" aria-label="练习列表">
         <div
-          v-for="it in items"
+          v-for="(it, idx) in items"
           :key="it.id"
-          class="sp-card-flat flex cursor-pointer items-center justify-between gap-4 p-4 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lift hover:ring-brand-200"
+          :style="{ '--i': Math.min(idx, 12) }"
+          class="sp-reveal sp-hover group flex cursor-pointer flex-wrap items-center justify-between gap-4 rounded-2xl bg-white p-5 ring-1 ring-line/80"
           @click="open(it)"
         >
           <div class="min-w-0">
@@ -298,11 +303,16 @@ function open(item) {
             >
               再练一次
             </button>
-            <span class="text-[11px] text-ink-mute">{{ it.report_id ? '看报告' : '继续练习' }}</span>
-            <span class="text-line transition">→</span>
+            <span class="hidden text-[11px] text-ink-mute sm:inline">{{ it.report_id ? '看报告' : '继续练习' }}</span>
+            <span class="sp-arrow" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+            </span>
           </div>
         </div>
+        </section>
       </div>
     </main>
+
+    <TabBar />
   </div>
 </template>

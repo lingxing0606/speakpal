@@ -100,28 +100,41 @@ async function submit() {
 </script>
 
 <template>
-  <div class="relative min-h-screen overflow-hidden bg-canvas">
-    <div class="pointer-events-none absolute -left-24 -top-32 h-80 w-80 rounded-full bg-brand-200/45 blur-3xl"></div>
-    <div class="pointer-events-none absolute -bottom-32 -right-24 h-80 w-80 rounded-full bg-coral-300/30 blur-3xl"></div>
+  <div class="min-h-screen bg-canvas lg:grid lg:grid-cols-2">
+    <!-- 品牌面板（桌面） -->
+    <aside class="relative hidden overflow-hidden bg-ink p-12 text-white lg:flex lg:flex-col lg:justify-between">
+      <div class="pointer-events-none absolute -left-20 -top-24 h-96 w-96 rounded-full bg-brand-500/35 blur-3xl"></div>
+      <div class="pointer-events-none absolute -bottom-32 right-0 h-96 w-96 rounded-full bg-coral-500/20 blur-3xl"></div>
+      <div class="relative"><BrandLogo :size="40" tone="inverse" wordmark /></div>
+      <div class="relative max-w-md">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/50">Speak · Review · Remember</div>
+        <p class="mt-5 text-[34px] font-bold leading-[1.2] tracking-tight">在真实场景里开口，<br />拿到看得懂的反馈。</p>
+        <div class="mt-10 space-y-3">
+          <div class="max-w-xs rounded-[1.25rem] rounded-bl-md bg-white/10 px-4 py-3 text-sm leading-6 ring-1 ring-white/10 animate-rise">
+            Could you tell me a bit about yourself?
+          </div>
+          <div class="ml-auto max-w-xs rounded-[1.25rem] rounded-br-md bg-brand-500 px-4 py-3 text-sm leading-6 animate-rise [animation-delay:150ms]">
+            I'm a student and I love building web apps.
+          </div>
+          <div class="max-w-xs rounded-2xl bg-white px-4 py-3 text-ink shadow-lift animate-rise [animation-delay:300ms]">
+            <div class="flex items-baseline justify-between"><span class="text-xs text-ink-mute">综合得分</span><span class="sp-num text-2xl font-semibold">78</span></div>
+            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-brand-50"><div class="h-full w-[78%] rounded-full bg-brand-500"></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="relative text-xs text-white/40">练习记录按账号独立保存，密钥只留在你自己的浏览器里</p>
+    </aside>
 
-    <div class="relative flex min-h-screen items-center justify-center px-4 py-10">
+    <div class="relative flex min-h-screen items-center justify-center px-5 py-10">
       <div class="w-full max-w-[400px]">
-        <div class="mb-6 flex flex-col items-center text-center">
-          <BrandLogo :size="46" />
-          <h1 class="mt-3.5 text-2xl font-bold tracking-tight text-ink">SpeakPal</h1>
-          <p class="mt-1 text-sm text-ink-soft">场景化 AI 英语口语陪练</p>
+        <div class="mb-8 flex flex-col items-center text-center lg:items-start lg:text-left">
+          <span class="lg:hidden"><BrandLogo :size="46" /></span>
+          <div class="sp-eyebrow mt-4 lg:mt-0">SpeakPal</div>
+          <h1 class="mt-2 text-[28px] font-bold tracking-tight text-ink">{{ mode === 'login' ? '欢迎回来' : '创建账号' }}</h1>
+          <p class="mt-1.5 text-sm text-ink-soft">{{ mode === 'login' ? '登录后继续你的口语练习' : '注册后即可开始练习，记录只属于你' }}</p>
         </div>
 
         <div class="sp-card p-6 sm:p-7">
-          <div class="mb-5">
-            <div class="text-[15px] font-semibold text-ink">
-              {{ mode === 'login' ? '欢迎回来' : '创建账号' }}
-            </div>
-            <div class="mt-0.5 text-xs text-ink-mute">
-              {{ mode === 'login' ? '登录后继续你的口语练习' : '注册后即可开始练习，记录只属于你' }}
-            </div>
-          </div>
-
           <div class="space-y-3">
             <label class="block">
               <span class="mb-1.5 block text-xs font-medium text-ink-soft">账号</span>
@@ -194,7 +207,7 @@ async function submit() {
           </div>
         </div>
 
-        <p class="mt-5 text-center text-xs text-ink-mute">
+        <p class="mt-6 text-center text-xs text-ink-mute lg:hidden">
           练习记录按账号独立保存，密钥只留在你自己的浏览器里
         </p>
       </div>

@@ -4,6 +4,8 @@
 import { computed, onMounted, ref } from 'vue'
 
 import api from '../api/client'
+import CountUp from './CountUp.vue'
+import EmptyState from './EmptyState.vue'
 
 const data = ref(null)
 const failed = ref(false)
@@ -31,7 +33,7 @@ const CELL = 11
 const GAP = 3
 const LEFT = 18
 const TOP = 12
-const SHADES = ['#EEF2F1', '#BFE5DD', '#7FCBBD', '#3FAE9B', '#14806F']
+const SHADES = ['#EFEAE1', '#BFE5DD', '#7FCBBD', '#3FAE9B', '#14806F']
 
 function shade(count) {
   if (!count) return SHADES[0]
@@ -121,23 +123,23 @@ const weekText = computed(() => {
 </script>
 
 <template>
-  <section v-if="data && !failed" class="sp-card mb-4 p-5" aria-label="学习数据">
+  <section v-if="data && !failed" class="sp-card p-5 sm:p-6" aria-label="学习数据">
     <div class="flex items-baseline justify-between">
       <div class="font-semibold text-ink">学习数据</div>
       <div class="text-xs text-ink-mute">{{ data.practiced_today ? '今天已练' : '今天还没练' }}</div>
     </div>
 
     <div class="mt-3 grid grid-cols-3 gap-2 text-center">
-      <div class="rounded-xl bg-canvas px-2 py-3 ring-1 ring-line/60">
-        <div class="text-xl font-bold text-brand-700">{{ data.current_streak }}</div>
+      <div class="sp-stat !px-2">
+        <div class="sp-num text-2xl font-semibold text-brand-700"><CountUp :value="data.current_streak" /></div>
         <div class="mt-0.5 text-[11px] text-ink-mute">连续天数</div>
       </div>
-      <div class="rounded-xl bg-canvas px-2 py-3 ring-1 ring-line/60">
-        <div class="text-xl font-bold text-ink">{{ data.longest_streak }}</div>
+      <div class="sp-stat !px-2">
+        <div class="sp-num text-2xl font-semibold text-ink"><CountUp :value="data.longest_streak" /></div>
         <div class="mt-0.5 text-[11px] text-ink-mute">最长连续</div>
       </div>
-      <div class="rounded-xl bg-canvas px-2 py-3 ring-1 ring-line/60">
-        <div class="text-xl font-bold text-ink">{{ data.practice_days }}</div>
+      <div class="sp-stat !px-2">
+        <div class="sp-num text-2xl font-semibold text-ink"><CountUp :value="data.practice_days" /></div>
         <div class="mt-0.5 text-[11px] text-ink-mute">累计练习天</div>
       </div>
     </div>
@@ -145,7 +147,7 @@ const weekText = computed(() => {
     <div v-if="heat" class="mt-4">
       <div class="text-xs font-medium text-ink-soft">近 12 周</div>
       <div class="mt-1 overflow-x-auto">
-        <svg :viewBox="`0 0 ${heat.w} ${heat.h}`" class="w-full max-w-[560px]" role="img" aria-label="近 12 周每天练习轮数热力图">
+        <svg :viewBox="`0 0 ${heat.w} ${heat.h}`" class="w-full max-w-[340px]" role="img" aria-label="近 12 周每天练习轮数热力图">
           <g fill="#98A2B3" font-size="8">
             <text v-for="m in heat.months" :key="m.x + m.label" :x="m.x" y="8">{{ m.label }}</text>
             <text x="0" :y="12 + 0 * 14 + 9">一</text>
@@ -166,7 +168,7 @@ const weekText = computed(() => {
           </rect>
         </svg>
       </div>
-      <div class="mt-1 flex max-w-[560px] items-center justify-end gap-1 text-[10px] text-ink-mute">
+      <div class="mt-1 flex max-w-[340px] items-center justify-end gap-1 text-[10px] text-ink-mute">
         少
         <span v-for="s in SHADES" :key="s" class="inline-block h-2.5 w-2.5 rounded-sm" :style="{ background: s }"></span>
         多
@@ -175,10 +177,14 @@ const weekText = computed(() => {
 
     <div class="mt-4 border-t border-line/70 pt-4">
       <div class="text-xs font-medium text-ink-soft">各维度平均分</div>
-      <p v-if="!data.dimensions.length" class="mt-2 text-xs leading-5 text-ink-mute">
-        还没有正式计分的报告。示例报告（模型不可用时生成）不计分，也不算进来。
-      </p>
-      <div v-else class="mt-2 flex flex-col items-center gap-3 sm:flex-row sm:items-start">
+      <EmptyState
+        v-if="!data.dimensions.length"
+        compact
+        icon="chart"
+        title="还没有计分的报告"
+        text="完成一次正式计分的练习后，这里会画出各维度雷达。示例报告不计分，也不算进来。"
+      />
+      <div v-else class="mt-2 flex flex-col items-center gap-3">
         <svg v-if="radar" viewBox="0 0 220 172" class="h-44 w-full max-w-[240px] shrink-0" role="img" aria-label="各维度平均分雷达图，满分 100">
           <polygon v-for="(r, i) in radar.rings" :key="i" :points="r" fill="none" stroke="#E3EAE9" stroke-width="1" />
           <line v-for="(a, i) in radar.axes" :key="`a${i}`" :x1="110" :y1="86" :x2="a[0]" :y2="a[1]" stroke="#E3EAE9" stroke-width="1" />
@@ -203,6 +209,6 @@ const weekText = computed(() => {
       </p>
     </div>
 
-    <p class="mt-3 rounded-xl bg-canvas px-3 py-2 text-xs leading-5 text-ink-soft ring-1 ring-line/60">{{ weekText }}</p>
+    <p class="mt-4 rounded-xl bg-paper px-3.5 py-2.5 text-xs leading-5 text-ink-soft ring-1 ring-line/70">{{ weekText }}</p>
   </section>
 </template>

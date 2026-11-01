@@ -3,7 +3,9 @@ import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
-import BrandLogo from '../components/BrandLogo.vue'
+import AppHeader from '../components/AppHeader.vue'
+import CountUp from '../components/CountUp.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
 import { loadRecordings, playRecording, stopRecording } from '../utils/recordings'
@@ -410,32 +412,16 @@ function again() {
 
 <template>
   <div class="min-h-screen bg-canvas">
-    <header class="sp-header">
-      <div class="sp-shell flex items-center justify-between py-3">
-        <div class="flex items-center gap-3">
-          <router-link to="/" aria-label="返回首页">
-            <BrandLogo :size="30" />
-          </router-link>
-          <span class="h-4 w-px bg-line"></span>
-          <div>
-            <div class="font-semibold text-ink">复盘报告</div>
-            <div v-if="metaLine" class="mt-0.5 text-[11px] text-ink-mute">{{ metaLine }}</div>
-          </div>
-        </div>
-        <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
-      </div>
-    </header>
+    <AppHeader title="复盘报告" :subtitle="metaLine" back="/history" />
 
-    <main class="sp-shell py-8">
+    <main class="sp-shell pb-16 pt-10">
       <p v-if="error" class="sp-alert-error">{{ error }}</p>
 
-      <div v-if="missing" class="sp-card flex flex-col items-center px-6 py-14 text-center">
-        <div class="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-2xl ring-1 ring-brand-100">📄</div>
-        <div class="mt-4 font-semibold text-ink">这次练习还没有报告</div>
-        <p class="mt-1 max-w-sm text-sm leading-6 text-ink-soft">
-          它可能是中途退出或刷新时丢掉的对话，还没有走到生成报告这一步。重新练一次，说几句再点「结束并出报告」，就能看到分数和纠错。
-        </p>
-        <button class="sp-btn-primary mt-5" @click="again">重新练一次</button>
+      <div v-if="missing" class="sp-card">
+        <EmptyState icon="report" title="这次练习还没有报告" text="它可能是中途退出或刷新时丢掉的对话，还没走到生成报告这一步。重新练一次，说几句再点「结束并出报告」。">
+          <button class="sp-btn-primary" @click="again">重新练一次</button>
+          <button class="sp-btn-ghost" @click="router.push('/history')">回历史</button>
+        </EmptyState>
       </div>
 
       <div v-if="report">
@@ -460,23 +446,28 @@ function again() {
           这次录音和打字都有：发音、流利度只统计录音的句子，「文字表达」只统计打字的句子。
         </div>
 
+        <div class="sp-grid items-start">
+          <aside class="space-y-5 lg:sticky lg:top-24 lg:col-span-4 lg:col-start-9 lg:row-start-1">
         <div
           v-if="hasScore"
-          class="relative overflow-hidden rounded-card bg-white p-7 text-center shadow-card ring-1 ring-line/70"
+          class="relative overflow-hidden rounded-card bg-ink p-7 text-white shadow-lift"
         >
-          <div class="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-brand-100/60 blur-2xl"></div>
+          <div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-brand-500/40 blur-2xl"></div>
+          <div class="pointer-events-none absolute -bottom-16 -left-10 h-40 w-40 rounded-full bg-coral-500/25 blur-2xl"></div>
           <div class="relative">
-            <div class="text-xs font-medium tracking-wide text-ink-mute">综合得分</div>
-            <div class="sp-num mt-1 text-[56px] font-semibold leading-none text-ink">{{ report.total_score }}</div>
-            <div v-if="bandText" class="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3.5 py-1.5 text-sm font-medium text-brand-700">
+            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60">综合得分</div>
+            <div class="mt-2 flex items-end gap-2">
+              <span class="sp-num text-[64px] font-semibold leading-none"><CountUp :value="report.total_score" /></span>
+              <span class="mb-2 text-sm text-white/50">/ 100</span>
+            </div>
+            <div v-if="bandText" class="mt-4 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-1.5 text-sm font-medium text-white ring-1 ring-white/15">
               {{ bandText }}
             </div>
           </div>
         </div>
-
         <div
           v-if="Object.keys(report.dimensions || {}).length"
-          class="sp-card mt-4 p-6"
+          class="sp-card p-6"
         >
           <div class="flex items-baseline justify-between">
             <div class="font-semibold text-ink">{{ Object.keys(report.dimensions).length }} 个维度</div>
@@ -496,7 +487,21 @@ function again() {
           </div>
         </div>
 
-        <div v-if="topFixes.length" class="sp-card mt-4 flex flex-wrap items-center justify-between gap-3 p-5">
+        <div v-if="report.comment" class="sp-card-soft p-5">
+          <div class="sp-eyebrow">点评</div>
+          <p class="mt-2 text-sm leading-7 text-ink-soft">{{ report.comment }}</p>
+        </div>
+        <div class="flex flex-col gap-2.5">
+          <button class="sp-btn-primary w-full py-3" @click="nextPractice">按推荐再练一次</button>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button class="sp-btn-secondary" @click="again">再来一次</button>
+            <button class="sp-btn-secondary" @click="router.push('/history')">看历史</button>
+          </div>
+        </div>
+          </aside>
+
+          <div class="min-w-0 space-y-5 lg:col-span-8 lg:col-start-1 lg:row-start-1">
+        <div v-if="topFixes.length" class="sp-card flex flex-wrap items-center justify-between gap-3 p-5">
           <div class="min-w-0">
             <div class="font-semibold text-ink">最该改的 {{ topFixes.length }} 句</div>
             <p class="mt-0.5 text-xs leading-5 text-ink-mute">
@@ -511,15 +516,23 @@ function again() {
           </div>
         </div>
 
-        <div class="sp-card mt-4 p-6">
-          <div class="font-semibold text-ink">逐句纠错</div>
-          <p v-if="!report.sentence_fixes.length" class="mt-3 text-sm text-ink-mute">
-            本次没有可展示的句子。
-          </p>
+        <div class="sp-card p-6">
+          <div class="flex items-baseline justify-between">
+            <div class="sp-section-title">逐句纠错</div>
+            <span v-if="report.sentence_fixes.length" class="text-xs text-ink-mute">{{ report.sentence_fixes.length }} 句</span>
+          </div>
+          <EmptyState
+            v-if="!report.sentence_fixes.length"
+            compact
+            icon="done"
+            title="没有需要改的句子"
+            text="这次说的话里没有挑出要改写的句子。换个难一点的场景，或多说几句再看看。"
+          />
           <div
             v-for="(f, i) in report.sentence_fixes"
             :key="i"
-            class="mt-3 rounded-xl bg-canvas p-4 text-sm ring-1 ring-line/60"
+            :style="{ '--i': Math.min(i, 10) }"
+            class="sp-reveal mt-3 rounded-2xl bg-paper p-4 text-sm ring-1 ring-line/70 transition duration-200 hover:ring-brand-200"
           >
             <div class="flex items-start gap-2">
               <span class="mt-0.5 text-[11px] font-medium text-ink-mute">原句</span>
@@ -603,7 +616,7 @@ function again() {
           </div>
         </div>
 
-        <div v-if="Object.keys(displayFeatures).length" class="sp-card mt-4 p-6">
+        <div v-if="Object.keys(displayFeatures).length" class="sp-card p-6">
           <div class="flex items-start justify-between gap-3">
             <div>
               <div class="font-semibold text-ink">{{ typedOnly ? '文字表达指标' : '流利度与表达指标' }}</div>
@@ -621,7 +634,7 @@ function again() {
           </div>
         </div>
 
-        <div v-if="hasDetail" class="sp-card mt-4 p-6">
+        <div v-if="hasDetail" class="sp-card p-6">
           <div class="flex items-start justify-between gap-3">
             <div>
               <div class="font-semibold text-ink">评分依据</div>
@@ -664,14 +677,8 @@ function again() {
           </div>
         </div>
 
-        <div class="sp-card mt-4 p-6 text-sm leading-6 text-ink-soft">
-          {{ report.comment }}
-        </div>
 
-        <div class="mt-6 flex flex-wrap gap-3">
-          <button class="sp-btn-primary flex-1" @click="nextPractice">按推荐再练一次</button>
-          <button class="sp-btn-secondary flex-1" @click="again">再来一次</button>
-          <button class="sp-btn-ghost" @click="router.push('/history')">看历史</button>
+          </div>
         </div>
       </div>
     </main>

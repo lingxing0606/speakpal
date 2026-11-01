@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import { streamTurn } from '../api/stream'
+import AppHeader from '../components/AppHeader.vue'
 import BrandLogo from '../components/BrandLogo.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { useSessionStore } from '../stores/session'
 import { startAudioCapture } from '../utils/audio'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
@@ -175,6 +177,26 @@ let recognizer = null
 let capturer = null
 let timer = null
 const elapsed = ref(0)
+// 录音按钮外圈跟着真实音量缩放（0–1）
+const micLevel = ref(0)
+let levelRaf = 0
+
+function trackLevel() {
+  cancelAnimationFrame(levelRaf)
+  const tick = () => {
+    const rms = capturer?.level?.() || 0
+    // 说话时 RMS 常在 0.02–0.2，映射到 0–1 并做一点平滑
+    const target = Math.min(1, Math.max(0, (rms - 0.015) * 6))
+    micLevel.value = micLevel.value * 0.6 + target * 0.4
+    levelRaf = requestAnimationFrame(tick)
+  }
+  levelRaf = requestAnimationFrame(tick)
+}
+
+function stopLevel() {
+  cancelAnimationFrame(levelRaf)
+  micLevel.value = 0
+}
 
 const DIFFICULTY_LABELS = { easy: '简单', medium: '中等', hard: '困难' }
 const difficultyLabel = computed(() => DIFFICULTY_LABELS[session.difficulty] || session.difficulty || '—')
@@ -276,6 +298,7 @@ function scrollBottom() {
 
 function startTimer() {
   stopTimer()
+  trackLevel()
   elapsed.value = 0
   timer = setInterval(() => {
     elapsed.value += 1
@@ -283,6 +306,7 @@ function startTimer() {
 }
 
 function stopTimer() {
+  stopLevel()
   if (timer) {
     clearInterval(timer)
     timer = null
@@ -518,41 +542,25 @@ async function finish() {
 
 <template>
   <div class="flex min-h-screen flex-col bg-canvas">
-    <header class="sp-header">
-      <div class="sp-shell flex items-center justify-between py-2.5">
-        <div class="flex min-w-0 items-center gap-2.5">
-          <router-link to="/" aria-label="返回首页">
-            <BrandLogo :size="30" />
-          </router-link>
-          <div class="min-w-0">
-            <div class="truncate text-sm font-semibold text-ink">{{ session.scene?.name || '练习' }}</div>
-            <div class="mt-0.5 flex items-center gap-1.5">
-              <span class="sp-chip-brand">难度 {{ difficultyLabel }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center gap-1">
-          <div class="mr-1 hidden items-center gap-0.5 rounded-lg bg-canvas p-0.5 ring-1 ring-line sm:flex" role="group" aria-label="AI 朗读语速">
-            <span class="px-1.5 text-[11px] text-ink-mute">语速</span>
-            <button
-              v-for="r in SPEECH_RATES"
-              :key="r.value"
-              class="rounded-md px-2 py-1 text-[11px] font-medium transition"
-              :class="speechRate === r.value ? 'bg-white text-brand-700 shadow-sm' : 'text-ink-mute hover:text-ink-soft'"
-              :aria-pressed="speechRate === r.value"
-              @click="speechRate = r.value"
-            >
-              {{ r.label }}
-            </button>
-          </div>
-          <button class="sp-btn-ghost" @click="router.push('/')">返回首页</button>
-          <router-link to="/settings" class="sp-btn-ghost">设置</router-link>
-        </div>
+    <AppHeader :title="session.scene?.name || '练习'" :subtitle="`难度 ${difficultyLabel}`" back="/" :nav="false" narrow>
+      <div class="sp-segment !p-0.5" role="group" aria-label="AI 朗读语速">
+        <span class="hidden pl-2 pr-1 text-[11px] text-ink-mute sm:inline">语速</span>
+        <button
+          v-for="r in SPEECH_RATES"
+          :key="r.value"
+          class="rounded-full px-2.5 py-1 text-[12px] font-medium transition"
+          :class="speechRate === r.value ? 'bg-white text-brand-700 shadow-soft ring-1 ring-line/80' : 'text-ink-mute hover:text-ink'"
+          :aria-pressed="speechRate === r.value"
+          @click="speechRate = r.value"
+        >
+          {{ r.label }}
+        </button>
       </div>
-    </header>
+      <router-link to="/settings" class="sp-btn-ghost hidden sm:inline-flex">设置</router-link>
+    </AppHeader>
 
-    <div v-if="blocked" class="sp-shell py-10">
-      <div class="sp-card mx-auto max-w-lg p-6 ring-brand-100">
+    <div v-if="blocked" class="sp-shell-narrow py-12">
+      <div class="sp-card mx-auto max-w-lg p-7 ring-brand-100">
         <div class="font-semibold text-ink">{{ blockReason || '进对话前要先接入一个模型密钥' }}</div>
         <p v-if="blockReason" class="mt-1.5 text-sm leading-6 text-ink-soft">
           换一个能用的密钥就能接着这段对话，刚才那句话没有计入记录。
@@ -568,19 +576,21 @@ async function finish() {
       </div>
     </div>
 
-    <main v-if="!blocked" ref="chatEl" class="sp-shell flex-1 space-y-3 overflow-y-auto py-6">
+    <main v-if="!blocked" ref="chatEl" class="sp-shell-narrow flex-1 space-y-4 overflow-y-auto pb-6 pt-8">
       <div
         v-for="(t, i) in session.turns"
         :key="i"
-        :class="t.role === 'ai' ? 'flex justify-start' : 'flex justify-end'"
+        :class="t.role === 'ai' ? 'flex items-end justify-start gap-2.5' : 'flex justify-end'"
+        class="animate-rise"
       >
+        <span v-if="t.role === 'ai'" class="mb-0.5 hidden shrink-0 sm:inline-flex" aria-hidden="true"><BrandLogo :size="28" /></span>
         <div
           :class="
             t.role === 'ai'
-              ? 'rounded-2xl rounded-tl-md bg-white text-ink ring-1 ring-line'
-              : 'rounded-2xl rounded-tr-md bg-brand-600 text-white'
+              ? 'rounded-[1.25rem] rounded-bl-md bg-white text-ink ring-1 ring-line/80'
+              : 'rounded-[1.25rem] rounded-br-md bg-brand-600 text-white'
           "
-          class="max-w-[80%] px-4 py-2.5 text-sm leading-6 shadow-sm"
+          class="max-w-[82%] px-4 py-3 text-[15px] leading-7 shadow-soft"
         >
           <span
             v-if="t.role === 'user'"
@@ -630,8 +640,9 @@ async function finish() {
         </div>
       </div>
 
-      <div v-if="sending && !streaming" class="flex justify-start">
-        <div class="flex items-center gap-1 rounded-2xl rounded-tl-md bg-white px-4 py-3 ring-1 ring-line">
+      <div v-if="sending && !streaming" class="flex items-end justify-start gap-2.5">
+        <span class="mb-0.5 hidden shrink-0 sm:inline-flex" aria-hidden="true"><BrandLogo :size="28" /></span>
+        <div class="flex items-center gap-1 rounded-[1.25rem] rounded-bl-md bg-white px-4 py-3.5 ring-1 ring-line/80">
           <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-300 [animation-delay:-0.2s]"></span>
           <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-300 [animation-delay:-0.1s]"></span>
           <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-300"></span>
@@ -639,19 +650,27 @@ async function finish() {
       </div>
 
       <div v-if="interim" class="flex justify-end">
-        <div class="max-w-[80%] rounded-2xl rounded-tr-md bg-brand-50 px-4 py-2.5 text-sm text-brand-700 ring-1 ring-brand-100">
+        <div class="max-w-[82%] rounded-[1.25rem] rounded-br-md border border-dashed border-brand-300 bg-brand-50 px-4 py-3 text-[15px] leading-7 text-brand-700">
           {{ interim }}…
         </div>
       </div>
 
-      <p v-if="loadingSession" class="text-center text-xs text-ink-mute">正在恢复这次对话…</p>
-      <p v-else-if="!session.turns.length" class="text-center text-xs text-ink-mute">
-        点下面的麦克风开口说
-      </p>
+      <div v-if="loadingSession" class="space-y-4" aria-label="正在恢复这次对话">
+        <div class="sp-skeleton h-16 w-3/4 rounded-[1.25rem]"></div>
+        <div class="sp-skeleton ml-auto h-12 w-1/2 rounded-[1.25rem]"></div>
+        <div class="sp-skeleton h-16 w-2/3 rounded-[1.25rem]"></div>
+      </div>
+      <EmptyState
+        v-else-if="!session.turns.length"
+        icon="practice"
+        title="准备好就开口"
+        text="点下面的麦克风说一句英文，说不出来可以「手动输入」或看「三种说法」。"
+      />
     </main>
 
-    <footer v-if="!blocked" class="border-t border-line bg-white/90 backdrop-blur">
-      <div class="sp-shell space-y-3 py-3">
+    <footer v-if="!blocked" class="sticky bottom-0 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-canvas/0 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+      <div class="sp-shell-narrow">
+      <div class="space-y-3 rounded-card bg-white/95 p-4 shadow-dock ring-1 ring-line/80 backdrop-blur sm:p-5">
         <p v-if="!manualOpen" class="text-center text-[11px] text-ink-mute">{{ progressHint }}</p>
 
         <p v-if="error" class="sp-alert-error">{{ error }}</p>
@@ -744,21 +763,23 @@ async function finish() {
           <div class="flex flex-col items-center gap-1">
             <button
               ref="micBtn"
+              :style="{ '--level': micLevel }"
               :class="
                 listening
-                  ? 'sp-mic sp-mic-rec sp-mic-pulse'
-                  : 'sp-mic sp-mic-idle'
+                  ? 'sp-mic sp-mic-rec sp-mic-pulse !h-16 !w-16'
+                  : 'sp-mic sp-mic-idle !h-16 !w-16 hover:scale-105 active:scale-95'
               "
               :disabled="sending || finishing"
               :aria-label="listening ? '停止录音' : '开始录音'"
               @click="toggleListening"
             >
-              <svg v-if="!listening" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <span v-if="listening" class="sp-mic-level" aria-hidden="true"></span>
+              <svg v-if="!listening" class="relative" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <rect x="9" y="2.8" width="6" height="11" rx="3" />
                 <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0" />
                 <path d="M12 17.8v3.4" />
               </svg>
-              <svg v-else width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+              <svg v-else class="relative" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
                 <rect x="7" y="7" width="10" height="10" rx="2.4" fill="currentColor" />
               </svg>
             </button>
@@ -771,6 +792,7 @@ async function finish() {
             {{ finishing ? '生成中…' : '结束并出报告' }}
           </button>
         </div>
+      </div>
       </div>
     </footer>
   </div>

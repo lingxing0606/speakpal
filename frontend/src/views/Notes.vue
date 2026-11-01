@@ -2,8 +2,8 @@
 import { onMounted, ref } from 'vue'
 
 import api from '../api/client'
-import BackLink from '../components/BackLink.vue'
-import BrandLogo from '../components/BrandLogo.vue'
+import AppHeader from '../components/AppHeader.vue'
+import EmptyState from '../components/EmptyState.vue'
 import TabBar from '../components/TabBar.vue'
 
 const loading = ref(true)
@@ -100,29 +100,20 @@ function when(iso) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-canvas pb-16 sm:pb-0">
-    <header class="sp-header">
-      <div class="sp-shell flex items-center justify-between py-3">
-        <div class="flex items-center gap-3">
-          <BackLink fallback="/" />
-          <span class="h-4 w-px bg-line"></span>
-          <router-link to="/" aria-label="首页">
-            <BrandLogo :size="30" />
-          </router-link>
-          <span class="h-4 w-px bg-line"></span>
-          <div class="font-semibold text-ink">笔记</div>
-        </div>
-        <div class="flex items-center gap-1">
-          <router-link to="/study" class="sp-btn-ghost">今日复习</router-link>
-          <button class="sp-btn-primary !px-3 !py-1.5 text-xs" @click="startNew">新建</button>
-        </div>
-      </div>
-    </header>
+  <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
+    <AppHeader title="笔记" back="/">
+      <button class="sp-btn-primary !px-3.5 !py-2 text-[13px]" @click="startNew">新建</button>
+    </AppHeader>
 
-    <main class="sp-shell py-8">
+    <main class="sp-shell pb-16 pt-10">
+      <div class="mb-8">
+        <div class="sp-eyebrow">笔记</div>
+        <h1 class="sp-title mt-2">随手记下想记住的说法</h1>
+        <p class="sp-lede">练习里冒出来的好句子、老是说错的地方，写在这里。点开就能改。</p>
+      </div>
       <p v-if="error" class="sp-alert-error mb-4">{{ error }}</p>
 
-      <div v-if="editing" class="sp-card p-6">
+      <div v-if="editing" class="sp-card mx-auto max-w-3xl p-6 sm:p-8">
         <input
           v-model="draft.title"
           class="sp-input border-0 !text-lg !font-semibold focus:ring-0"
@@ -140,33 +131,27 @@ function when(iso) {
         </div>
       </div>
 
-      <p v-if="loading" class="text-sm text-ink-mute">正在加载…</p>
+      <div v-if="loading" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="正在加载"><div v-for="i in 6" :key="i" class="sp-skeleton h-36 rounded-2xl"></div></div>
 
-      <div v-else-if="!editing && notes.length === 0" class="mt-10 flex flex-col items-center text-center">
-        <div class="sp-icon-tile h-14 w-14 text-brand-700">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M6 3.5h9l4 4v13H6z" />
-            <path d="M15 3.5v4h4" />
-            <path d="M9 12h7M9 16h5" />
-          </svg>
-        </div>
-        <div class="mt-4 text-lg font-semibold text-ink">还没有笔记</div>
-        <p class="mt-1 max-w-xs text-sm leading-6 text-ink-soft">练习里遇到想记住的说法，随手写在这里。</p>
-        <button class="sp-btn-primary mt-6" @click="startNew">写第一条</button>
+      <div v-else-if="!editing && notes.length === 0" class="sp-card">
+        <EmptyState icon="notes" title="还没有笔记" text="练习里遇到想记住的说法，随手写在这里。">
+          <button class="sp-btn-primary" @click="startNew">写第一条</button>
+        </EmptyState>
       </div>
 
-      <div v-else-if="!editing" class="space-y-3">
+      <div v-else-if="!editing" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div
-          v-for="n in notes"
+          v-for="(n, ni) in notes"
           :key="n.id"
-          class="sp-card-flat group flex cursor-pointer items-start justify-between gap-4 p-5 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lift"
+          :style="{ '--i': Math.min(ni, 12) }"
+          class="sp-reveal sp-hover group flex min-h-[9rem] cursor-pointer flex-col justify-between gap-4 rounded-2xl bg-white p-5 ring-1 ring-line/80"
           @click="startEdit(n)"
         >
           <div class="min-w-0">
-            <div class="truncate font-medium text-ink">{{ n.title || '无标题' }}</div>
-            <p class="mt-1 line-clamp-2 text-xs leading-5 text-ink-soft">{{ n.body }}</p>
+            <div class="truncate font-semibold text-ink">{{ n.title || '无标题' }}</div>
+            <p class="mt-2 line-clamp-3 text-[13px] leading-6 text-ink-soft">{{ n.body }}</p>
           </div>
-          <div class="flex shrink-0 flex-col items-end gap-1">
+          <div class="flex items-center justify-between gap-2 border-t border-line/70 pt-3">
             <span class="text-[11px] text-ink-mute">{{ when(n.updated_at || n.created_at) }}</span>
             <div class="relative">
               <button class="rounded-lg px-1.5 py-0.5 text-sm text-ink-mute transition hover:bg-canvas hover:text-ink-soft" aria-label="更多操作" @click.stop="menuFor = menuFor === n.id ? null : n.id">⋯</button>

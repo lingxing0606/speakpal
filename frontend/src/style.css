@@ -6,13 +6,13 @@
 
 @layer base {
   :root {
-    --sp-ink: #1b2430;
-    --sp-ink-soft: #475467;
-    --sp-ink-mute: #5f6b78;
+    --sp-ink: #1f1b16;
+    --sp-ink-soft: #4a443b;
+    --sp-ink-mute: #6b6358;
     --sp-brand: #14806f;
     --sp-brand-soft: #d5f1ea;
-    --sp-canvas: #f5f8f8;
-    --sp-line: #e3eae9;
+    --sp-canvas: #f6f3ee;
+    --sp-line: #e6e0d5;
     --sp-coral: #ff6f52;
   }
 
@@ -45,22 +45,96 @@
 }
 
 @layer components {
-  /* 版心 */
+  /* 版心：12 列栅格的外框。宽版给多栏页面，窄版给对话 / 表单类 */
   .sp-shell {
-    @apply mx-auto w-full max-w-3xl px-4 sm:px-6;
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+
+  .sp-shell-narrow {
+    @apply mx-auto w-full max-w-3xl px-5 sm:px-8;
+  }
+
+  .sp-grid {
+    @apply grid grid-cols-1 gap-5 lg:grid-cols-12 lg:gap-8;
   }
 
   .sp-header {
-    @apply sticky top-0 z-20 border-b border-line bg-white/85 backdrop-blur;
+    @apply sticky top-0 z-20 border-b border-line/70 bg-canvas/80 backdrop-blur-md;
+  }
+
+  /* 页面标题区：小标签 + 大标题 + 说明 */
+  .sp-eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-mute;
+  }
+
+  .sp-title {
+    @apply text-[28px] font-bold leading-[1.15] tracking-tight text-ink sm:text-[36px];
+  }
+
+  .sp-lede {
+    @apply mt-3 max-w-xl text-sm leading-7 text-ink-soft;
+  }
+
+  .sp-section-title {
+    @apply text-base font-semibold tracking-tight text-ink;
   }
 
   /* 卡片 */
   .sp-card {
-    @apply rounded-card bg-white shadow-card ring-1 ring-line/70;
+    @apply rounded-card bg-white shadow-card ring-1 ring-line/80;
   }
 
   .sp-card-flat {
-    @apply rounded-2xl bg-white ring-1 ring-line/70;
+    @apply rounded-2xl bg-white ring-1 ring-line/80;
+  }
+
+  .sp-card-soft {
+    @apply rounded-2xl bg-paper ring-1 ring-line/70;
+  }
+
+  /* 卡片微交互：悬停上浮、按下回弹；配合 .sp-arrow 箭头右移 */
+  .sp-hover {
+    @apply transition duration-300 ease-[cubic-bezier(0.2,0.7,0.2,1)]
+      hover:-translate-y-1 hover:shadow-lift hover:ring-brand-200
+      active:translate-y-0 active:scale-[0.99] active:duration-100;
+  }
+
+  .sp-arrow {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-full bg-canvas text-ink-mute ring-1 ring-line
+      transition duration-300 group-hover:translate-x-1 group-hover:bg-brand-600 group-hover:text-white group-hover:ring-brand-600;
+  }
+
+  /* 进场：列表依次浮现，style="--i: n" 控制先后 */
+  .sp-reveal {
+    animation: sp-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: calc(var(--i, 0) * 55ms);
+  }
+
+  /* 加载占位：微光扫过，代替「正在加载…」 */
+  .sp-skeleton {
+    @apply rounded-lg bg-sand-100;
+    background-image: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.65) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: sp-shimmer 1.6s linear infinite;
+  }
+
+  /* 分段切换（学习页板块、语速） */
+  .sp-segment {
+    @apply inline-flex items-center gap-1 rounded-full bg-sand-50 p-1 ring-1 ring-line/80;
+  }
+
+  .sp-segment-item {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium text-ink-mute
+      transition duration-200 hover:text-ink;
+  }
+
+  .sp-segment-item-active {
+    @apply bg-white text-ink shadow-soft ring-1 ring-line/80;
+  }
+
+  /* 统计数字块 */
+  .sp-stat {
+    @apply rounded-2xl bg-paper px-4 py-3.5 ring-1 ring-line/70;
   }
 
   /* 按钮 */
@@ -73,14 +147,14 @@
   .sp-btn-primary {
     @apply inline-flex select-none items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5
       text-sm font-medium text-white shadow-soft transition duration-150 ease-out
-      hover:bg-brand-700 active:translate-y-px
+      hover:-translate-y-px hover:bg-brand-700 hover:shadow-lift active:translate-y-0 active:scale-[0.98]
       disabled:cursor-not-allowed disabled:opacity-55;
   }
 
   .sp-btn-secondary {
     @apply inline-flex select-none items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5
       text-sm font-medium text-ink-soft ring-1 ring-line transition duration-150 ease-out
-      hover:text-ink hover:ring-brand-300
+      hover:text-ink hover:ring-brand-300 active:scale-[0.98]
       disabled:cursor-not-allowed disabled:opacity-55;
   }
 
@@ -163,6 +237,12 @@
     @apply flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-50 text-xl ring-1 ring-brand-100;
   }
 
+  /* 录音音量圈：--level 0–1 由真实音量驱动 */
+  .sp-mic-level {
+    @apply pointer-events-none absolute inset-0 rounded-full bg-coral-300/40 transition-transform duration-100 ease-out;
+    transform: scale(calc(1 + var(--level, 0) * 0.9));
+  }
+
   /* 录音按钮：仅珊瑚色不够（WCAG 1.4.1），必须配「录音中 0:03」文字 */
   .sp-mic {
     @apply relative flex h-14 w-14 items-center justify-center rounded-full text-2xl text-white shadow-soft
@@ -183,6 +263,26 @@
     content: '';
     @apply pointer-events-none absolute inset-0 rounded-full ring-4 ring-coral-300/60;
     animation: sp-pulse 1.6s ease-out infinite;
+  }
+}
+
+@keyframes sp-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sp-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
   }
 }
 
