@@ -10,7 +10,7 @@ const router = useRouter()
 
 // 刷新页面时用 /auth/me 校准本地用户：账号被删、改密被踢之后，别继续显示旧昵称。
 // 探测带 skipAuthRedirect，且在结束时放开拦截器的硬跳闸：这里失败是「本地 token 对不上现在的库」，
-// 要回到欢迎页而不是被顶到登录页——否则首次打开 start-all.bat 会直接看到登录界面（用户已反馈过）。
+// 要按原因回到登录页，由用户重新登录或注册。
 onMounted(async () => {
   if (!auth.token) {
     endStartupProbe()
@@ -26,11 +26,14 @@ onMounted(async () => {
       const here = `${window.location.pathname}${window.location.search}`
       auth.logout({ clearKey: false })
       if (reason === 'password_changed' || reason === 'token_invalid' || reason === 'expired') {
-        // 被改密/凭证失效要有明确原因，别把人丢到欢迎页让人以为账号没了
+        // 被改密/凭证失效要有明确原因，别让人以为账号没了
         router.push(`/login?reason=${encodeURIComponent(reason)}&next=${encodeURIComponent(here)}`)
-      } else if (router.currentRoute.value.path !== '/welcome') {
-        // 账号已注销或没有原因：回欢迎页，重新注册或登录
-        router.push('/welcome?again=1')
+      } else if (reason === 'user_gone') {
+        // 账号已注销：去登录页并说明原因，注册新号就能继续
+        router.push('/login?reason=user_gone')
+      } else {
+        // 没有原因（老 token / 后端刚清库）：回登录页重新登录，不要把用户丢到空白页
+        router.push('/login')
       }
     }
     // 纯网络问题就先用本地缓存渲染，不打扰用户

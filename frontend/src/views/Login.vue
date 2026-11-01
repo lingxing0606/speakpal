@@ -34,6 +34,8 @@ const nextPath = (() => {
   if (typeof value !== 'string') return ''
   if (!value.startsWith('/') || value.startsWith('//')) return ''
   if (value.startsWith('/login')) return ''
+  // 欢迎页已删除，旧的 next=/welcome 不再当跳转目标
+  if (value.startsWith('/welcome')) return ''
   return value
 })()
 
@@ -73,24 +75,8 @@ async function submit() {
       router.push(nextPath)
       return
     }
-    // 新注册的账号、或者这台机器上还没看过引导的账号，先走一遍引导；
-    // 旧版全局标记 '1' 没有用户名，当「未知」处理，让老账号也能看一次；
-    // 本次浏览里刚在欢迎页点过「开始使用」的，就不再弹第二遍
-    const welcomedFor = localStorage.getItem('sp_welcomed') || ''
-    const isNewUser = mode.value === 'register'
-    const seenHere =
-      !!welcomedFor && welcomedFor !== '1' && welcomedFor === (data.user?.username || '')
-    let introSeen = false
-    try {
-      introSeen = sessionStorage.getItem('sp_intro_seen') === '1'
-    } catch {
-      introSeen = false
-    }
-    if (!introSeen && (isNewUser || !seenHere)) {
-      router.push('/welcome')
-      return
-    }
-    router.push(settings.configured ? '/' : await firstStop())
+    // 登录/注册后直接进首页；本浏览器没 key 才去设置页填
+    router.push(await firstStop())
   } catch (e) {
     error.value = e?.response?.data?.detail || '请求失败，请稍后重试'
   } finally {

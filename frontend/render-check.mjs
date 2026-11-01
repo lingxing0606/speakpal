@@ -79,6 +79,9 @@ for (const file of files) {
 
 // 2. 浏览器环境替身（只为让模块能 import，不参与断言）
 const noop = () => {}
+// CountUp 在 setup 里就会 cancelAnimationFrame；SSR 里没有这两个全局，补上以免误报
+globalThis.requestAnimationFrame = () => 0
+globalThis.cancelAnimationFrame = noop
 globalThis.localStorage = {
   store: new Map(),
   getItem(k) { return this.store.has(k) ? this.store.get(k) : null },
@@ -117,7 +120,7 @@ const { renderToString } = await import('vue/server-renderer')
 const { createPinia } = await import('pinia')
 const { createRouter, createMemoryHistory } = await import('vue-router')
 
-const views = ['Login', 'Welcome', 'Home', 'Practice', 'Report', 'History', 'Settings', 'Pronunciation']
+const views = ['Login', 'Home', 'Practice', 'Report', 'History', 'Settings', 'Pronunciation']
 const routes = [
   { path: '/login', component: { template: '<div />' } },
   { path: '/', component: { template: '<div />' } },

@@ -12,16 +12,18 @@ const route = useRoute()
 const router = useRouter()
 
 // 四个板块：复习（今天到期的全部卡，按类型分组）、新词、语法、口语
+// tab 值用改版后的 canonical id：review / new / grammar / spoken，旧链接里的 phrase 兼容成 spoken
 const TABS = [
   { id: 'review', label: '复习' },
   { id: 'new', label: '新词' },
   { id: 'grammar', label: '语法' },
-  { id: 'phrase', label: '口语' },
+  { id: 'spoken', label: '口语' },
 ]
 
 const KIND_LABELS = { word: '单词', spelling: '拼写', grammar: '语法', phrase: '短语' }
 
 function tabFromQuery(v) {
+  if (v === 'phrase') return 'spoken'
   return TABS.some((t) => t.id === v) ? v : ''
 }
 
@@ -51,7 +53,7 @@ const counts = computed(() => ({
   review: queue.value.length,
   new: null,
   grammar: dueByKey.value.grammar || 0,
-  phrase: dueByKey.value.spoken || 0,
+  spoken: dueByKey.value.spoken || 0,
 }))
 
 const emptyState = computed(() => {
@@ -110,7 +112,7 @@ onMounted(async () => {
   await loadToday()
   if (tab.value === 'new') await fetchVocab('')
   if (tab.value === 'grammar') await loadGrammar()
-  if (tab.value === 'phrase') await loadSpoken()
+  if (tab.value === 'spoken') await loadSpoken()
 })
 
 watch(
@@ -126,11 +128,11 @@ watch(tab, (id) => {
   resetCard()
   if (id === 'new' && !bankData.value && !bankLoading.value) fetchVocab('')
   if (id === 'grammar' && !grammarLib.value && !grammarLoading.value) loadGrammar()
-  if (id === 'phrase' && !spokenLib.value && !spokenLoading.value) loadSpoken()
+  if (id === 'spoken' && !spokenLib.value && !spokenLoading.value) loadSpoken()
 })
 
 function switchTab(id) {
-  // tab 之间切换不算「返回」：用 replace，返回键仍然回首页
+  // tab 之间切换用 replace，别把每个 tab 都塞进浏览器历史栈
   if (id === tab.value) return
   tab.value = id
   router.replace({ path: '/study', query: { tab: id } })
@@ -528,7 +530,7 @@ async function addSpoken() {
       </div>
 
       <!-- 口语 -->
-      <div v-else-if="tab === 'phrase'" class="mx-auto mt-10 max-w-4xl">
+      <div v-else-if="tab === 'spoken'" class="mx-auto mt-10 max-w-4xl">
         <div class="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <div class="text-sm font-medium text-ink">口语卡</div>
