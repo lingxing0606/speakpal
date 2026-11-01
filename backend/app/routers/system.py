@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends
 from ..config import settings
 from ..models import User
 from ..security import get_current_user
-from ..services.llm_config import LLMConfig, get_llm_config, is_valid_base_url
+from ..services.llm_config import LLMConfig, get_llm_config
+from ..services.outbound import UnsafeBaseURL, check_base_url
 from ..services.storage import storage_info
 
 router = APIRouter(prefix="/api", tags=["system"])
@@ -45,8 +46,10 @@ def test_llm(
     """
     if not llm.configured:
         return {"ok": False, "error_kind": "invalid_key", "error": "未提供密钥"}
-    if not is_valid_base_url(llm.base_url):
-        return {"ok": False, "error_kind": "unreachable", "error": "Base URL 不是 http(s) 地址"}
+    try:
+        check_base_url(llm.base_url)
+    except UnsafeBaseURL as exc:
+        return {"ok": False, "error_kind": "unreachable", "error": exc.message}
 
     started = time.perf_counter()
     try:

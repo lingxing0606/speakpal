@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
+from .config import settings
 from .db import Base, engine
 from .routers import (
     account,
@@ -142,8 +143,9 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    # 白名单见 CORS_ORIGINS；认证走 Authorization 头，不需要 Cookie 凭证
+    allow_origins=settings.cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     # 401 的原因码放在响应头，跨域部署时前端要能读到它

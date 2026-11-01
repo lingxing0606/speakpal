@@ -1,9 +1,11 @@
 import json
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
+from sqlalchemy.orm import selectinload
 
 from ..db import get_db
 from ..models import PracticeSession, Report, Turn, User
@@ -22,6 +24,7 @@ from ..timeutil import utc_iso
 from ..services.llm import chat_reply
 from ..services.study import cards_from_fixes, create_cards
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
+from ..services.outbound import UnsafeBaseURL
 from ..services.report_view import report_out
 from ..services.rules import apply_to_report
 from ..services.scenes import get_scene
@@ -126,10 +129,13 @@ def add_turn(
     user_count = sum(1 for t in history if t["role"] == "user")
 
     try:
-        reply = chat_reply(scene, sess.difficulty, history, user_count, llm)
+        reply, degraded = chat_reply(scene, sess.difficulty, history, user_count, llm)
     except UserKeyInvalid:
         db.rollback()
         return key_invalid_response()
+    except UnsafeBaseURL as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=exc.message)
 
     db.add(
         Turn(
@@ -148,6 +154,7 @@ def add_turn(
         ai_reply=reply,
         is_follow_up=True,
         should_finish=user_count >= 4,
+        degraded=degraded,
     )
 
 
@@ -162,7 +169,8 @@ def finish_session(
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="会话不存在")
     if sess.report:
-        return report_out(sess.report)
+        # 带上 db：重复打开时也要返回这次自动建的学习卡，和第一次一致
+        return report_out(sess.report, db)
     # finish 故意不拦「没有 key」：练习已经做完，key 中途被删也该给出一份报告，
     # 走 not_configured 的示例报告（分数留空），而不是把用户卡在报告页外面。
     # 拦只在 create_session / add_turn 两个“进入对话”的入口做。
@@ -253,7 +261,15 @@ def finish_session(
     sess.status = "finished"
     # §16.4：只给 spelling / stiffness 自动建卡（草稿、立即可复习），其余类型由用户手动加入
     create_cards(db, user.id, sess.id, cards_from_fixes(data.get("sentence_fixes") or []))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 两个 finish 并发：另一个请求已经写了报告（session_id 唯一），返回那一份
+        db.rollback()
+        existing = db.query(Report).filter(Report.session_id == sess.id).first()
+        if not existing:
+            raise
+        return report_out(existing, db)
     db.refresh(rep)
     return report_out(rep, db)
 
@@ -293,15 +309,22 @@ def get_session_detail(
 
 @router.get("/sessions", response_model=list[HistoryItem])
 def list_sessions(
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
 ):
-    rows = (
+    """不传 limit 返回全部（兼容现有前端）；传了就分页。"""
+    query = (
         db.query(PracticeSession)
+        .options(selectinload(PracticeSession.turns), selectinload(PracticeSession.report))
         .filter(PracticeSession.user_id == user.id)
         .order_by(PracticeSession.id.desc())
-        .all()
+        .offset(offset)
     )
+    if limit is not None:
+        query = query.limit(limit)
+    rows = query.all()
     out = []
     for s in rows:
         scene = get_scene(s.scene_id)

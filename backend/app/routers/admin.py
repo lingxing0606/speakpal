@@ -1,19 +1,23 @@
+import hmac
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session as OrmSession
+from sqlalchemy.orm import selectinload
 
 from ..config import database_url_locked_by_env, settings
 from ..db import get_db
 from ..models import DrillAttempt, Note, PracticeSession, Report, StudyItem, Turn, User
 from ..schemas import AdminUserUpdateIn
-from ..security import hash_password
+from ..security import check_password_rule, hash_password
 from ..services.scenes import get_scene
 from ..services.storage import (
     copy_current_to,
+    current_db_path,
     normalize_target,
     storage_info,
     write_location,
@@ -24,8 +28,15 @@ from ..timeutil import utc_iso
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
+def admin_key_ok(given: str | None) -> bool:
+    """常量时间比较，避免按响应时间逐字符猜密钥。"""
+    if not settings.admin_key or not given:
+        return False
+    return hmac.compare_digest(given.encode("utf-8"), settings.admin_key.encode("utf-8"))
+
+
 def require_admin(x_admin_key: str | None = Header(default=None)):
-    if not settings.admin_key or x_admin_key != settings.admin_key:
+    if not admin_key_ok(x_admin_key):
         raise HTTPException(status_code=401, detail="管理密钥错误")
     return True
 
@@ -36,7 +47,7 @@ def require_admin_ui(x_admin_key: str | None = Header(default=None)):
     前端 axios 拦截器把任何 401 当作“登录失效”并登出；在设置页把管理密钥填错
     不该把用户踢出登录态，所以这两个“从界面调用”的接口用 403。
     """
-    if not settings.admin_key or x_admin_key != settings.admin_key:
+    if not admin_key_ok(x_admin_key):
         raise HTTPException(status_code=403, detail="管理密钥错误")
     return True
 
@@ -57,27 +68,25 @@ def stats(_=Depends(require_admin), db: OrmSession = Depends(get_db)):
 @router.get("/users")
 def user_stats(_=Depends(require_admin), db: OrmSession = Depends(get_db)):
     rows = db.query(User).order_by(User.id).all()
+    # 两条分组查询代替「每个用户 3 次 count」的 N+1
+    session_counts = dict(
+        db.query(PracticeSession.user_id, func.count(PracticeSession.id))
+        .group_by(PracticeSession.user_id)
+        .all()
+    )
+    report_stats = {
+        uid: (cnt, avg)
+        for uid, cnt, avg in db.query(
+            PracticeSession.user_id, func.count(Report.id), func.avg(Report.total_score)
+        )
+        .join(Report, Report.session_id == PracticeSession.id)
+        .group_by(PracticeSession.user_id)
+        .all()
+    }
     out = []
     for u in rows:
-        session_count = (
-            db.query(func.count(PracticeSession.id))
-            .filter(PracticeSession.user_id == u.id)
-            .scalar()
-            or 0
-        )
-        report_count = (
-            db.query(func.count(Report.id))
-            .join(PracticeSession, Report.session_id == PracticeSession.id)
-            .filter(PracticeSession.user_id == u.id)
-            .scalar()
-            or 0
-        )
-        avg = (
-            db.query(func.avg(Report.total_score))
-            .join(PracticeSession, Report.session_id == PracticeSession.id)
-            .filter(PracticeSession.user_id == u.id)
-            .scalar()
-        )
+        session_count = session_counts.get(u.id, 0)
+        report_count, avg = report_stats.get(u.id, (0, None))
         out.append(
             {
                 "id": u.id,
@@ -100,6 +109,7 @@ def recent_sessions(
     limit = max(1, min(limit, 100))
     rows = (
         db.query(PracticeSession)
+        .options(selectinload(PracticeSession.user), selectinload(PracticeSession.report))
         .order_by(PracticeSession.id.desc())
         .limit(limit)
         .all()
@@ -152,6 +162,13 @@ def update_storage(body: StorageIn, _=Depends(require_admin_ui)):
         target = normalize_target(body.path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    if settings.storage_root:
+        root = Path(settings.storage_root).expanduser().resolve()
+        if not target.is_relative_to(root):
+            raise HTTPException(status_code=400, detail=f"数据位置只能放在 {root} 下面")
+    # 只往新文件里复制：目标已存在就可能是别的库或系统文件，绝不覆盖
+    if target.exists() and target != current_db_path():
+        raise HTTPException(status_code=400, detail="目标位置已有同名文件，换一个目录或先手动移走")
 
     parent = target.parent
     try:
@@ -258,6 +275,7 @@ def update_user(
     if nickname:
         target.nickname = nickname
     if password:
+        check_password_rule(password)
         target.password_hash = hash_password(password)
         # 管理员重置密码后，该用户所有已登录设备立即失效
         target.token_version = int(target.token_version or 0) + 1

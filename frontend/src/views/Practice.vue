@@ -332,6 +332,10 @@ async function send(text, audio = null, mode = 'typed') {
       input_mode: mode,
     })
     session.turns.push({ role: 'ai', content: data.ai_reply })
+    // 模型这轮没回上来，后端给的是预设追问：明说，别让人以为 AI 在正常聊
+    if (data.degraded) {
+      error.value = '模型这一轮没有响应（超时、限流或服务异常），上面是预设的追问。可以继续说，或稍后再试。'
+    }
     if (data.should_finish) canFinish.value = true
     speakSmart(data.ai_reply, { rate: speechRate.value })
     scrollBottom()

@@ -12,6 +12,7 @@ ease（难度因子）按 SM-2：again −0.2、hard −0.15、good +0.1，下�
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from ..timeutil import utcnow
 
 RESULTS = ("again", "hard", "good")
 
@@ -34,7 +35,7 @@ def schedule(
     if key not in RESULTS:
         raise ValueError("result 只能是 again / hard / good")
 
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     ease = float(ease or 2.5)
     interval_days = float(interval_days or 0)
     reps = int(reps or 0)

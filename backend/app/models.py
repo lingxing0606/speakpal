@@ -1,9 +1,9 @@
-from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from .db import Base
+from .timeutil import utcnow
 
 
 class User(Base):
@@ -18,7 +18,7 @@ class User(Base):
     # 设置页的偏好：练习难度（easy|medium|hard）、新词词库范围（gaokao|cet4|cet6）
     practice_difficulty = Column(String(16), default="medium")
     word_scope = Column(String(16), default="cet4")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     sessions = relationship("PracticeSession", back_populates="user")
 
@@ -31,7 +31,7 @@ class PracticeSession(Base):
     scene_id = Column(String(64), nullable=False)
     difficulty = Column(String(16), default="medium")
     status = Column(String(16), default="active")  # active | finished
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="sessions")
     turns = relationship(
@@ -58,7 +58,7 @@ class Turn(Base):
     # user 轮的输入方式：voice（录音）/ typed（打字），报告据此决定哪些维度能算
     input_mode = Column(String(8), default="voice")
     audio_json = Column(Text, default="{}")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     session = relationship("PracticeSession", back_populates="turns")
 
@@ -84,7 +84,7 @@ class Report(Base):
     fixes_json = Column(Text, default="[]")
     features_json = Column(Text, default="{}")
     comment = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     session = relationship("PracticeSession", back_populates="report")
 
@@ -99,7 +99,7 @@ class DrillAttempt(Base):
     item_index = Column(Integer, nullable=False)
     transcript = Column(Text, nullable=False)
     similarity = Column(Float, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class StudyItem(Base):
@@ -125,10 +125,10 @@ class StudyItem(Base):
     source = Column(String(16), default="")
     ease = Column(Float, default=2.5)
     interval_days = Column(Float, default=0)
-    due_at = Column(DateTime, default=datetime.utcnow, index=True)
+    due_at = Column(DateTime, default=utcnow, index=True)
     reps = Column(Integer, default=0)
     lapses = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class Note(Base):
@@ -139,5 +139,5 @@ class Note(Base):
     title = Column(String(128), default="")  # 不填就用正文首行
     body = Column(Text, default="")
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow)

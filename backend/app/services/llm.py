@@ -1,6 +1,7 @@
 import httpx
 
 from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
+from .outbound import check_base_url
 
 MOCK_FOLLOW_UPS = {
     "job_interview": [
@@ -32,15 +33,19 @@ def chat_reply(
     history: list,
     turn_index: int,
     llm: LLMConfig | None = None,
-) -> str:
+) -> tuple[str, bool]:
     """多轮对话。
 
     没带 key 时走 `.env` 兜底（不是“未配置”）；用户 key 被 401/403 拒绝时抛
     UserKeyInvalid，让路由层立刻告诉用户去换 key，而不是继续聊一轮假对话。
+
+    返回 (回复, degraded)。degraded=True 表示模型没回上来、用的是预设追问，
+    前端要提示用户，不能让人以为 AI 在正常工作。base_url 不安全时抛 UnsafeBaseURL。
     """
     llm = llm or build_llm_config()
     if not llm.configured:
-        return _mock_reply(scene["id"], turn_index)
+        return _mock_reply(scene["id"], turn_index), True
+    check_base_url(llm.base_url)
 
     system = (
         f"You are {scene['role']}. The user is an English learner practicing speaking.\n"
@@ -69,10 +74,15 @@ def chat_reply(
                 },
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+            if not content:
+                return _mock_reply(scene["id"], turn_index), True
+            return content, False
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (401, 403) and llm.from_user:
             raise UserKeyInvalid() from exc
-        return _mock_reply(scene["id"], turn_index)
-    except Exception:  # noqa: BLE001 - 对话中断比整个请求失败更糟，降级成预设追问
-        return _mock_reply(scene["id"], turn_index)
+        print(f"[llm] 对话降级为预设追问：HTTP {exc.response.status_code}", flush=True)
+        return _mock_reply(scene["id"], turn_index), True
+    except Exception as exc:  # noqa: BLE001 - 对话中断比整个请求失败更糟，降级成预设追问
+        print(f"[llm] 对话降级为预设追问：{type(exc).__name__}", flush=True)
+        return _mock_reply(scene["id"], turn_index), True

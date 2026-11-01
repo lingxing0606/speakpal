@@ -290,8 +290,8 @@ async function changePassword() {
     pwdState.value = { running: false, tip: '', error: '请先填当前密码' }
     return
   }
-  if (pwd.value.next.length < 4 || pwd.value.next.length > 64) {
-    pwdState.value = { running: false, tip: '', error: '新密码要 4–64 位' }
+  if (pwd.value.next.length < 6 || pwd.value.next.length > 64) {
+    pwdState.value = { running: false, tip: '', error: '新密码要 6–64 位' }
     return
   }
   if (pwd.value.next !== pwd.value.confirm) {
@@ -421,7 +421,7 @@ function logout() {
             </label>
             <label class="block text-sm">
               <span class="mb-1.5 block text-xs font-medium text-ink-mute">新密码</span>
-              <input v-model="pwd.next" type="password" autocomplete="new-password" class="sp-input" placeholder="4–64 位" />
+              <input v-model="pwd.next" type="password" autocomplete="new-password" class="sp-input" placeholder="6–64 位" />
             </label>
             <label class="block text-sm">
               <span class="mb-1.5 block text-xs font-medium text-ink-mute">再输一次</span>

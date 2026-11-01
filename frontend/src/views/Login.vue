@@ -140,7 +140,7 @@ async function submit() {
                   v-model="password"
                   :type="showPwd ? 'text' : 'password'"
                   class="sp-input pr-11"
-                  placeholder="至少 4 位"
+                  placeholder="至少 6 位"
                   autocomplete="current-password"
                   @keyup.enter="submit"
                 />

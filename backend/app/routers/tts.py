@@ -9,7 +9,8 @@ from pydantic import BaseModel
 
 from ..models import User
 from ..security import get_current_user
-from ..services.llm_config import TTSConfig, get_tts_config, is_valid_base_url
+from ..services.llm_config import TTSConfig, get_tts_config
+from ..services.outbound import UnsafeBaseURL, check_base_url
 
 router = APIRouter(prefix="/api", tags=["tts"])
 
@@ -62,8 +63,10 @@ def synthesize(
             "tts_not_configured",
             "没有配置语音合成密钥，将使用浏览器内置朗读",
         )
-    if not is_valid_base_url(tts.base_url):
-        return _error(502, "tts_unavailable", "语音合成地址不是 http(s) 地址")
+    try:
+        check_base_url(tts.base_url)
+    except UnsafeBaseURL as exc:
+        return _error(502, "tts_unavailable", exc.message)
 
     voice = (body.voice or "").strip() or tts.voice
     speed = _clamp_speed(body.speed)

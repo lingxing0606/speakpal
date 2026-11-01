@@ -15,6 +15,53 @@ from .models import User
 
 bearer = HTTPBearer(auto_error=False)
 
+PASSWORD_MIN, PASSWORD_MAX = 6, 64
+
+
+def check_password_rule(password: str) -> None:
+    """新密码统一规则（注册 / 改密 / 管理员重置）。旧的短密码照常能登录。"""
+    if len(password) < PASSWORD_MIN or len(password) > PASSWORD_MAX:
+        raise HTTPException(status_code=400, detail=f"密码要 {PASSWORD_MIN}–{PASSWORD_MAX} 位")
+
+
+class LoginLimiter:
+    """进程内的登录失败计数：同一 IP+账号 在窗口内失败太多次就暂时拒绝。
+
+    单进程演示够用；多进程部署要换成 Redis 之类的共享存储。
+    """
+
+    def __init__(self, max_fails: int = 5, window_sec: int = 300):
+        self.max_fails = max_fails
+        self.window_sec = window_sec
+        self._fails: dict[str, list[float]] = {}
+
+    def _recent(self, key: str, now: float) -> list[float]:
+        hits = [t for t in self._fails.get(key, []) if now - t < self.window_sec]
+        if hits:
+            self._fails[key] = hits
+        else:
+            self._fails.pop(key, None)
+        return hits
+
+    def retry_after(self, key: str) -> int:
+        """还要等几秒；0 表示可以尝试。"""
+        now = time.time()
+        hits = self._recent(key, now)
+        if len(hits) < self.max_fails:
+            return 0
+        return max(1, int(self.window_sec - (now - hits[0])))
+
+    def fail(self, key: str) -> None:
+        now = time.time()
+        self._recent(key, now)
+        self._fails.setdefault(key, []).append(now)
+
+    def reset(self, key: str) -> None:
+        self._fails.pop(key, None)
+
+
+login_limiter = LoginLimiter()
+
 
 def hash_password(password: str) -> str:
     salt = os.urandom(16)

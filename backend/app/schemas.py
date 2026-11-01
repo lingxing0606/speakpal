@@ -1,11 +1,11 @@
 from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RegisterIn(BaseModel):
     username: str = Field(min_length=2, max_length=32)
-    password: str = Field(min_length=4, max_length=64)
+    password: str = Field(max_length=128)
     nickname: str = ""
 
 
@@ -19,8 +19,7 @@ class UserOut(BaseModel):
     username: str
     nickname: str = ""
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TokenOut(BaseModel):
@@ -38,7 +37,7 @@ class ProfileUpdateIn(BaseModel):
     """自己改资料：昵称直接改；改密码必须给出旧密码。"""
 
     nickname: str | None = Field(default=None, max_length=32)
-    password: str | None = Field(default=None, min_length=4, max_length=64)
+    password: str | None = Field(default=None, max_length=128)
     current_password: str | None = None
 
 
@@ -46,7 +45,7 @@ class AdminUserUpdateIn(BaseModel):
     """管理员改用户：不需要旧密码，但不能把昵称/密码同时留空。"""
 
     nickname: str | None = Field(default=None, max_length=32)
-    password: str | None = Field(default=None, min_length=4, max_length=64)
+    password: str | None = Field(default=None, max_length=128)
 
 
 class SceneOut(BaseModel):
@@ -85,6 +84,8 @@ class TurnOut(BaseModel):
     ai_reply: str
     is_follow_up: bool = True
     should_finish: bool = False
+    # 模型没回上来，这一轮用的是预设追问（前端据此提示）
+    degraded: bool = False
 
 
 class SentenceFix(BaseModel):

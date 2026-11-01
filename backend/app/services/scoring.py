@@ -6,6 +6,7 @@ import httpx
 from evaluation.bands import DIMENSIONS, report_bands, round_band
 
 from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
+from .outbound import UnsafeBaseURL, check_base_url
 from .study import normalize_related
 
 ERROR_TYPES = ("spelling", "grammar", "stiffness", "wordiness")
@@ -257,6 +258,11 @@ def generate_report(scene: dict, difficulty: str, history, llm: LLMConfig | None
     llm = llm or build_llm_config()
     if not llm.configured:
         return _fallback_report(history, MOCK_NOT_CONFIGURED, "没有检测到模型密钥")
+
+    try:
+        check_base_url(llm.base_url)
+    except UnsafeBaseURL as exc:
+        return _fallback_report(history, MOCK_UNAVAILABLE, exc.message)
 
     try:
         text = _request_report(llm, scene, difficulty, history)

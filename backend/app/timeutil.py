@@ -9,6 +9,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 
+def utcnow() -> datetime:
+    """naive UTC 当前时间（库里一直存 naive UTC）。替代已弃用的 datetime.utcnow()。"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def utc_iso(dt: datetime | None) -> str:
     if dt is None:
         return ""

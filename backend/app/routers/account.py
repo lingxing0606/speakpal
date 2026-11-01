@@ -21,7 +21,13 @@ from ..schemas import (
     RecommendationOut,
     UserOut,
 )
-from ..security import create_token, get_current_user, hash_password, verify_password
+from ..security import (
+    check_password_rule,
+    create_token,
+    get_current_user,
+    hash_password,
+    verify_password,
+)
 from ..services import wordbank
 from ..services.user_data import delete_user_data
 
@@ -61,6 +67,7 @@ def update_my_profile(
             raise HTTPException(status_code=400, detail="改密码需要提供当前密码")
         if not verify_password(body.current_password, user.password_hash):
             raise HTTPException(status_code=400, detail="当前密码不正确")
+        check_password_rule(password)
         user.password_hash = hash_password(password)
         user.token_version = int(user.token_version or 0) + 1
         password_changed = True

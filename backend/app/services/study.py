@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session as OrmSession
 from ..models import StudyItem
 from ..schemas import StudyItemOut
 from ..timeutil import utc_iso
+from ..timeutil import utcnow
 
 KINDS = ("word", "phrase", "spelling", "grammar")
 AUTO_KINDS = {"spelling": "spelling", "stiffness": "phrase"}
@@ -48,7 +49,7 @@ def normalize_related(raw) -> dict:
 
 
 def item_out(row: StudyItem, now: datetime | None = None) -> StudyItemOut:
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     return StudyItemOut(
         id=row.id,
         kind=row.kind,
@@ -73,7 +74,7 @@ def is_due(row: StudyItem, now: datetime | None = None) -> bool:
 
     按时刻比会让凌晨打开首页是 0 个、也会让「again +10 分钟」当场掉出队列。
     """
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     due = row.due_at or now
     return due.date() <= now.date()
 
@@ -163,7 +164,7 @@ def create_cards(db: OrmSession, user_id: int, session_id: int | None, cards):
             related_json=json.dumps(card.get("related") or EMPTY_RELATED, ensure_ascii=False),
             source_session_id=session_id,
             source="report",  # 报告自动建卡，见 docs/design.md §16.1
-            due_at=datetime.utcnow(),  # 草稿：立即可复习
+            due_at=utcnow(),  # 草稿：立即可复习
         )
         db.add(row)
         existing.add(key)

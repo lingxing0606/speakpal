@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as OrmSession
@@ -32,7 +31,7 @@ from ..security import get_current_user
 from ..services import library, wordbank
 from ..services.srs import schedule
 from ..services.study import KINDS, is_due, item_out, judge_spelling, normalize_related
-from ..timeutil import utc_iso
+from ..timeutil import utc_iso, utcnow
 
 router = APIRouter(prefix="/api", tags=["study"])
 
@@ -61,7 +60,7 @@ def due_items(
     这里如果默认只给 50 张，首页说 60 个、学习页只能复习 50 个，两边对不上。
     `limit` 仍然可传（给需要分页的调用方），不传就不截断。
     """
-    now = datetime.utcnow()
+    now = utcnow()
     rows = (
         db.query(StudyItem)
         .filter(StudyItem.user_id == user.id)
@@ -80,7 +79,7 @@ def study_summary(user: User = Depends(get_current_user), db: OrmSession = Depen
 
     `due_count` 与 `/study/due` 同源同量；分类型的 due_*_count 给 tab 上的数字用。
     """
-    now = datetime.utcnow()
+    now = utcnow()
     rows = db.query(StudyItem).filter(StudyItem.user_id == user.id).all()
     notes_count = db.query(Note).filter(Note.user_id == user.id).count()
     due = [row for row in rows if is_due(row, now)]
@@ -150,7 +149,7 @@ def create_item(
         related_json=__import__("json").dumps(normalize_related(body.related), ensure_ascii=False),
         source_session_id=body.source_session_id,
         source=source,
-        due_at=datetime.utcnow(),
+        due_at=utcnow(),
     )
     db.add(row)
     db.commit()
@@ -231,7 +230,7 @@ def _learned_word_terms(db: OrmSession, user_id: int) -> set[str]:
 
 def _vocab_used_today(db: OrmSession, user_id: int) -> int:
     """今天用词库加了几张新词卡（只用于展示，不再限制）。"""
-    today = datetime.utcnow().date()
+    today = utcnow().date()
     rows = (
         db.query(StudyItem.created_at)
         .filter(
@@ -331,7 +330,7 @@ def vocab_add(
             example=card["example"],
             related_json=__import__("json").dumps(card["related"], ensure_ascii=False),
             source="vocab",
-            due_at=datetime.utcnow(),  # 新词当天进复习队列
+            due_at=utcnow(),  # 新词当天进复习队列
         )
         db.add(row)
         added_rows.append(row)
@@ -383,7 +382,7 @@ def _add_cards(db: OrmSession, user_id: int, cards: list[dict]) -> tuple[list[St
             example=card.get("example") or "",
             related_json=__import__("json").dumps(card.get("related") or {}, ensure_ascii=False),
             source=card["source"],
-            due_at=datetime.utcnow(),  # 加进来当天就能复习
+            due_at=utcnow(),  # 加进来当天就能复习
         )
         db.add(row)
         added.append(row)
@@ -575,7 +574,7 @@ def _today_key(row: StudyItem) -> str:
 @router.get("/study/today", response_model=TodayOut)
 def today_queue(user: User = Depends(get_current_user), db: OrmSession = Depends(get_db)):
     """「今天」合并队列：到期卡按类型分组，组内按到期时间升序。"""
-    now = datetime.utcnow()
+    now = utcnow()
     rows = (
         db.query(StudyItem)
         .filter(StudyItem.user_id == user.id)
@@ -690,7 +689,7 @@ def update_note(
         raise HTTPException(status_code=400, detail="笔记不能是空的")
     row.title = title
     row.body = text
-    row.updated_at = datetime.utcnow()
+    row.updated_at = utcnow()
     db.commit()
     db.refresh(row)
     return _note_out(row)

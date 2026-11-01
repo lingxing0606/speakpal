@@ -20,3 +20,7 @@ tmp-zoom-*.png
 # 任何 *.env 都不进仓库：临时 env 文件里可能带真 key
 *.env
 frontend/public/probe-*.html
+# 后端测试的临时库
+backend/.tmp-test/
+# 本地数据库备份
+backend/backups/

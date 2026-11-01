@@ -102,9 +102,12 @@ def build_tts_config(
 ) -> TTSConfig:
     user_key = _clean(api_key)
     env_key = (settings.tts_api_key or "").strip()
+    user_base = _clean(base_url)
+    # 服务端兜底 key 只能发往服务端配置的地址：否则填个自己的地址就能把 key 收走
+    foreign_base = bool(user_base) and user_base.rstrip("/") != settings.tts_base_url.rstrip("/")
     if user_key:
         key, source = user_key, "user"
-    elif env_key:
+    elif env_key and not foreign_base:
         key, source = env_key, "env"
     else:
         key, source = "", "none"
