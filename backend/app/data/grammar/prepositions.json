@@ -4,18 +4,18 @@
   "desc": "时间、地点与固定搭配",
   "items": [
     { "id": "prep-01", "point": "具体日期用 on", "rule": "具体到某一天用 on，只有月份或年份用 in。", "wrong": "I was born in May 5th.", "right": "I was born on May 5th." },
-    { "id": "prep-02", "point": "in the morning / at night", "rule": "上午下午晚上用 in the morning，夜里用 at night。", "wrong": "I read at the morning.", "right": "I read in the morning." },
+    { "id": "prep-02", "point": "上午与夜里", "rule": "上午下午晚上用 in the morning，夜里用 at night。", "wrong": "I read at the morning.", "right": "I read in the morning." },
     { "id": "prep-03", "point": "地点用 at 还是 in", "rule": "把地点当成一个点用 at，把它当成一个空间范围用 in。", "wrong": "I met him in the station.", "right": "I met him at the station." },
     { "id": "prep-04", "point": "home 前不加 to", "rule": "go home、arrive home 是固定搭配，home 前不加 to。", "wrong": "I go to home after class.", "right": "I go home after class." },
     { "id": "prep-05", "point": "交通方式 by 与 on", "rule": "by + 交通工具（by bike），但 on foot 是固定说法。", "wrong": "I go to work by my bike.", "right": "I go to work by bike." },
     { "id": "prep-06", "point": "for 与 since", "rule": "for 接一段时间，since 接时间点。", "wrong": "I have studied English since five years.", "right": "I have studied English for five years." },
     { "id": "prep-07", "point": "进入用 into", "rule": "表示从外到里的移动用 into。", "wrong": "He walked in the room.", "right": "He walked into the room." },
-    { "id": "prep-08", "point": "原因用 because of", "rule": "because of + 名词，because + 句子。", "wrong": "The match was cancelled because the rain.", "right": "The match was cancelled because of the rain." },
+    { "id": "prep-08", "point": "because of", "rule": "because of + 名词，because + 句子。", "wrong": "The match was cancelled because the rain.", "right": "The match was cancelled because of the rain." },
     { "id": "prep-09", "point": "关于用 about", "rule": "书、谈话的主题用 about 或 on。", "wrong": "This is a book in history.", "right": "This is a book about history." },
     { "id": "prep-10", "point": "在墙上用 on", "rule": "贴在表面上用 on，嵌在墙里才用 in。", "wrong": "There is a picture in the wall.", "right": "There is a picture on the wall." },
     { "id": "prep-11", "point": "三者以上用 among", "rule": "两者之间用 between，三者及以上用 among。", "wrong": "Divide it between the three groups.", "right": "Divide it among the three groups." },
-    { "id": "prep-12", "point": "到达用 arrive at / in", "rule": "arrive at 小地点，arrive in 大地点，不用 arrive to。", "wrong": "We arrived to the hotel at nine.", "right": "We arrived at the hotel at nine." },
-    { "id": "prep-13", "point": "be interested in", "rule": "对某事感兴趣用 be interested in。", "wrong": "She is interested on music.", "right": "She is interested in music." },
+    { "id": "prep-12", "point": "到达用 at/in", "rule": "arrive at 小地点，arrive in 大地点，不用 arrive to。", "wrong": "We arrived to the hotel at nine.", "right": "We arrived at the hotel at nine." },
+    { "id": "prep-13", "point": "感兴趣用 in", "rule": "对某事感兴趣用 be interested in。", "wrong": "She is interested on music.", "right": "She is interested in music." },
     { "id": "prep-14", "point": "be good at", "rule": "擅长用 be good at + 名词或动名词。", "wrong": "He is good in maths.", "right": "He is good at maths." },
     { "id": "prep-15", "point": "be afraid of", "rule": "害怕某物用 be afraid of。", "wrong": "I am afraid from dogs.", "right": "I am afraid of dogs." }
   ]
