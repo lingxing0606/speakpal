@@ -173,16 +173,29 @@ def judge_spoken(answer: str, natural: str) -> str:
     return "again"
 
 
-def judge_card(kind: str, answer: str, right: str, shown: str, blank_answer: str = "") -> str:
+def judge_card(
+    kind: str,
+    answer: str,
+    right: str,
+    shown: str,
+    blank_answer: str = "",
+    blanked: str = "",
+) -> str:
     """判档入口：先挡「原样抄卡片提示」，再按题型判档。
 
     `shown` 是卡片上直接显示、用户能照抄的那句：语法卡是错句（`row.context`），
     口语卡是书面说法（`row.term`）。错句/书面句和正确答案往往只差一个词，
     照抄本来会命中 hard（语法）或直接得分（口语），等于没练，所以一律 `again`。
+
+    `blanked` 是语法卡上同时显示的挖空句（如 `He ____ to school by bus.`）。
+    `normalize` 会把 `____` 抹成空格，用户直接复制挖空句等于「只差一个词」，
+    同样会命中 hard，所以它也要进拦截名单。
     """
     said = normalize(answer)
-    if said and said == normalize(shown):
-        return "again"
+    if said:
+        for text in (shown, blanked):
+            if text and said == normalize(text):
+                return "again"
     if kind == "grammar":
         return judge_grammar(answer, right, blank_answer)
     return judge_spoken(answer, right)

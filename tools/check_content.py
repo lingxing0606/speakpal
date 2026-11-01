@@ -311,11 +311,19 @@ def check_grading() -> None:
             cid = str(item.get("id") or "?")
             wrong = str(item.get("wrong") or "")
             right = str(item.get("right") or "")
-            blank_answer = cardlib.blank_and_answer(wrong, right)[1]
-            copied = cardlib.judge_card("grammar", wrong, right, wrong, blank_answer)
+            blanked, blank_answer = cardlib.blank_and_answer(wrong, right)
+            copied = cardlib.judge_card("grammar", wrong, right, wrong, blank_answer, blanked)
             if copied != "again":
                 fail(f"[grading] {cid} 照抄错句被判成 {copied}，应为 again")
-            fixed = cardlib.judge_card("grammar", blank_answer or right, right, wrong, blank_answer)
+            if blanked:
+                copied_blank = cardlib.judge_card(
+                    "grammar", blanked, right, wrong, blank_answer, blanked
+                )
+                if copied_blank != "again":
+                    fail(f"[grading] {cid} 照抄挖空句被判成 {copied_blank}，应为 again")
+            fixed = cardlib.judge_card(
+                "grammar", blank_answer or right, right, wrong, blank_answer, blanked
+            )
             if fixed != "good":
                 fail(f"[grading] {cid} 改对了却判成 {fixed}，应为 good")
     path = DATA / "spoken.json"

@@ -30,7 +30,14 @@ from ..schemas import (
 from ..security import get_current_user
 from ..services import library, wordbank
 from ..services.srs import schedule
-from ..services.study import KINDS, is_due, item_out, judge_spelling, normalize_related
+from ..services.study import (
+    KINDS,
+    is_due,
+    item_out,
+    judge_spelling,
+    normalize_related,
+    safe_spelling_hint,
+)
 from ..timeutil import utc_iso, utcnow
 
 router = APIRouter(prefix="/api", tags=["study"])
@@ -139,14 +146,26 @@ def create_item(
     if existing is not None:
         return item_out(existing)
 
+    context = (body.context or "").strip()
+    meaning_zh = (body.meaning_zh or "").strip()
+    related = normalize_related(body.related)
+    reason = str((body.related or {}).get("reason") or "").strip()
+    if kind == "spelling":
+        # 拼写卡题干一律留空，原因（常直接写出正确拼写）挪到 related.reason
+        meaning_zh, reason_text = safe_spelling_hint(term, meaning_zh)
+        if reason_text:
+            related["reason"] = reason_text
+    elif reason:
+        related["reason"] = reason
+
     row = StudyItem(
         user_id=user.id,
         kind=kind,
         term=term[:MAX_TERM],
-        context=(body.context or "").strip(),
-        meaning_zh=(body.meaning_zh or "").strip(),
+        context=context,
+        meaning_zh=meaning_zh,
         example=(body.example or "").strip(),
-        related_json=__import__("json").dumps(normalize_related(body.related), ensure_ascii=False),
+        related_json=__import__("json").dumps(related, ensure_ascii=False),
         source_session_id=body.source_session_id,
         source=source,
         due_at=utcnow(),
@@ -173,13 +192,14 @@ def review_item(
         if not answer:
             raise HTTPException(status_code=400, detail="这类卡要用 answer 提交改写后的说法")
         if row.kind == "grammar":
-            # 卡片上显示的是错句（row.context）：照抄必须判 again
+            # 卡片上同时显示错句（row.context）和挖空句（related.blank），两句照抄都要判 again
             result = library.judge_card(
                 "grammar",
                 answer,
                 row.example or "",
                 row.context or "",
                 str(related.get("answer") or ""),
+                str(related.get("blank") or ""),
             )
         else:
             # 口语卡上显示的是书面说法（row.term）：照抄必须判 again

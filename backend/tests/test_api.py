@@ -573,6 +573,23 @@ class StudyCardCopyTests(ApiTestCase):
         )
         self.assertEqual(r.json()["last_result"], "good", r.text)
 
+    def test_copying_grammar_blank_is_again(self):
+        """卡片上同时显示挖空句，原样复制 `He ____ to school by bus.` 也不能拿分。"""
+        _, headers = self.register()
+        r = self.client.post("/api/study/grammar/add", json={"group": "tenses"}, headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        blank_item = next(
+            i for i in self._due(headers, "grammar") if (i.get("related") or {}).get("blank")
+        )
+        r = self.client.post(
+            f"/api/study/items/{blank_item['id']}/review",
+            json={"answer": blank_item["related"]["blank"]},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["last_result"], "again", "照抄挖空句不能拿分")
+        self.assertGreaterEqual(r.json()["lapses"], 1)
+
     def test_copying_spoken_prompt_is_again(self):
         _, headers = self.register()
         r = self.client.post("/api/study/spoken/add", json={"count": 3}, headers=headers)
@@ -591,6 +608,63 @@ class StudyCardCopyTests(ApiTestCase):
             headers=headers,
         )
         self.assertEqual(r.json()["last_result"], "good", r.text)
+
+
+class SpellingCardHintTests(ApiTestCase):
+    """拼写卡题干不能泄露答案（rc24 补）。
+
+    模型的纠错原因常直接写出正确拼写（「coffee 有两个 f」），如果它是题干，
+    默写就变成抄写。规则：题干 `meaning_zh` 留空，原因进 `related.reason`，
+    判完再展示；回归断言就是「题干里不得包含 term」。
+    """
+
+    def test_manual_spelling_card_hides_reason_from_hint(self):
+        _, headers = self.register()
+        r = self.client.post(
+            "/api/study/items",
+            json={
+                "kind": "spelling",
+                "term": "coffee",
+                "context": "I want a cofee, please.",
+                "meaning_zh": "coffee 有两个 f",
+                "example": "I'd like a coffee, please.",
+            },
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["meaning_zh"], "", "题干不能出现纠错原因")
+        self.assertNotIn("coffee", (body["meaning_zh"] or "").lower())
+        self.assertIn("coffee", (body["related"] or {}).get("reason", ""))
+
+    def test_generated_spelling_card_hides_reason_from_hint(self):
+        from app.db import SessionLocal
+        from app.services.study import cards_from_fixes, create_cards
+
+        _, headers = self.register()
+        me = self.client.get("/api/auth/me", headers=headers).json()
+        fix = {
+            "error_type": "spelling",
+            "word": "coffee",
+            "original": "I want a cofee, please.",
+            "better": "I'd like a coffee, please.",
+            "reason": "coffee 有两个 f",
+            "related": {"synonyms": ["latte"]},
+        }
+        cards = cards_from_fixes([fix])
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["meaning_zh"], "")
+        self.assertIn("coffee", cards[0]["related"].get("reason", ""))
+
+        db = SessionLocal()
+        try:
+            rows = create_cards(db, me["id"], None, cards)
+            db.commit()
+            self.assertEqual(len(rows), 1)
+            self.assertNotIn("coffee", (rows[0].meaning_zh or "").lower())
+            self.assertIn("coffee", rows[0].related_json)
+        finally:
+            db.close()
 
 
 class BandTests(unittest.TestCase):

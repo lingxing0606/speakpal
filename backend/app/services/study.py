@@ -107,6 +107,17 @@ def judge_spelling(answer: str, term: str) -> tuple[str, int]:
     return "again", distance
 
 
+def safe_spelling_hint(term: str, meaning_zh: str) -> tuple[str, str]:
+    """拼写卡的题干一律留空，原文本（通常是纠错原因）挪去 `related.reason`。
+
+    模型的纠错原因常直接写出正确拼写（「coffee 有两个 f」），放到 `meaning_zh` 上，
+    默写就变成抄写；就算没写全词，它也只是错误解释、不是词义提示。所以这里不看
+    内容，统一返回 (空题干, 原因原文)，由调用方把原因放进 `related.reason`，
+    判完之后再展示成「为什么：…」。
+    """
+    return "", (meaning_zh or "").strip()
+
+
 def cards_from_fixes(fixes):
     """把一次报告的 sentence_fixes 变成待建卡列表（只建 spelling / stiffness）。"""
     cards = []
@@ -128,14 +139,23 @@ def cards_from_fixes(fixes):
             term = natural or better
         if not term:
             continue
+        reason = str(fix.get("reason") or "").strip()
+        related = normalize_related(fix.get("related"))
+        if kind == "spelling":
+            # 题干留空，原因放到判完后的反馈里（reason 可能直接写出正确拼写）
+            meaning_zh, reason_text = safe_spelling_hint(term, reason)
+            if reason_text:
+                related["reason"] = reason_text
+        else:
+            meaning_zh = reason
         cards.append(
             {
                 "kind": kind,
                 "term": term[:MAX_TERM],
                 "context": original,
-                "meaning_zh": str(fix.get("reason") or "").strip(),
+                "meaning_zh": meaning_zh,
                 "example": better if kind == "spelling" else (natural or better),
-                "related": normalize_related(fix.get("related")),
+                "related": related,
             }
         )
     return cards
