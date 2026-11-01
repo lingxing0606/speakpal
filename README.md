@@ -110,6 +110,7 @@ backend\.venv\Scripts\python.exe -m unittest discover -s backend\tests -t backen
 - 注册 / 登录（账号密码 + JWT）
 - 6 个场景：求职面试 / 咖啡店点单 / 雅思 Part 1 / 酒店入住 / 机场值机 / 餐厅点餐
 - 语音录入转写（Web Speech API）+ AI 语音朗读；也可手动打字作答（两种方式分开记分）
+- 录音回放：练习页每句录音都能回放，报告页逐句纠错旁可听当时的原声。录音只存在本浏览器（IndexedDB），不上传服务器；保留最近 30 次练习，主动退出或清空数据时一并删除
 - 多轮对话 + 追问
 - 评分卡（综合 + 视作答方式 3–5 维）
 - 逐句纠错报告

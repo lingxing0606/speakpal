@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { clearRecordings } from '../utils/recordings'
 import { useSettingsStore } from './settings'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -24,6 +25,8 @@ export const useAuthStore = defineStore('auth', () => {
     // 主动退出：连本浏览器的模型密钥一起清掉，换账号登录时不会把上一个人的 key 带出去。
     // 被 401 踢下线时传 { clearKey: false }：用户没说要换账号，不该顺手删掉他的密钥。
     if (!clearKey) return
+    // 主动退出：本浏览器里的录音一起清，换人用这台电脑听不到上一个人的声音
+    clearRecordings()
     try {
       useSettingsStore().clear()
     } catch {

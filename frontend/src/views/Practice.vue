@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, markRaw, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
@@ -7,7 +7,8 @@ import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
 import { startAudioCapture } from '../utils/audio'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
-import { createRecognizer, speakSmart } from '../utils/speech'
+import { loadRecordings, playRecording, saveRecording, stopRecording } from '../utils/recordings'
+import { createRecognizer, speakSmart, stopSpeaking } from '../utils/speech'
 
 const route = useRoute()
 const router = useRouter()
@@ -68,6 +69,7 @@ function useFrame(f) {
   manualText.value = f.en
   recognizedText.value = ''
   pendingAudio = null
+  pendingBlob = null
   framesOpen.value = false
   openManual()
 }
@@ -76,6 +78,37 @@ function useFrame(f) {
 // 用户改过文字就不带录音了，免得「语速/停顿」指标和文字对不上
 const recognizedText = ref('')
 let pendingAudio = null
+// 这句的录音文件（Promise<Blob|null>），发送成功后存到本地供回放
+let pendingBlob = null
+
+// 回放自己说过的话：同一时间只放一句
+const playingIndex = ref(-1)
+
+async function togglePlayback(t, i) {
+  if (playingIndex.value === i) {
+    stopRecording()
+    playingIndex.value = -1
+    return
+  }
+  stopSpeaking()
+  playingIndex.value = i
+  const ok = await playRecording(t.blob, () => {
+    if (playingIndex.value === i) playingIndex.value = -1
+  })
+  if (!ok) error.value = '这段录音放不出来，可能是浏览器不支持这种格式。'
+}
+
+// 按「第几句用户发言」把本地录音挂回对话（刷新 / 从历史回来时）
+async function attachRecordings(id) {
+  const blobs = await loadRecordings(id)
+  if (!Object.keys(blobs).length) return
+  let ord = 0
+  for (const t of session.turns) {
+    if (t.role !== 'user') continue
+    ord += 1
+    if (blobs[ord] && !t.blob) t.blob = markRaw(blobs[ord])
+  }
+}
 
 // 手动输入条打开后 8 秒没动键盘，就在输入框上方递三条可用说法；每次进练习页只递一次
 const hintVisible = ref(false)
@@ -123,6 +156,7 @@ function useHintFrame(f) {
   manualText.value = f.en
   recognizedText.value = ''
   pendingAudio = null
+  pendingBlob = null
   hintVisible.value = false
   nextTick(() => {
     const el = manualInput.value
@@ -202,6 +236,7 @@ async function loadSession(id) {
         data.difficulty,
         (data.turns || []).map((t) => ({ role: t.role, content: t.content, mode: t.input_mode }))
       )
+      attachRecordings(id)
       scrollBottom()
       // 回填时不重播开场白，否则刷新一次就念一遍
       return
@@ -221,6 +256,7 @@ async function loadSession(id) {
 }
 
 onUnmounted(() => {
+  stopRecording()
   stopTimer()
   clearHintTimer()
   if (recognizer) recognizer.abort?.()
@@ -258,6 +294,7 @@ async function startListening() {
       stopTimer()
       const text = interim.value.trim()
       pendingAudio = capturer ? capturer.stop() : null
+      pendingBlob = capturer ? capturer.blob() : null
       capturer = null
       interim.value = ''
       if (!text) {
@@ -280,6 +317,7 @@ async function startListening() {
         capturer = null
       }
       pendingAudio = null
+      pendingBlob = null
       interim.value = ''
       const msg = SPEECH_ERRORS[event?.error]
       if (msg) error.value = msg
@@ -313,7 +351,7 @@ function toggleListening() {
   else startListening()
 }
 
-async function send(text, audio = null, mode = 'typed') {
+async function send(text, audio = null, mode = 'typed', blobPromise = null) {
   if (!text || sending.value) return false
   const gate = await llmReady()
   if (!gate.ok) {
@@ -324,6 +362,8 @@ async function send(text, audio = null, mode = 'typed') {
   error.value = ''
   const mine = { role: 'user', content: text, mode }
   session.turns.push(mine)
+  // 拿响应式代理（不是原对象），之后挂录音才会刷新界面
+  const mineRef = session.turns[session.turns.length - 1]
   scrollBottom()
   try {
     const { data } = await api.post(`/sessions/${session.sessionId}/turn`, {
@@ -332,6 +372,14 @@ async function send(text, audio = null, mode = 'typed') {
       input_mode: mode,
     })
     session.turns.push({ role: 'ai', content: data.ai_reply })
+    if (blobPromise) {
+      const sid = session.sessionId
+      blobPromise.then((blob) => {
+        if (!blob) return
+        saveRecording(sid, data.turn_index, blob)
+        mineRef.blob = markRaw(blob)
+      })
+    }
     // 模型这轮没回上来，后端给的是预设追问：明说，别让人以为 AI 在正常聊
     if (data.degraded) {
       error.value = '模型这一轮没有响应（超时、限流或服务异常），上面是预设的追问。可以继续说，或稍后再试。'
@@ -378,6 +426,7 @@ function discardManual() {
   manualText.value = ''
   recognizedText.value = ''
   pendingAudio = null
+  pendingBlob = null
   manualOpen.value = false
   nextTick(() => manualBtn.value?.focus())
 }
@@ -387,11 +436,14 @@ async function submitManual() {
   if (!text || sending.value) return
   const audio = text === recognizedText.value ? pendingAudio : null
   const mode = audio ? 'voice' : 'typed'
-  const ok = await send(text, audio, mode)
+  // 改过文字就不算这段录音的转写了，录音也不留（和语速指标同一条规则）
+  const blobPromise = audio ? pendingBlob : null
+  const ok = await send(text, audio, mode, blobPromise)
   if (!ok) return
   manualText.value = ''
   recognizedText.value = ''
   pendingAudio = null
+  pendingBlob = null
   manualOpen.value = false
   nextTick(() => manualBtn.value?.focus())
 }
@@ -509,6 +561,20 @@ async function finish() {
             </svg>
             {{ t.mode === 'voice' ? '录音' : '打字' }}
           </span>
+          <button
+            v-if="t.role === 'user' && t.blob"
+            class="mb-1 ml-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white/90 transition hover:bg-white/25"
+            :aria-label="playingIndex === i ? '停止回放' : '回放我的录音'"
+            @click="togglePlayback(t, i)"
+          >
+            <svg v-if="playingIndex === i" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="1.5" />
+            </svg>
+            <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M8 5.5v13l10.5-6.5L8 5.5Z" />
+            </svg>
+            {{ playingIndex === i ? '停止' : '回放' }}
+          </button>
           {{ t.content }}
           <button
             v-if="t.role === 'ai'"

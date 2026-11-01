@@ -1,12 +1,13 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
-import { createRecognizer, speakSmart } from '../utils/speech'
+import { loadRecordings, playRecording, stopRecording } from '../utils/recordings'
+import { createRecognizer, speakSmart, stopSpeaking } from '../utils/speech'
 
 const route = useRoute()
 const router = useRouter()
@@ -189,7 +190,46 @@ onMounted(async () => {
   } catch {
     meta.value = null
   }
+  const blobs = await loadRecordings(Number(route.params.id))
+  for (const k of Object.keys(blobs)) blobs[k] = markRaw(blobs[k])
+  recordings.value = blobs
 })
+
+onUnmounted(() => stopRecording())
+
+// 本地录音（只在录这次练习的浏览器里有）：{ 第几句用户发言: Blob }
+const recordings = ref({})
+const playingFix = ref(-1)
+
+function normText(text) {
+  return String(text || '').toLowerCase().replace(/[^a-z0-9']+/g, ' ').trim()
+}
+
+// 每条纠错的原句是用户某一轮里的一句话：按文本包含关系找回那一轮的录音
+const fixRecordings = computed(() => {
+  const fixes = report.value?.sentence_fixes || []
+  const turns = (meta.value?.turns || []).filter((t) => t.role === 'user')
+  if (!fixes.length || !turns.length || !Object.keys(recordings.value).length) return []
+  return fixes.map((f) => {
+    const target = normText(f.original)
+    if (!target) return null
+    const idx = turns.findIndex((t) => t.input_mode === 'voice' && normText(t.content).includes(target))
+    return idx >= 0 ? recordings.value[idx + 1] || null : null
+  })
+})
+
+async function toggleFixPlayback(i) {
+  if (playingFix.value === i) {
+    stopRecording()
+    playingFix.value = -1
+    return
+  }
+  stopSpeaking()
+  playingFix.value = i
+  await playRecording(fixRecordings.value[i], () => {
+    if (playingFix.value === i) playingFix.value = -1
+  })
+}
 
 // 下一练：按推荐难度直接开一场，不用回首页重新选
 async function nextPractice() {
@@ -498,6 +538,14 @@ function again() {
             <div class="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line/70 pt-2">
               <div class="min-w-0 text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
               <div class="flex shrink-0 items-center gap-2">
+                <button
+                  v-if="fixRecordings[i]"
+                  class="sp-btn-ghost !px-3 !py-1 text-xs"
+                  :aria-label="playingFix === i ? '停止回放' : '听我当时怎么说的'"
+                  @click="toggleFixPlayback(i)"
+                >
+                  {{ playingFix === i ? '停止' : '听我的录音' }}
+                </button>
                 <button
                   v-if="drillByIndex[i]"
                   class="sp-btn-secondary !px-3 !py-1 text-xs"

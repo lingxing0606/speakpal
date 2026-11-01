@@ -8,6 +8,7 @@ import BrandLogo from '../components/BrandLogo.vue'
 import TabBar from '../components/TabBar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
+import { clearRecordings } from '../utils/recordings'
 import { resetTtsProbe } from '../utils/speech'
 
 const router = useRouter()
@@ -322,6 +323,7 @@ async function clearData() {
   dataState.value = { running: true, tip: '', error: '' }
   try {
     const { data } = await api.delete('/me/data')
+    await clearRecordings()
     const sessions = data.deleted_sessions ?? 0
     const reports = data.deleted_reports ?? 0
     dataState.value = {
