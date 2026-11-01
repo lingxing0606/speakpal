@@ -235,6 +235,7 @@ speakpal/
 | GET | /api/scenes | 场景列表 | 是 |
 | POST | /api/sessions | 开始会话 | 是 |
 | POST | /api/sessions/{id}/turn | 用户作答一轮（body 可带 `input_mode: voice|typed`，见 §5） | 是 |
+| POST | /api/sessions/{id}/turn/stream | 同上，AI 回复按 SSE 逐段推送（见下方「流式对话」） | 是 |
 | POST | /api/sessions/{id}/finish | 结束并生成报告 | 是 |
 | GET | /api/sessions/{id} | 单个会话完整对话，用于刷新/回填；每轮带 `input_mode`（见 §5） | 是 |
 | GET | /api/sessions | 历史会话列表（当前用户，带 `status` / `report_id` / `band` / `cefr` / `comparable_band` / `answer_mode` / `voice_turns` / `typed_turns`） | 是 |
@@ -321,6 +322,17 @@ speakpal/
 // resp
 {"turn_index": 2, "ai_reply": "Nice. What was the most challenging project you worked on?", "is_follow_up": true}
 ```
+
+`POST /api/sessions/{id}/turn/stream`（流式对话，练习页默认走这个）
+
+- 请求体、校验、错误码与 `/turn` 完全相同；校验失败 / 密钥被拒（502 `key_invalid`）/ 地址不安全（400）都**不开流**，直接返回 JSON。
+- 成功时 `Content-Type: text/event-stream`，依次推送：
+  - `event: delta` · `data: {"text": "Great, "}`（若干条）
+  - `event: done` · `data: <TurnOut>`（与 `/turn` 响应相同）
+  - `event: error` · `data: {"detail": "..."}`（只在落库失败时出现）
+- **整句收完才落库**。上游中途断流时丢掉半句，`done.ai_reply` 换成预设追问并 `degraded: true`；前端一律用 `done.ai_reply` 覆盖气泡。
+- 客户端在 `done` 前断开，这一轮不记录，前端撤回并提示重发。
+- 前端遇到 401 / 404 / 405 回落到 `/turn`（401 走 axios 拦截器登出；404/405 兼容旧后端）。
 
 `POST /api/sessions/{id}/finish` →
 ```json

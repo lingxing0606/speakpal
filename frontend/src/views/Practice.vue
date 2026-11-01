@@ -3,6 +3,7 @@ import { computed, markRaw, nextTick, onMounted, onUnmounted, ref, watch } from 
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
+import { streamTurn } from '../api/stream'
 import BrandLogo from '../components/BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
 import { startAudioCapture } from '../utils/audio'
@@ -17,6 +18,9 @@ const session = useSessionStore()
 const listening = ref(false)
 const interim = ref('')
 const sending = ref(false)
+// 流式回复已经开始出字：此时收起「正在输入」的三个点
+const streaming = ref(false)
+let streamAbort = null
 const finishing = ref(false)
 const confirmingFinish = ref(false)
 const canFinish = ref(false)
@@ -256,6 +260,8 @@ async function loadSession(id) {
 }
 
 onUnmounted(() => {
+  // 离开页面时断开还在收的回复（这一轮服务端不会记录）
+  streamAbort?.abort()
   stopRecording()
   stopTimer()
   clearHintTimer()
@@ -365,13 +371,34 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
   // 拿响应式代理（不是原对象），之后挂录音才会刷新界面
   const mineRef = session.turns[session.turns.length - 1]
   scrollBottom()
+  // AI 气泡收到第一段才插入；之后边收边追加
+  let aiRef = null
+  streamAbort = new AbortController()
   try {
-    const { data } = await api.post(`/sessions/${session.sessionId}/turn`, {
-      transcript: text,
-      audio,
-      input_mode: mode,
-    })
-    session.turns.push({ role: 'ai', content: data.ai_reply })
+    const data = await streamTurn(
+      session.sessionId,
+      { transcript: text, audio, input_mode: mode },
+      {
+        signal: streamAbort.signal,
+        onDelta(piece) {
+          if (!piece) return
+          if (!aiRef) {
+            session.turns.push({ role: 'ai', content: '', streaming: true })
+            aiRef = session.turns[session.turns.length - 1]
+            streaming.value = true
+          }
+          aiRef.content += piece
+          scrollBottom()
+        },
+      }
+    )
+    // 以 done 里的整句为准：中途断流时服务端会换成预设追问
+    if (aiRef) {
+      aiRef.content = data.ai_reply
+      aiRef.streaming = false
+    } else {
+      session.turns.push({ role: 'ai', content: data.ai_reply })
+    }
     if (blobPromise) {
       const sid = session.sessionId
       blobPromise.then((blob) => {
@@ -389,9 +416,15 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
     scrollBottom()
     return true
   } catch (e) {
-    // 后端拒收（空转写 / 超长 / 密钥问题）时，把刚乐观插入的这句撤回，别留下假记录
+    // 后端拒收（空转写 / 超长 / 密钥问题）或流断了：把刚乐观插入的这句和半截回复都撤回
+    if (aiRef) {
+      const j = session.turns.indexOf(aiRef)
+      if (j >= 0) session.turns.splice(j, 1)
+    }
     const i = session.turns.indexOf(mine)
     if (i >= 0) session.turns.splice(i, 1)
+    // 离开页面导致的中断不用提示
+    if (e?.name === 'AbortError') return false
     const detail = e?.response?.data?.detail
     const kind = e?.response?.data?.kind
     if (e?.response?.status === 409 && (kind === 'llm_not_configured' || detail === 'llm_key_required')) {
@@ -406,6 +439,8 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
     return false
   } finally {
     sending.value = false
+    streaming.value = false
+    streamAbort = null
   }
 }
 
@@ -576,8 +611,13 @@ async function finish() {
             {{ playingIndex === i ? '停止' : '回放' }}
           </button>
           {{ t.content }}
+          <span
+            v-if="t.streaming"
+            class="ml-0.5 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-brand-300"
+            aria-hidden="true"
+          ></span>
           <button
-            v-if="t.role === 'ai'"
+            v-if="t.role === 'ai' && !t.streaming"
             class="ml-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-brand-600 transition hover:bg-brand-50"
             aria-label="朗读这句"
             @click="speakSmart(t.content, { rate: speechRate })"
@@ -590,7 +630,7 @@ async function finish() {
         </div>
       </div>
 
-      <div v-if="sending" class="flex justify-start">
+      <div v-if="sending && !streaming" class="flex justify-start">
         <div class="flex items-center gap-1 rounded-2xl rounded-tl-md bg-white px-4 py-3 ring-1 ring-line">
           <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-300 [animation-delay:-0.2s]"></span>
           <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-300 [animation-delay:-0.1s]"></span>

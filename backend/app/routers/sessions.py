@@ -1,13 +1,14 @@
 import json
 import re
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import selectinload
 
-from ..db import get_db
+from ..db import SessionLocal, get_db
 from ..models import PracticeSession, Report, Turn, User
 from ..schemas import (
     CreateSessionIn,
@@ -21,7 +22,7 @@ from ..schemas import (
 )
 from ..security import get_current_user
 from ..timeutil import utc_iso
-from ..services.llm import chat_reply
+from ..services.llm import StreamUnavailable, chat_reply, fallback_reply, open_chat_stream
 from ..services.study import cards_from_fixes, create_cards
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
 from ..services.outbound import UnsafeBaseURL
@@ -85,14 +86,24 @@ def create_session(
     return CreateSessionOut(session_id=sess.id, opening_question=scene["opening"])
 
 
-@router.post("/sessions/{session_id}/turn", response_model=TurnOut)
-def add_turn(
-    session_id: int,
-    body: TurnIn,
-    user: User = Depends(get_current_user),
-    db: OrmSession = Depends(get_db),
-    llm: LLMConfig = Depends(get_llm_config),
-):
+@dataclass
+class _TurnCtx:
+    """一轮作答校验通过后要用到的纯数据（不带 ORM 对象，流式生成器里也能安全用）。"""
+
+    session_id: int
+    scene: dict
+    difficulty: str
+    transcript: str
+    input_mode: str
+    audio_json: str
+    history: list
+    user_count: int
+
+
+def _prepare_turn(
+    session_id: int, body: TurnIn, user: User, db: OrmSession, llm: LLMConfig
+) -> "_TurnCtx | JSONResponse":
+    """/turn 与 /turn/stream 共用的校验，顺序与报错保持一致。"""
     sess = db.get(PracticeSession, session_id)
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -127,9 +138,55 @@ def add_turn(
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
     history.append({"role": "user", "content": transcript})
     user_count = sum(1 for t in history if t["role"] == "user")
+    return _TurnCtx(
+        session_id=sess.id,
+        scene=scene,
+        difficulty=sess.difficulty,
+        transcript=transcript,
+        input_mode=input_mode,
+        audio_json=audio_json,
+        history=history,
+        user_count=user_count,
+    )
 
+
+def _save_turn_pair(db: OrmSession, ctx: _TurnCtx, reply: str) -> None:
+    db.add(
+        Turn(
+            session_id=ctx.session_id,
+            role="user",
+            content=ctx.transcript,
+            input_mode=ctx.input_mode,
+            audio_json=ctx.audio_json,
+        )
+    )
+    db.add(Turn(session_id=ctx.session_id, role="ai", content=reply, input_mode="voice"))
+    db.commit()
+
+
+def _turn_out(ctx: _TurnCtx, reply: str, degraded: bool) -> TurnOut:
+    return TurnOut(
+        turn_index=ctx.user_count,
+        ai_reply=reply,
+        is_follow_up=True,
+        should_finish=ctx.user_count >= 4,
+        degraded=degraded,
+    )
+
+
+@router.post("/sessions/{session_id}/turn", response_model=TurnOut)
+def add_turn(
+    session_id: int,
+    body: TurnIn,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+    llm: LLMConfig = Depends(get_llm_config),
+):
+    ctx = _prepare_turn(session_id, body, user, db, llm)
+    if isinstance(ctx, JSONResponse):
+        return ctx
     try:
-        reply, degraded = chat_reply(scene, sess.difficulty, history, user_count, llm)
+        reply, degraded = chat_reply(ctx.scene, ctx.difficulty, ctx.history, ctx.user_count, llm)
     except UserKeyInvalid:
         db.rollback()
         return key_invalid_response()
@@ -137,24 +194,79 @@ def add_turn(
         db.rollback()
         raise HTTPException(status_code=400, detail=exc.message)
 
-    db.add(
-        Turn(
-            session_id=sess.id,
-            role="user",
-            content=transcript,
-            input_mode=input_mode,
-            audio_json=audio_json,
-        )
-    )
-    db.add(Turn(session_id=sess.id, role="ai", content=reply, input_mode="voice"))
-    db.commit()
+    _save_turn_pair(db, ctx, reply)
+    return _turn_out(ctx, reply, degraded)
 
-    return TurnOut(
-        turn_index=user_count,
-        ai_reply=reply,
-        is_follow_up=True,
-        should_finish=user_count >= 4,
-        degraded=degraded,
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/sessions/{session_id}/turn/stream")
+def add_turn_stream(
+    session_id: int,
+    body: TurnIn,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+    llm: LLMConfig = Depends(get_llm_config),
+):
+    """同 /turn，但 AI 回复按 SSE 逐段推送：`delta` 若干条，最后一条 `done`（即 TurnOut）。
+
+    - 校验失败、密钥被拒、地址不安全：和 /turn 一样直接返回 4xx/5xx，不开流。
+    - 上游流中途断了：丢掉已收到的半句，`done` 里换成预设追问并标 degraded，
+      前端用 `done.ai_reply` 覆盖气泡。
+    - 整句收完才落库；客户端中途断开则这一轮不记录（和 /turn 失败不落库一致）。
+    - `event: error` 只在落库失败时出现，这一轮同样没有记录。
+    """
+    ctx = _prepare_turn(session_id, body, user, db, llm)
+    if isinstance(ctx, JSONResponse):
+        return ctx
+    try:
+        stream = open_chat_stream(ctx.scene, ctx.difficulty, ctx.history, llm)
+    except UserKeyInvalid:
+        return key_invalid_response()
+    except UnsafeBaseURL as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
+    except StreamUnavailable as exc:
+        print(f"[llm] 流式对话降级为预设追问：{exc}", flush=True)
+        stream = None
+
+    def events():
+        parts: list[str] = []
+        broken = stream is None
+        if stream is not None:
+            try:
+                for piece in stream:
+                    parts.append(piece)
+                    yield _sse("delta", {"text": piece})
+            except Exception as exc:  # noqa: BLE001 - 中途断流降级，不让整轮失败
+                print(f"[llm] 流式对话中途断开：{type(exc).__name__}", flush=True)
+                broken = True
+            finally:
+                stream.close()
+        reply = "".join(parts).strip()
+        degraded = broken or not reply
+        if degraded:
+            reply = fallback_reply(ctx.scene["id"], ctx.user_count)
+        # 请求级 db 会话不保证活到流结束，落库用独立会话
+        with SessionLocal() as wdb:
+            try:
+                sess = wdb.get(PracticeSession, ctx.session_id)
+                if not sess or sess.status != "active":
+                    yield _sse("error", {"detail": "会话已结束，这一轮没有记录"})
+                    return
+                _save_turn_pair(wdb, ctx, reply)
+            except Exception as exc:  # noqa: BLE001
+                wdb.rollback()
+                print(f"[sessions] 流式对话落库失败：{type(exc).__name__}", flush=True)
+                yield _sse("error", {"detail": "保存这一轮失败，请重发"})
+                return
+        yield _sse("done", _turn_out(ctx, reply, degraded).model_dump())
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

@@ -1,3 +1,5 @@
+import json
+
 import httpx
 
 from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
@@ -27,6 +29,29 @@ def _mock_reply(scene_id: str, turn_index: int) -> str:
     return lst[min(max(turn_index, 0), len(lst) - 1)]
 
 
+# 流式接口在模型不可用时也要给一句预设追问
+fallback_reply = _mock_reply
+
+
+def build_messages(scene: dict, difficulty: str, history: list) -> list:
+    system = (
+        f"You are {scene['role']}. The user is an English learner practicing speaking.\n"
+        "Ask short, natural, conversational questions. Ask only one question at a time.\n"
+        "After the user answers, briefly acknowledge, then ask one relevant follow-up.\n"
+        "Do not correct grammar during the conversation; correction is handled later.\n"
+        f"Difficulty: {difficulty}. Keep it friendly."
+    )
+    messages = [{"role": "system", "content": system}]
+    for t in history[-8:]:
+        messages.append(
+            {
+                "role": "assistant" if t["role"] == "ai" else "user",
+                "content": t["content"],
+            }
+        )
+    return messages
+
+
 def chat_reply(
     scene: dict,
     difficulty: str,
@@ -47,21 +72,7 @@ def chat_reply(
         return _mock_reply(scene["id"], turn_index), True
     check_base_url(llm.base_url)
 
-    system = (
-        f"You are {scene['role']}. The user is an English learner practicing speaking.\n"
-        "Ask short, natural, conversational questions. Ask only one question at a time.\n"
-        "After the user answers, briefly acknowledge, then ask one relevant follow-up.\n"
-        "Do not correct grammar during the conversation; correction is handled later.\n"
-        f"Difficulty: {difficulty}. Keep it friendly."
-    )
-    messages = [{"role": "system", "content": system}]
-    for t in history[-8:]:
-        messages.append(
-            {
-                "role": "assistant" if t["role"] == "ai" else "user",
-                "content": t["content"],
-            }
-        )
+    messages = build_messages(scene, difficulty, history)
     try:
         with httpx.Client(timeout=30) as client:
             resp = client.post(
@@ -86,3 +97,92 @@ def chat_reply(
     except Exception as exc:  # noqa: BLE001 - 对话中断比整个请求失败更糟，降级成预设追问
         print(f"[llm] 对话降级为预设追问：{type(exc).__name__}", flush=True)
         return _mock_reply(scene["id"], turn_index), True
+
+
+# ---------------------------------------------------------------- 流式
+class StreamUnavailable(Exception):
+    """流还没开始就失败（网络、5xx、限流）：路由层降级为预设追问。"""
+
+
+class ChatStream:
+    """已经确认状态码正常的上游流；迭代得到文本片段，用完必须 close()。"""
+
+    def __init__(self, client, resp):
+        self._client = client
+        self._resp = resp
+
+    def __iter__(self):
+        ctype = (self._resp.headers.get("content-type") or "").lower()
+        if "text/event-stream" not in ctype:
+            # 有的兼容服务忽略 stream=true，直接回整段 JSON：当成一个片段
+            data = json.loads(self._resp.read())
+            content = data["choices"][0]["message"]["content"]
+            if content:
+                yield content
+            return
+        for line in self._resp.iter_lines():
+            line = (line or "").strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except ValueError:
+                continue
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            piece = (choices[0].get("delta") or {}).get("content")
+            if piece:
+                yield piece
+
+    def close(self):
+        try:
+            self._resp.close()
+        finally:
+            self._client.close()
+
+
+def open_chat_stream(
+    scene: dict,
+    difficulty: str,
+    history: list,
+    llm: LLMConfig | None = None,
+) -> ChatStream:
+    """先把上游连接和状态码确认好，再交给路由去流式转发。
+
+    这样密钥被拒（UserKeyInvalid）、地址不安全（UnsafeBaseURL）仍能返回正常的 HTTP 错误码，
+    不会变成「200 开流之后才报错」。其他失败抛 StreamUnavailable。
+    """
+    llm = llm or build_llm_config()
+    if not llm.configured:
+        raise StreamUnavailable("未配置密钥")
+    check_base_url(llm.base_url)
+    client = httpx.Client(timeout=httpx.Timeout(30.0))
+    try:
+        request = client.build_request(
+            "POST",
+            f"{llm.base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {llm.api_key}"},
+            json={
+                "model": llm.model,
+                "messages": build_messages(scene, difficulty, history),
+                "temperature": 0.7,
+                "stream": True,
+            },
+        )
+        resp = client.send(request, stream=True)
+    except Exception as exc:  # noqa: BLE001
+        client.close()
+        raise StreamUnavailable(type(exc).__name__) from exc
+    if resp.status_code in (401, 403) and llm.from_user:
+        resp.close()
+        client.close()
+        raise UserKeyInvalid()
+    if resp.status_code >= 400:
+        resp.close()
+        client.close()
+        raise StreamUnavailable(f"HTTP {resp.status_code}")
+    return ChatStream(client, resp)

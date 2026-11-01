@@ -308,6 +308,157 @@ class SessionTests(ApiTestCase):
         self.assertEqual(r.status_code, 404)
 
 
+import json as _json  # noqa: E402
+
+
+def _sse_lines(*pieces):
+    for piece in pieces:
+        yield "data: " + _json.dumps({"choices": [{"delta": {"content": piece}}]})
+        yield ""
+    yield "data: [DONE]"
+
+
+class _FakeStreamResp:
+    def __init__(self, status=200, lines=(), ctype="text/event-stream", body=b"", explode_after=None):
+        self.status_code = status
+        self.headers = {"content-type": ctype}
+        self._lines = list(lines)
+        self._body = body
+        self._explode_after = explode_after
+        self.closed = False
+
+    def iter_lines(self):
+        for i, line in enumerate(self._lines):
+            if self._explode_after is not None and i >= self._explode_after:
+                raise RuntimeError("upstream dropped")
+            yield line
+
+    def read(self):
+        return self._body
+
+    def close(self):
+        self.closed = True
+
+
+def _stream_client(resp):
+    class C:
+        last = None
+
+        def __init__(self, *a, **k):
+            C.last = self
+            self.closed = False
+
+        def build_request(self, *a, **k):
+            self.request_json = k.get("json")
+            return object()
+
+        def send(self, request, stream=False):
+            assert stream
+            return resp
+
+        def close(self):
+            self.closed = True
+
+    return C
+
+
+def _parse_sse(text):
+    events = []
+    for block in text.strip().split("\n\n"):
+        name, data = "message", ""
+        for line in block.splitlines():
+            if line.startswith("event:"):
+                name = line[6:].strip()
+            elif line.startswith("data:"):
+                data += line[5:].strip()
+        events.append((name, _json.loads(data) if data else None))
+    return events
+
+
+class StreamTests(SessionTests):
+    def _stream(self, sid, client_cls, text="I like coding a lot."):
+        with mock.patch("app.services.llm.httpx.Client", client_cls):
+            return self.client.post(
+                f"/api/sessions/{sid}/turn/stream",
+                json={"transcript": text, "input_mode": "typed"},
+                headers=self.headers,
+            )
+
+    def _saved_turns(self, sid):
+        return self.client.get(f"/api/sessions/{sid}", headers=self.headers).json()["turns"]
+
+    def test_stream_sends_deltas_then_done_and_saves(self):
+        sid = self._start()
+        resp = _FakeStreamResp(lines=list(_sse_lines("Nice. ", "What else", "?")))
+        cls = _stream_client(resp)
+        r = self._stream(sid, cls)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.headers["content-type"].startswith("text/event-stream"))
+        events = _parse_sse(r.text)
+        self.assertEqual([e for e, _ in events], ["delta", "delta", "delta", "done"])
+        done = events[-1][1]
+        self.assertEqual(done["ai_reply"], "Nice. What else?")
+        self.assertFalse(done["degraded"])
+        self.assertEqual(done["turn_index"], 1)
+        self.assertTrue(cls.last.request_json["stream"])
+        self.assertTrue(resp.closed and cls.last.closed)
+        turns = self._saved_turns(sid)
+        self.assertEqual([t["role"] for t in turns], ["ai", "user", "ai"])
+        self.assertEqual(turns[-1]["content"], "Nice. What else?")
+
+    def test_stream_key_rejected_returns_502_without_saving(self):
+        sid = self._start()
+        r = self._stream(sid, _stream_client(_FakeStreamResp(status=401)))
+        self.assertEqual(r.status_code, 502)
+        self.assertEqual(r.json()["kind"], "key_invalid")
+        self.assertEqual(len(self._saved_turns(sid)), 1)
+
+    def test_stream_upstream_error_degrades(self):
+        sid = self._start()
+        r = self._stream(sid, _stream_client(_FakeStreamResp(status=500)))
+        events = _parse_sse(r.text)
+        self.assertEqual([e for e, _ in events], ["done"])
+        self.assertTrue(events[0][1]["degraded"])
+        self.assertEqual(len(self._saved_turns(sid)), 3)
+
+    def test_stream_drop_midway_replaces_partial_text(self):
+        sid = self._start()
+        resp = _FakeStreamResp(lines=list(_sse_lines("Half a sent", "ence never")), explode_after=2)
+        r = self._stream(sid, _stream_client(resp))
+        events = _parse_sse(r.text)
+        self.assertEqual(events[0][0], "delta")
+        done = events[-1][1]
+        self.assertTrue(done["degraded"])
+        self.assertNotIn("Half a sent", done["ai_reply"])
+        self.assertTrue(resp.closed)
+        self.assertEqual(self._saved_turns(sid)[-1]["content"], done["ai_reply"])
+
+    def test_stream_provider_ignoring_stream_flag(self):
+        sid = self._start()
+        body = _json.dumps({"choices": [{"message": {"content": "Plain JSON reply?"}}]}).encode()
+        r = self._stream(sid, _stream_client(_FakeStreamResp(ctype="application/json", body=body)))
+        events = _parse_sse(r.text)
+        self.assertEqual(events[-1][1]["ai_reply"], "Plain JSON reply?")
+        self.assertFalse(events[-1][1]["degraded"])
+
+    def test_stream_requires_key_and_safe_url(self):
+        sid = self._start()
+        no_key = {k: v for k, v in self.headers.items() if k != "X-LLM-Key"}
+        r = self.client.post(f"/api/sessions/{sid}/turn/stream", json={"transcript": "Hi there"}, headers=no_key)
+        self.assertEqual(r.status_code, 409)
+        self._dns.stop()
+        try:
+            r = self.client.post(
+                f"/api/sessions/{sid}/turn/stream",
+                json={"transcript": "Hi there"},
+                headers={**self.headers, "X-LLM-Base-URL": "http://127.0.0.1:8000"},
+            )
+        finally:
+            self._dns.start()
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(len(self._saved_turns(sid)), 1)
+
+
 class BandTests(unittest.TestCase):
     def test_band_score_roundtrip_monotonic(self):
         names = [n for n in dir(bands) if not n.startswith("_")]
