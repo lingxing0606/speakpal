@@ -13,13 +13,12 @@
 ├── backend/            # FastAPI 后端
 │   ├── app/
 │   ├── requirements.txt
-│   ├── .env            # 本地配置（JWT、数据库、大模型 key）
+│   ├── .env            # 本地配置（JWT、管理员密钥、数据库；**不含模型 key**）
 │   └── .venv/          # Python 虚拟环境
 ├── frontend/           # Vue3 前端
 │   ├── src/
 │   ├── package.json
-│   ├── node_modules/
-│   └── dist/           # 已构建产物
+│   └── node_modules/   # dist/ 不提交也不打包，`start-frontend` 用 dev server
 ├── evaluation/         # 评估与验证（人评一致性统计、特征提取）
 ├── tools/node/         # 便携版 Node（免系统安装）
 ├── docs/
@@ -41,6 +40,8 @@
 
 环境已备好（Python 用系统 D:\python，前端用 tools\node）。**最简单：双击 `start-all.bat`**，它会启动前后端并打开浏览器。
 
+> 换一台机器（评委的电脑）第一次跑，先执行 `setup.ps1` 装依赖——那一步需要联网；之后才双击 `start-all.bat`。
+
 也可以手动启动（两个 PowerShell 窗口）：
 
 1. 启动后端：
@@ -61,17 +62,14 @@
 
 如果依赖缺失或环境损坏，运行 `.\setup.ps1` 重装。
 
-## 配置大模型
+## 配置大模型密钥
 
-编辑 `backend/.env`：
+**`backend/.env` 里不再配置模型 key**——服务端不提供密钥，key 由使用者自己填、只存在浏览器里。
 
-```
-LLM_API_KEY=你的key
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_MODEL=deepseek-chat
-```
+流程：注册登录 → 打开「设置」→「模型密钥」填自己的 key（可选改 Base URL / 模型）→ 点「测试连接」→ 显示绿色结果即生效。
+不填 key 点场景会被直接拦住（后端返回 `409 llm_not_configured`），不会进入一段注定出示例报告的对话。
 
-留空 `LLM_API_KEY` 时，后端用内置 mock 回复把对话流程跑通（方便先看界面），但报告会标成「示例报告（模型不可用）· 本次不计分」，**不给分也不给档位**，逐句纠错只列用户真实说过的句子。
+模型地址默认是 OpenAI 兼容的 `https://api.deepseek.com/v1`，换供应商只改设置页里的 Base URL（或 `.env` 里的默认值），三家格式一样。
 
 ## 后端控制台
 
@@ -127,8 +125,7 @@ backend\.venv\Scripts\python.exe -m unittest discover -s backend\tests -t backen
 **打字和录音分开算**：有录音轮才有「发音 / 流利度」，有打字轮才有「文字表达」；纯打字 3 维、纯录音 4 维、混合 5 维。
 综合分**按作答模式加权**（纯录音 20/20/30/30、纯打字 35/35/30、混合 15/15/20/25/25），所以 `total_score` 只在同模式内可比；
 跨模式看 `comparable_band`（只用「语言复杂度 + 语用得体性」两个共享维度），报告与历史都会给出。历史成长曲线用它、全部会话都画，打字会话用空心点标出。
-发音维度基于转写文本推断，
-报告中已标注「AI 估算」，不是专业声学测评。
+发音维度基于转写文本推断，**不是专业声学测评**；正常报告的注脚是「分数由模型分与可测规则分融合得出，仅供参考」，只有降级报告才写「示例报告 · 本次不计分」。
 
 模型不可用时**不再编造分数**：报告会标成「示例报告（模型不可用）· 本次不计分」，
 分数与档位留空，只列出用户真实说过的句子；`original` 字段必须能在用户转写里找到，否则这条改写不会显示。
@@ -156,5 +153,5 @@ D:\python\python.exe -m evaluation.validate --csv evaluation/demo_data.csv `
 1. 登录 → 体现有用户体系。
 2. 选「求职面试」，AI 开口问 Tell me about yourself。
 3. 对着麦克风答一段，AI 追问。
-4. 点「结束并出报告」，展示综合分、4 个维度、逐句改写。
+4. 点「结束并出报告」，展示综合分、3–5 个维度（随作答方式）、逐句改写。
 5. 收尾：流程可复用到雅思、旅行、商务谈判等场景。
