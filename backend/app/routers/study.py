@@ -151,10 +151,11 @@ def create_item(
     related = normalize_related(body.related)
     reason = str((body.related or {}).get("reason") or "").strip()
     if kind == "spelling":
-        # 拼写卡题干一律留空，原因（常直接写出正确拼写）挪到 related.reason
-        meaning_zh, reason_text = safe_spelling_hint(term, meaning_zh)
-        if reason_text:
-            related["reason"] = reason_text
+        # 拼写卡题干一律留空；原因可能来自 meaning_zh（旧客户端）或 related.reason（新客户端）
+        meaning_zh, from_hint = safe_spelling_hint(term, meaning_zh)
+        keep = from_hint or reason
+        if keep:
+            related["reason"] = keep
     elif reason:
         related["reason"] = reason
 

@@ -666,6 +666,45 @@ class SpellingCardHintTests(ApiTestCase):
         finally:
             db.close()
 
+    def test_manual_spelling_card_keeps_reason_from_related_field(self):
+        """新客户端把原因放 `related.reason`、`meaning_zh` 留空，服务端不能把原因丢掉。"""
+        _, headers = self.register()
+        r = self.client.post(
+            "/api/study/items",
+            json={
+                "kind": "spelling",
+                "term": "necessary",
+                "context": "It is neccessary to rest.",
+                "meaning_zh": "",
+                "related": {"reason": "necessary 是 c 后面接 e"},
+                "example": "It is necessary to rest.",
+            },
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["meaning_zh"], "")
+        self.assertEqual(body["related"].get("reason"), "necessary 是 c 后面接 e")
+
+    def test_generated_spelling_hint_is_blank_even_without_term(self):
+        """原因里不含 term（如「少了一个 r」）时，题干也必须为空。"""
+        from app.services.study import cards_from_fixes
+
+        cards = cards_from_fixes(
+            [
+                {
+                    "error_type": "spelling",
+                    "word": "letter",
+                    "original": "Send me a leter.",
+                    "better": "Send me a letter.",
+                    "reason": "少了一个 r",
+                    "related": {},
+                }
+            ]
+        )
+        self.assertEqual(cards[0]["meaning_zh"], "")
+        self.assertEqual(cards[0]["related"].get("reason"), "少了一个 r")
+
 
 class BandTests(unittest.TestCase):
     def test_band_score_roundtrip_monotonic(self):
