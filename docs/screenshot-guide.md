@@ -9,7 +9,7 @@
 
 | 需要 | 说明 |
 | --- | --- |
-| Chrome | `C:\Users\lingxing\AppData\Local\Google\Chrome\Application\chrome.exe`（Edge 同理，换 `-FilePath` 即可） |
+| Chrome | `$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe`（Edge 同理，换 `-FilePath` 即可） |
 | Node | 便携版 `tools\node\node.exe`（不要装到系统 PATH） |
 | dev server | `127.0.0.1:5173`（`start-all.bat` 或 `npm run dev`） |
 | 后端 | `127.0.0.1:8000`，**必须是当前 HEAD 起的进程**，否则新接口 404，截出来是旧行为 |
@@ -20,7 +20,7 @@
 启动命令（PowerShell）：
 
 ```powershell
-$chrome = "C:\Users\lingxing\AppData\Local\Google\Chrome\Application\chrome.exe"
+$chrome = "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
 Start-Process -FilePath $chrome -ArgumentList @(
   '--headless=new','--no-sandbox','--disable-gpu',
   '--no-crashpad','--disable-breakpad','--disable-crash-reporter',
