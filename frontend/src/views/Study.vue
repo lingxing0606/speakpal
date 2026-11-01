@@ -82,6 +82,8 @@ const relatedRows = computed(() => {
 // related.blank/answer 是服务端算好的挖空和答案
 const grammarBlank = computed(() => String(current.value?.related?.blank || ''))
 const grammarAnswerHint = computed(() => String(current.value?.related?.answer || ''))
+// 拼写卡的纠错原因放在 related.reason，判完之后才显示，不能出现在题干上
+const spellingReason = computed(() => String(current.value?.related?.reason || ''))
 
 function cardLabel(item) {
   if (!item) return ''
@@ -526,7 +528,7 @@ async function addSpoken() {
         </div>
 
         <p v-if="grammarTip" class="mt-3 text-xs leading-5 text-ink-soft">{{ grammarTip }}</p>
-        <p class="mt-4 text-center text-[11px] text-ink-mute">做题在「复习」里：给错句改对或补上空缺，由服务端判档。</p>
+        <p class="mt-4 text-center text-[11px] text-ink-mute">去「复习」里做题。</p>
       </div>
 
       <!-- 口语 -->
@@ -628,6 +630,7 @@ async function addSpoken() {
                   <span class="ml-1 text-ink-soft">{{ r.items.join('、') }}</span>
                 </div>
               </div>
+              <p v-if="spellingReason" class="mt-2 text-xs leading-5 text-ink-mute">为什么：{{ spellingReason }}</p>
             </div>
           </div>
 

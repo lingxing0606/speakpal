@@ -277,22 +277,9 @@ function logout() {
         </div>
 
         <div v-else class="sp-card mt-6">
-          <EmptyState icon="search" title="场景没加载出来" text="可能是后端没启动或网络断了。确认后端窗口显示 Uvicorn running，再刷新一次。">
+          <EmptyState icon="search" title="场景没加载出来" text="可能是网络断了，点「刷新」再试一次。">
             <button class="sp-btn-primary" @click="$router.go(0)">刷新</button>
           </EmptyState>
-        </div>
-      </section>
-
-      <!-- 怎么练 -->
-      <section class="mt-14 grid gap-4 sm:grid-cols-3">
-        <div v-for="(step, i) in [
-          { n: '01', t: '对话', d: '选场景开口说，卡住了可以打字或看三种说法。' },
-          { n: '02', t: '复盘', d: '报告给分项评分、逐句改写，还能回放自己的录音。' },
-          { n: '03', t: '巩固', d: '错句自动进学习卡，按间隔重复每天复习。' },
-        ]" :key="step.n" class="sp-card-soft p-5" :style="{ '--i': i }">
-          <div class="sp-num text-sm font-semibold text-brand-500">{{ step.n }}</div>
-          <div class="mt-2 font-semibold text-ink">{{ step.t }}</div>
-          <p class="mt-1 text-xs leading-5 text-ink-soft">{{ step.d }}</p>
         </div>
       </section>
     </main>

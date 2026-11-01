@@ -294,13 +294,18 @@ async function addToStudy(fix, i) {
   addError.value = { ...addError.value, [i]: '' }
   try {
     const kind = fix.error_type === 'spelling' ? 'spelling' : 'phrase'
+    const reason = fix.reason || ''
+    // 拼写卡的题干不能出现纠错原因（原因常直接写出正确拼写），原因放到 related.reason，
+    // 等判完之后在卡片反馈里显示
+    const related = { ...(fix.related || {}) }
+    if (kind === 'spelling' && reason) related.reason = reason
     await api.post('/study/items', {
       kind,
       term: fix.word || fix.better || fix.original,
       context: fix.original,
-      meaning_zh: fix.reason || '',
+      meaning_zh: kind === 'spelling' ? '' : reason,
       example: fix.better || '',
-      related: fix.related || {},
+      related,
       source_session_id: Number(route.params.id) || null,
     })
     addedMap.value = { ...addedMap.value, [i]: true }

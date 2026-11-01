@@ -140,7 +140,7 @@ async function testTts() {
       }
     }
     let msg = '试听失败：连不上语音合成服务，或返回的不是音频。练习里会自动用浏览器朗读。'
-    if (status === 409) msg = '试听失败：没读到你的 key，服务端也没有兜底，练习里会用浏览器朗读。'
+    if (status === 409) msg = '试听失败：没有可用的语音密钥，练习里会用浏览器朗读。'
     else if (status === 502 && kind === 'tts_key_invalid') msg = '试听失败：key 被语音服务拒绝了，检查是不是复制少了字符。练习里会先用浏览器朗读。'
     else if (status === 502 && kind === 'tts_unavailable') msg = '试听失败：Base URL 不可达或超时。检查地址和网络，练习里会先用浏览器朗读。'
     else if (status === 400) msg = '试听失败：请求被拒，检查 Base URL 是否指向 OpenAI 兼容的 /audio/speech。'
@@ -571,7 +571,7 @@ function logout() {
           </p>
           <p class="text-xs leading-5 text-ink-mute">
             当前：{{ settings.configured ? `已配置 ${settings.masked}` : '本浏览器未配置' }}
-            <span v-if="server.error">· 读取服务端状态失败：{{ server.error }}</span>
+            <span v-if="server.error">· 状态读取失败</span>
           </p>
         </div>
       </section>
