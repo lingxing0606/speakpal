@@ -753,6 +753,11 @@ System prompt 模板：
 
 - **`related.blank` / `related.answer` 是语法卡判档的关键**：`blank` 是挖空后的句子、`answer` 是要填的语法点。
   **`blank` 为空表示这张卡不挖空**（比如「删掉多余词」的卡），走整句改写判档——别把「没挖空」当 bug 排查。
+- **判档要挡住「照抄屏幕上那句话」**：语义上要真的产出改动，不能把卡片上显示的东西原样粘回来就得分。
+  归一化（小写、去标点、压缩空格、`____` 抹成空格）后，答案只要等于以下任一「显示句」→ 直接 `again` 并记一次 lapse，再谈相似度：
+  **语法卡的 `related.blank`（挖空句，如 `He ____ to school by bus.`）、语法卡的 `context`（错句，界面上带删除线）、口语卡的 `term`（书面句）**。
+  只拦错句、漏掉挖空句是**已经踩过的坑**：`blank` 抹成空格后与正确句只差一个词，会命中 `hard`，等于复制粘贴也能延长间隔。
+- **回归断言**：`backend/tests` 与 `tools/check_content.py` 都要有「照抄提示句 → `again`、改对 → `good`」，三类提示句各覆盖一次；换内容时自动报警，别靠人工复查。
 - 语法卡复习**必须传 `answer`**：填对那个点或整句正确 → `good`；只差一个词 → `hard`；其余 → `again`；不传 `answer` → **400**。
 - 口语卡 `answer` 与 `example` 做词级相似度：≥0.7 → `good`，≥0.5 → `hard`；归一化小写、中文标点、压缩空格后再比。
 - 接口与词库同构：`GET /api/study/grammar` → `{groups:[{id,name,total}], items, learned}`；`POST /api/study/grammar/add {group|ids}`；
