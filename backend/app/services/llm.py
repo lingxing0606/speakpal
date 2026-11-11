@@ -33,7 +33,35 @@ def _mock_reply(scene_id: str, turn_index: int) -> str:
 fallback_reply = _mock_reply
 
 
-def build_messages(scene: dict, difficulty: str, history: list) -> list:
+def _plan_block(plan: dict | None) -> str:
+    """Executor 的目标注入：给出还缺什么，让模型自然把话题引过去。
+
+    清单本身不给用户看，也要求模型不要说出来——用户只在页面上看到进度条。
+    """
+    plan = plan or {}
+    goals = [g for g in (plan.get("goals") or []) if isinstance(g, str) and g]
+    if not goals:
+        return ""
+    done = [g for g in (plan.get("achieved") or []) if g in goals]
+    left = [g for g in goals if g not in done]
+    block = (
+        "\nSession goals (invisible to the learner; steer the conversation toward them):\n"
+        f"- all goals: {', '.join(goals)}\n"
+        f"- already covered: {', '.join(done) or 'none'}\n"
+        f"- still missing: {', '.join(left) or 'none'}\n"
+        "When a goal is still missing after a couple of turns, ask one short question that\n"
+        "makes it natural to do it. If every goal is covered, keep the chat going with light\n"
+        "follow-ups. Never list the goals or mention that you are following a plan."
+    )
+    focus = [f for f in (plan.get("focus") or []) if isinstance(f, str) and f]
+    if focus:
+        block += "\nWording to encourage (Chinese hints, do not translate them): " + "; ".join(
+            focus[:2]
+        )
+    return block
+
+
+def build_messages(scene: dict, difficulty: str, history: list, plan: dict | None = None) -> list:
     system = (
         f"You are {scene['role']}. The user is an English learner practicing speaking.\n"
         "Ask short, natural, conversational questions. Ask only one question at a time.\n"
@@ -41,6 +69,7 @@ def build_messages(scene: dict, difficulty: str, history: list) -> list:
         "Do not correct grammar during the conversation; correction is handled later.\n"
         f"Difficulty: {difficulty}. Keep it friendly."
     )
+    system += _plan_block(plan)
     messages = [{"role": "system", "content": system}]
     for t in history[-8:]:
         messages.append(
@@ -58,6 +87,7 @@ def chat_reply(
     history: list,
     turn_index: int,
     llm: LLMConfig | None = None,
+    plan: dict | None = None,
 ) -> tuple[str, bool]:
     """多轮对话。
 
@@ -72,7 +102,7 @@ def chat_reply(
         return _mock_reply(scene["id"], turn_index), True
     check_base_url(llm.base_url)
 
-    messages = build_messages(scene, difficulty, history)
+    messages = build_messages(scene, difficulty, history, plan)
     try:
         with httpx.Client(timeout=30) as client:
             resp = client.post(
@@ -150,6 +180,7 @@ def open_chat_stream(
     difficulty: str,
     history: list,
     llm: LLMConfig | None = None,
+    plan: dict | None = None,
 ) -> ChatStream:
     """先把上游连接和状态码确认好，再交给路由去流式转发。
 
@@ -168,7 +199,7 @@ def open_chat_stream(
             headers={"Authorization": f"Bearer {llm.api_key}"},
             json={
                 "model": llm.model,
-                "messages": build_messages(scene, difficulty, history),
+                "messages": build_messages(scene, difficulty, history, plan),
                 "temperature": 0.7,
                 "stream": True,
             },

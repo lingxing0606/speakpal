@@ -16,12 +16,14 @@ from ..schemas import (
     HistoryItem,
     ReportOut,
     SessionDetailOut,
+    SessionPlan,
     SessionTurnOut,
     TurnIn,
     TurnOut,
 )
 from ..security import get_current_user
 from ..timeutil import utc_iso
+from ..services.agent import critic, plan_session, progress, should_finish
 from ..services.llm import StreamUnavailable, chat_reply, fallback_reply, open_chat_stream
 from ..services.study import cards_from_fixes, create_cards
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
@@ -30,6 +32,7 @@ from ..services.report_view import report_out
 from ..services.rules import apply_to_report
 from ..services.scenes import get_scene
 from ..services.scoring import generate_report
+from ..services.tools import call as call_tool
 from evaluation.features import fluency_features, speech_features, tokenize
 
 router = APIRouter(prefix="/api", tags=["sessions"])
@@ -81,9 +84,17 @@ def create_session(
     db.add(sess)
     db.commit()
     db.refresh(sess)
+    # Planner：进对话前先定 3 个目标。模型不可用时退回场景清单，绝不让建会话失败。
+    weakness = call_tool("recent_weakness", db=db, user_id=user.id) or []
+    plan = plan_session(scene, difficulty, weakness, llm)
+    sess.plan_json = json.dumps(plan, ensure_ascii=False)
     db.add(Turn(session_id=sess.id, role="ai", content=scene["opening"]))
     db.commit()
-    return CreateSessionOut(session_id=sess.id, opening_question=scene["opening"])
+    return CreateSessionOut(
+        session_id=sess.id,
+        opening_question=scene["opening"],
+        plan=SessionPlan(**plan),
+    )
 
 
 @dataclass
@@ -98,6 +109,16 @@ class _TurnCtx:
     audio_json: str
     history: list
     user_count: int
+    plan: dict
+
+
+def _plan_of(sess: PracticeSession) -> dict:
+    """会话的 plan_json → dict；老会话没有这一列时按空 plan 处理。"""
+    try:
+        data = json.loads(sess.plan_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _prepare_turn(
@@ -138,6 +159,11 @@ def _prepare_turn(
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
     history.append({"role": "user", "content": transcript})
     user_count = sum(1 for t in history if t["role"] == "user")
+    # 目标进度在每轮提交时现算：纯规则，不额外调模型
+    plan = _plan_of(sess)
+    if plan.get("goals"):
+        user_text = " ".join(t["content"] for t in history if t["role"] == "user")
+        plan = progress(sess.scene_id, plan, user_text)
     return _TurnCtx(
         session_id=sess.id,
         scene=scene,
@@ -147,6 +173,7 @@ def _prepare_turn(
         audio_json=audio_json,
         history=history,
         user_count=user_count,
+        plan=plan,
     )
 
 
@@ -169,8 +196,9 @@ def _turn_out(ctx: _TurnCtx, reply: str, degraded: bool) -> TurnOut:
         turn_index=ctx.user_count,
         ai_reply=reply,
         is_follow_up=True,
-        should_finish=ctx.user_count >= 4,
+        should_finish=should_finish(ctx.plan, ctx.user_count),
         degraded=degraded,
+        plan=SessionPlan(**ctx.plan),
     )
 
 
@@ -186,7 +214,9 @@ def add_turn(
     if isinstance(ctx, JSONResponse):
         return ctx
     try:
-        reply, degraded = chat_reply(ctx.scene, ctx.difficulty, ctx.history, ctx.user_count, llm)
+        reply, degraded = chat_reply(
+            ctx.scene, ctx.difficulty, ctx.history, ctx.user_count, llm, ctx.plan
+        )
     except UserKeyInvalid:
         db.rollback()
         return key_invalid_response()
@@ -222,7 +252,7 @@ def add_turn_stream(
     if isinstance(ctx, JSONResponse):
         return ctx
     try:
-        stream = open_chat_stream(ctx.scene, ctx.difficulty, ctx.history, llm)
+        stream = open_chat_stream(ctx.scene, ctx.difficulty, ctx.history, llm, ctx.plan)
     except UserKeyInvalid:
         return key_invalid_response()
     except UnsafeBaseURL as exc:
@@ -340,6 +370,13 @@ def finish_session(
         has_typed=typed_count > 0,
     )
     detail = data.get("scoring_detail") or {}
+    # Critic：出报告前复盘目标达成度。示例报告不计分，也就只按关键词规则算，不调模型。
+    plan = _plan_of(sess)
+    if plan.get("goals"):
+        if data.get("source") == "llm":
+            plan = critic(scene, plan, history, user_text, llm)
+        else:
+            plan = progress(sess.scene_id, plan, user_text)
     scoring_json = json.dumps(
         {
             "dimensions": detail,
@@ -367,6 +404,7 @@ def finish_session(
         fixes_json=json.dumps(data.get("sentence_fixes", []), ensure_ascii=False),
         features_json=json.dumps(features, ensure_ascii=False),
         scoring_json=scoring_json,
+        plan_json=json.dumps(plan, ensure_ascii=False),
         comment=data.get("comment", ""),
     )
     db.add(rep)
@@ -397,6 +435,13 @@ def get_session_detail(
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="会话不存在")
     scene = get_scene(sess.scene_id)
+    plan = _plan_of(sess)
+    if plan.get("goals"):
+        plan = progress(
+            sess.scene_id,
+            plan,
+            " ".join(t.content for t in sess.turns if t.role == "user"),
+        )
     return SessionDetailOut(
         id=sess.id,
         scene_id=sess.scene_id,
@@ -416,6 +461,7 @@ def get_session_detail(
         ],
         report_id=sess.report.id if sess.report else None,
         total_score=sess.report.total_score if sess.report else None,
+        plan=SessionPlan(**plan),
     )
 
 
