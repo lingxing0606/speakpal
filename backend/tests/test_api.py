@@ -38,6 +38,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app import security  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services import llm_config, outbound  # noqa: E402
+from app.services.rules import TASK_CHECKS  # noqa: E402
 from evaluation import bands  # noqa: E402
 from app.db import engine  # noqa: E402
 
@@ -205,6 +206,10 @@ class SessionTests(ApiTestCase):
         self._dns = mock.patch.object(outbound.socket, "getaddrinfo", _public_dns)
         self._dns.start()
         self.addCleanup(self._dns.stop)
+        # Planner 在建会话时就会调一次模型：统一替身掉，测试绝不碰网络
+        self._planner = mock.patch("app.services.agent.httpx.Client", _FakePlanClient)
+        self._planner.start()
+        self.addCleanup(self._planner.stop)
         _, auth = self.register()
         self.headers = {**auth, **LLM_HEADERS}
 
@@ -309,6 +314,47 @@ class SessionTests(ApiTestCase):
 
 
 import json as _json  # noqa: E402
+
+
+# ---------------------------------------------------------------- Agent 替身
+class _FakePlanClient(_FakeClient):
+    """Planner/Critic 替身：回一份合法 JSON（目标取清单前三个）。
+
+    SessionTests.setUp 统一挂它；要演别的行为（失败、非法下标、收紧达成度）
+    就在单个用例里用 _ScriptedClient 再 patch 一层。
+    """
+
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": _json.dumps(
+                        {"goals": [0, 1, 2], "focus": [], "comment": ""}, ensure_ascii=False
+                    )
+                }
+            }
+        ]
+    }
+
+
+class _ScriptedClient(_FakeClient):
+    """按给定文本回放，用来分别扮演 Planner / Critic / 评分模型。"""
+
+    @classmethod
+    def with_text(cls, text):
+        return type("Scripted", (cls,), {"payload": {"choices": [{"message": {"content": text}}]}})
+
+
+# 一份能通过 parse_llm_report 的评分结果（纯打字：语法词汇 + 任务完成度）
+_REPORT_JSON = _json.dumps(
+    {
+        "bands": {"grammar_vocab": 5.0, "task_completion": 6.0},
+        "sentence_fixes": [],
+        "comment": "还不错",
+        "note": "",
+    },
+    ensure_ascii=False,
+)
 
 
 def _sse_lines(*pieces):
@@ -457,6 +503,138 @@ class StreamTests(SessionTests):
             self._dns.start()
         self.assertEqual(r.status_code, 400)
         self.assertEqual(len(self._saved_turns(sid)), 1)
+
+
+class PlanTests(SessionTests):
+    """Planner：目标只能来自场景任务清单，模型挂了一样能开会话。"""
+
+    def _create(self, client_cls=None, scene_id="cafe_order"):
+        with mock.patch("app.services.agent.httpx.Client", client_cls or _FakePlanClient):
+            return self.client.post(
+                "/api/sessions", json={"scene_id": scene_id}, headers=self.headers
+            )
+
+    def test_plan_falls_back_when_model_unavailable(self):
+        r = self._create(client_cls=type("Failing", (_FakeClient,), {"status": 500}))
+        self.assertEqual(r.status_code, 200, r.text)
+        labels = [label for label, _ in TASK_CHECKS["cafe_order"]]
+        plan = r.json()["plan"]
+        self.assertEqual(plan["source"], "rule")
+        self.assertEqual(plan["goals"], labels[:3])
+
+    def test_plan_uses_model_goals_and_ignores_bad_indexes(self):
+        labels = [label for label, _ in TASK_CHECKS["cafe_order"]]
+        # 99 / -1 越界，字符串不是下标；只有 3 和 4 有效，第 3 个目标按清单顺序补齐
+        text = _json.dumps(
+            {"goals": [99, -1, labels[0], 3, 4], "focus": ["先说 I'd like"], "comment": ""},
+            ensure_ascii=False,
+        )
+        r = self._create(client_cls=_ScriptedClient.with_text(text))
+        plan = r.json()["plan"]
+        self.assertEqual(plan["source"], "llm")
+        self.assertEqual(plan["goals"], [labels[3], labels[4], labels[0]])
+        self.assertEqual(plan["focus"], ["先说 I'd like"])
+
+    def test_old_session_without_plan_keeps_old_finish_rule(self):
+        from app.db import SessionLocal
+        from app.models import PracticeSession
+
+        sid = self._start()
+        db = SessionLocal()
+        try:
+            db.get(PracticeSession, sid).plan_json = "{}"
+            db.commit()
+        finally:
+            db.close()
+        r = self._turn(sid)
+        self.assertEqual(r.json()["plan"]["goals"], [])
+        self.assertFalse(r.json()["should_finish"])
+        detail = self.client.get(f"/api/sessions/{sid}", headers=self.headers).json()
+        self.assertEqual(detail["plan"]["goals"], [])
+        for _ in range(3):
+            last = self._turn(sid)
+        self.assertTrue(last.json()["should_finish"], "没有目标的老会话仍按 4 轮口径")
+
+
+class PlanProgressTests(SessionTests):
+    """Executor：每轮按关键词规则更新达成度，结束时机不再写死 4 轮。"""
+
+    def _cafe(self):
+        r = self.client.post(
+            "/api/sessions", json={"scene_id": "cafe_order"}, headers=self.headers
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["session_id"]
+
+    def test_turn_reports_goal_progress(self):
+        sid = self._cafe()
+        r = self._turn(sid, "I'd like a large latte, please.")
+        self.assertEqual(r.status_code, 200, r.text)
+        labels = [label for label, _ in TASK_CHECKS["cafe_order"]]
+        plan = r.json()["plan"]
+        self.assertEqual(plan["goals"], labels[:3])
+        self.assertEqual(plan["achieved"], [labels[0], labels[1]])
+        self.assertEqual(plan["missing"], [labels[2]])
+        self.assertFalse(r.json()["should_finish"])
+
+    def test_should_finish_needs_goals_or_six_turns(self):
+        sid = self._cafe()
+        first = self._turn(sid, "I'd like a large latte.")
+        self.assertFalse(first.json()["should_finish"])
+        second = self._turn(sid, "And a croissant, please.")
+        self.assertFalse(second.json()["should_finish"], "目标刚齐也不能两轮就收尾")
+        third = self._turn(sid, "Thanks, that's all.")
+        self.assertTrue(third.json()["should_finish"], "三个目标达成且满三轮")
+        # 另一场：目标一直没达成，第 6 轮兜底结束
+        other = self._cafe()
+        for _ in range(5):
+            r = self._turn(other, "I am not sure.")
+        self.assertFalse(r.json()["should_finish"])
+        self.assertTrue(self._turn(other, "I am not sure.").json()["should_finish"], "6 轮兜底")
+
+
+class CriticTests(SessionTests):
+    """Critic：只可收紧关键词命中，模型失败也不影响出报告。"""
+
+    def _finish(self, sid, critic_json):
+        # scoring.httpx 与 agent.httpx 是同一个 httpx 模块，同时 patch 会互相覆盖，
+        # 所以评分走模型替身、复盘直接替 _request_json。
+        with mock.patch(
+            "app.services.scoring.httpx.Client", _ScriptedClient.with_text(_REPORT_JSON)
+        ), mock.patch("app.services.agent._request_json", return_value=critic_json):
+            return self.client.post(f"/api/sessions/{sid}/finish", headers=self.headers)
+
+    def test_critic_only_tightens_keyword_hits(self):
+        r = self.client.post(
+            "/api/sessions", json={"scene_id": "cafe_order"}, headers=self.headers
+        )
+        sid = r.json()["session_id"]
+        self._turn(sid, "I'd like a large latte, thanks.")
+        labels = [label for label, _ in TASK_CHECKS["cafe_order"]]
+        # Critic 认「点单饮品」，还额外声称做了「加料或餐点」（规则没命中）
+        rep = self._finish(
+            sid, {"achieved": [labels[0], labels[2]], "comment": "还差一句规格。"}
+        )
+        self.assertEqual(rep.status_code, 200, rep.text)
+        self.assertEqual(rep.json()["source"], "llm")
+        plan = rep.json()["plan"]
+        self.assertEqual(plan["review"], "llm")
+        self.assertEqual(plan["achieved"], [labels[0]], "模型说做了但规则没命中的不算")
+        self.assertEqual(plan["rule_hits"], [labels[0], labels[1]])
+        self.assertEqual(plan["missing"], [labels[1], labels[2]])
+        self.assertEqual(plan["comment"], "还差一句规格。")
+
+    def test_critic_failure_keeps_rule_progress(self):
+        r = self.client.post(
+            "/api/sessions", json={"scene_id": "cafe_order"}, headers=self.headers
+        )
+        sid = r.json()["session_id"]
+        self._turn(sid, "I'd like a large latte, thanks.")
+        labels = [label for label, _ in TASK_CHECKS["cafe_order"]]
+        plan = self._finish(sid, None).json()["plan"]
+        self.assertEqual(plan["review"], "rule")
+        self.assertEqual(plan["achieved"], [labels[0], labels[1]])
+        self.assertIn(labels[2], plan["comment"])
 
 
 from datetime import date, datetime, timedelta  # noqa: E402
