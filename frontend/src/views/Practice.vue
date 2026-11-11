@@ -203,9 +203,19 @@ const difficultyLabel = computed(() => DIFFICULTY_LABELS[session.difficulty] || 
 const elapsedText = computed(() => `${Math.floor(elapsed.value / 60)}:${String(elapsed.value % 60).padStart(2, '0')}`)
 const hasUserTurn = computed(() => session.turns.some((t) => t.role === 'user'))
 const userTurnCount = computed(() => session.turns.filter((t) => t.role === 'user').length)
+// Agent 本场计划：目标来自场景任务清单，达成由服务端每轮按关键词规则算
+const planGoals = computed(() => session.plan?.goals || [])
+const planAchieved = computed(() => session.plan?.achieved || [])
 // 常驻进度：别让人说两句就点结束，也别等到第 4 轮才知道能出报告
 const progressHint = computed(() => {
-  if (canFinish.value) return '聊得差不多了，可以出报告了'
+  if (canFinish.value) {
+    return planGoals.value.length ? '目标都达成了，可以出报告了' : '聊得差不多了，可以出报告了'
+  }
+  if (planGoals.value.length) {
+    const left = planGoals.value.length - planAchieved.value.length
+    const done = `本轮 ${planGoals.value.length} 个目标已达成 ${planAchieved.value.length} 个`
+    return left > 0 ? `${done}，再补 ${left} 个就能出报告` : done
+  }
   const left = 3 - userTurnCount.value
   if (left > 0) return `再说 ${left} 句就能出报告`
   return '可以点「结束并出报告」看评分'
@@ -260,7 +270,8 @@ async function loadSession(id) {
         id,
         { id: data.scene_id, name: data.scene_name },
         data.difficulty,
-        (data.turns || []).map((t) => ({ role: t.role, content: t.content, mode: t.input_mode }))
+        (data.turns || []).map((t) => ({ role: t.role, content: t.content, mode: t.input_mode })),
+        data.plan
       )
       attachRecordings(id)
       scrollBottom()
@@ -435,6 +446,8 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
     if (data.degraded) {
       error.value = '模型这一轮没有响应（超时、限流或服务异常），上面是预设的追问。可以继续说，或稍后再试。'
     }
+    // 目标进度以服务端为准：老会话没有 plan，就不更新
+    session.setPlan(data.plan)
     if (data.should_finish) canFinish.value = true
     speakSmart(data.ai_reply, { rate: speechRate.value })
     scrollBottom()
@@ -577,6 +590,22 @@ async function finish() {
     </div>
 
     <main v-if="!blocked" ref="chatEl" class="sp-shell-narrow flex-1 space-y-4 overflow-y-auto pb-6 pt-8">
+      <div v-if="planGoals.length" class="rounded-xl bg-white px-3.5 py-2.5 text-xs leading-5 ring-1 ring-line/80">
+        <div class="flex items-baseline justify-between">
+          <span class="font-medium text-ink">本轮 {{ planGoals.length }} 个目标</span>
+          <span class="text-ink-mute">达成 {{ planAchieved.length }}/{{ planGoals.length }}</span>
+        </div>
+        <ul class="mt-1.5 flex flex-wrap gap-1.5">
+          <li
+            v-for="g in planGoals"
+            :key="g"
+            class="sp-chip-line"
+            :class="planAchieved.includes(g) ? 'text-brand-700' : 'text-ink-mute'"
+          >
+            {{ planAchieved.includes(g) ? '✓' : '○' }} {{ g }}
+          </li>
+        </ul>
+      </div>
       <div
         v-for="(t, i) in session.turns"
         :key="i"

@@ -106,13 +106,15 @@ async function begin(scene) {
     // 不传 difficulty：服务端会用「设置 → 练习偏好」里的值
     const { data } = await api.post('/sessions', { scene_id: scene.id })
     let diff = usedDifficulty.value
+    let plan = data.plan || null
     try {
       const detail = await api.get(`/sessions/${data.session_id}`)
       diff = detail?.data?.difficulty || diff
+      plan = detail?.data?.plan || plan
     } catch {
       // 读不到就用本地偏好兜底
     }
-    session.start(data.session_id, scene, diff, data.opening_question)
+    session.start(data.session_id, scene, diff, data.opening_question, plan)
     router.push(`/practice/${data.session_id}`)
   } catch (e) {
     error.value = '开始失败：' + (e?.response?.data?.detail || e.message)

@@ -114,6 +114,10 @@ const showMockSettingsLink = computed(
 const hasScore = computed(() => report.value?.total_score !== null && report.value?.total_score !== undefined)
 const scoringDims = computed(() => report.value?.scoring_detail?.dimensions || {})
 const hasDetail = computed(() => Object.keys(scoringDims.value).length > 0)
+// 本轮目标达成：老报告没有 plan 字段，整块不显示
+const reportPlan = computed(() => report.value?.plan || {})
+const reportGoals = computed(() => reportPlan.value.goals || [])
+const reportAchieved = computed(() => reportPlan.value.achieved || [])
 
 function evidenceText(d) {
   const inputs = d?.inputs
@@ -256,7 +260,8 @@ async function nextPractice() {
       data.session_id,
       { id: sceneId, name: meta.value?.scene_name || '练习' },
       usedDiff,
-      data.opening_question
+      data.opening_question,
+      data.plan
     )
     router.push(`/practice/${data.session_id}`)
   } catch (e) {
@@ -520,6 +525,27 @@ function again() {
               练 ship / sheep
             </router-link>
           </div>
+        </div>
+
+        <div v-if="reportGoals.length" class="sp-card p-6">
+          <div class="flex items-baseline justify-between">
+            <div class="sp-section-title">本轮目标达成</div>
+            <span class="text-xs text-ink-mute">{{ reportAchieved.length }}/{{ reportGoals.length }}</span>
+          </div>
+          <ul class="mt-3 flex flex-wrap gap-1.5">
+            <li
+              v-for="g in reportGoals"
+              :key="g"
+              class="sp-chip-line"
+              :class="reportAchieved.includes(g) ? 'text-brand-700' : 'text-ink-mute'"
+            >
+              {{ reportAchieved.includes(g) ? '✓' : '○' }} {{ g }}
+            </li>
+          </ul>
+          <p v-if="reportPlan.comment" class="mt-2 text-xs leading-5 text-ink-soft">{{ reportPlan.comment }}</p>
+          <p v-if="reportPlan.review === 'rule'" class="mt-1 text-[11px] leading-5 text-ink-mute">
+            目标达成按关键词规则判定，模型这次没有参与复盘。
+          </p>
         </div>
 
         <div class="sp-card p-6">
