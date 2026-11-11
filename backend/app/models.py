@@ -31,6 +31,8 @@ class PracticeSession(Base):
     scene_id = Column(String(64), nullable=False)
     difficulty = Column(String(16), default="medium")
     status = Column(String(16), default="active")  # active | finished
+    # Agent 本场计划（目标 / 用词提示 / 由谁定的），见 services/agent.py
+    plan_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="sessions")
@@ -81,6 +83,8 @@ class Report(Base):
     dimensions_json = Column(Text, default="{}")
     bands_json = Column(Text, default="{}")
     scoring_json = Column(Text, default="{}")
+    # Agent 目标达成度（Critic 复盘结果），示例报告为规则兜底结果
+    plan_json = Column(Text, default="{}")
     fixes_json = Column(Text, default="[]")
     features_json = Column(Text, default="{}")
     comment = Column(Text, default="")

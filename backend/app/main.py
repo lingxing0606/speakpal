@@ -42,6 +42,7 @@ def _ensure_schema():
         "answer_mode": "VARCHAR(8)",
         "comparable_band": "REAL",
         "scoring_json": "TEXT DEFAULT '{}'",
+        "plan_json": "TEXT DEFAULT '{}'",
     }
     if "reports" in tables:
         cols = {c["name"] for c in insp.get_columns("reports")}
@@ -60,6 +61,12 @@ def _ensure_schema():
             if name not in cols:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE turns ADD COLUMN {name} {ddl}"))
+    if "sessions" in tables:
+        cols = {c["name"] for c in insp.get_columns("sessions")}
+        if "plan_json" not in cols:
+            # 旧会话没有 Agent 计划：按空 plan 处理，结束时机仍走原来的 4 轮口径
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE sessions ADD COLUMN plan_json TEXT DEFAULT '{}'"))
     if "users" in tables:
         cols = {c["name"] for c in insp.get_columns("users")}
         if "token_version" not in cols:

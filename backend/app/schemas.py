@@ -61,9 +61,27 @@ class CreateSessionIn(BaseModel):
     difficulty: str | None = None
 
 
+class SessionPlan(BaseModel):
+    """Agent 本场计划（AI 架构方案 §三.1 方案 A）。
+
+    目标只能取自场景任务清单，达成由关键词规则算（services/agent.py），
+    `source` / `review` 分别记录「谁定的目标」「谁复盘的达成度」。
+    """
+
+    goals: List[str] = []
+    focus: List[str] = []  # 用词提示（中文，注入对话 prompt，不给用户看）
+    achieved: List[str] = []
+    missing: List[str] = []
+    rule_hits: List[str] = []  # 关键词命中，用于报告里核对 Critic 有没有放宽
+    source: str = "rule"  # llm | rule
+    review: str = ""  # llm | rule；空表示还没复盘
+    comment: str = ""
+
+
 class CreateSessionOut(BaseModel):
     session_id: int
     opening_question: str
+    plan: SessionPlan = SessionPlan()
 
 
 class AudioMeta(BaseModel):
@@ -86,6 +104,8 @@ class TurnOut(BaseModel):
     should_finish: bool = False
     # 模型没回上来，这一轮用的是预设追问（前端据此提示）
     degraded: bool = False
+    # 本场目标与最新进度（老会话为空 plan）
+    plan: SessionPlan = SessionPlan()
 
 
 class SentenceFix(BaseModel):
@@ -142,6 +162,8 @@ class ReportOut(BaseModel):
     comment: str = ""
     features: Dict[str, Any] = {}
     scoring_detail: Dict[str, Any] = {}
+    # 本轮目标达成（老报告为空 plan，报告页据此隐藏这一块）
+    plan: SessionPlan = SessionPlan()
     note: str = "分数由 AI 估算，仅供参考。"
 
 
@@ -184,6 +206,8 @@ class SessionDetailOut(BaseModel):
     turns: List[SessionTurnOut] = []
     report_id: int | None = None
     total_score: int | None = None
+    # 这一场的目标与当前进度（刷新 / 从历史回来时回填）
+    plan: SessionPlan = SessionPlan()
 
 
 class DrillItem(BaseModel):

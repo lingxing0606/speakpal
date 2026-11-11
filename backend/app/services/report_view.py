@@ -37,5 +37,6 @@ def report_out(rep: Report, db=None) -> ReportOut:
         comment=rep.comment or "",
         features=json.loads(rep.features_json or "{}"),
         scoring_detail=json.loads(rep.scoring_json or "{}"),
+        plan=json.loads(rep.plan_json or "{}"),
         note=MOCK_NOTE if source == "mock" else DEFAULT_NOTE,
     )
