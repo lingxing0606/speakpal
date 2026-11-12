@@ -273,6 +273,24 @@
     animation: sp-chip-land 180ms ease-out;
   }
 
+  /* 开关（40×24 轨道 + 20px 旋钮）：设置页的本地展示偏好 */
+  .sp-switch {
+    @apply relative inline-flex h-6 w-10 shrink-0 items-center rounded-full bg-sand-200 transition-colors duration-200 ease-[cubic-bezier(0.2,0.7,0.2,1)];
+  }
+
+  .sp-switch-on {
+    @apply bg-brand-600;
+  }
+
+  .sp-switch::after {
+    content: '';
+    @apply absolute left-0.5 h-5 w-5 rounded-full bg-white shadow-soft transition-transform duration-200 ease-[cubic-bezier(0.2,0.7,0.2,1)];
+  }
+
+  .sp-switch-on::after {
+    @apply translate-x-4;
+  }
+
   /* 录音按钮呼吸圈 */
   .sp-mic-pulse::after {
     content: '';

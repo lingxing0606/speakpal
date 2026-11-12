@@ -207,7 +207,16 @@ const SCOPES = [
   { id: 'cet4', label: '四级' },
   { id: 'cet6', label: '六级' },
 ]
+// 报告默认量表，与报告页切换器同一份偏好（服务端字段 report_scale）
+const SCALE_OPTIONS = [
+  { id: 'ielts', label: '雅思' },
+  { id: 'cefr', label: 'CEFR' },
+  { id: 'toefl', label: '托福' },
+  { id: 'duolingo', label: '多邻国' },
+  { id: 'cet', label: '四六级' },
+]
 const prefsTip = ref({ running: false, message: '' })
+const reportPrefError = ref('')
 
 // 偏好存服务端（换设备跟着走），localStorage 只当兜底缓存
 async function loadPrefs() {
@@ -215,8 +224,19 @@ async function loadPrefs() {
     const { data } = await api.get('/me/settings')
     if (data?.practice_difficulty) settings.setPrefDifficulty(data.practice_difficulty)
     if (data?.word_scope) settings.setWordScope(data.word_scope)
+    if (data?.report_scale) settings.setReportScale(data.report_scale)
   } catch {
     // 接口不可用就用本地缓存
+  }
+}
+
+async function pickReportScale(id) {
+  settings.setReportScale(id)
+  reportPrefError.value = ''
+  try {
+    await api.patch('/me/settings', { report_scale: id })
+  } catch (e) {
+    reportPrefError.value = '保存失败：' + (e?.response?.data?.detail || e.message)
   }
 }
 
@@ -504,6 +524,37 @@ function logout() {
               {{ s.label }}
             </button>
           </div>
+        </div>
+
+        <div class="mt-6 border-t border-line pt-5">
+          <div class="text-xs font-medium text-ink-mute">报告</div>
+          <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <span class="text-[11px] leading-5 text-ink-mute">默认量表</span>
+            <div class="flex items-center gap-1">
+              <select
+                class="sp-select"
+                aria-label="默认量表"
+                :value="settings.reportScale"
+                @change="pickReportScale($event.target.value)"
+              >
+                <option v-for="s in SCALE_OPTIONS" :key="s.id" :value="s.id">{{ s.label }}</option>
+              </select>
+              <button class="sp-btn-ghost !px-2 !py-1 text-[11px]" @click="pickReportScale('ielts')">恢复默认</button>
+            </div>
+          </div>
+          <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <span class="text-[11px] leading-5 text-ink-mute">四六级只显示通过水平</span>
+            <button
+              class="sp-switch"
+              :class="settings.cetPassOnly ? 'sp-switch-on' : ''"
+              role="switch"
+              :aria-checked="settings.cetPassOnly"
+              aria-label="四六级只显示通过水平"
+              @click="settings.setCetPassOnly(!settings.cetPassOnly)"
+            ></button>
+          </div>
+          <p v-if="reportPrefError" class="mt-2 text-[11px] leading-5 text-danger">{{ reportPrefError }}</p>
+          <p class="mt-2 text-[11px] leading-5 text-ink-mute">报告页也能临时切换；换设备登录后以账号里的默认值为准。</p>
         </div>
 
         <p class="mt-3 text-xs leading-5 text-ink-mute">
