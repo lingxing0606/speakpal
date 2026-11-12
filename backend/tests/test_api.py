@@ -776,6 +776,42 @@ class HintTests(SessionTests):
         self.assertEqual(body["source"], "frames")
         self.assertEqual(_HintClient.calls, 0, "熔断期内不再打上游")
 
+    def test_nonce_bypasses_cache_and_regenerates(self):
+        sid = self._start()
+        self._turn(sid, "I am a student, nonce case.")
+        first = self._hint(sid).json()
+        self.assertFalse(first["cached"])
+        self.assertEqual(_HintClient.calls, 1)
+        with mock.patch("app.services.hints.httpx.Client", _HintClient):
+            again = self.client.post(
+                f"/api/sessions/{sid}/hint",
+                json={"nonce": "abc123"},
+                headers=self.headers,
+            ).json()
+        self.assertFalse(again["cached"], "带 nonce 的换一批必须重新生成")
+        self.assertEqual(_HintClient.calls, 2)
+        # 不带 nonce 仍然命中最初那份缓存
+        third = self._hint(sid).json()
+        self.assertTrue(third["cached"])
+        self.assertEqual(_HintClient.calls, 2)
+
+    def test_cache_key_unchanged_without_nonce(self):
+        base = hints_service.cache_key(
+            "cafe_order", "medium", ["点单饮品"], "Hi there?", "I want coffee."
+        )
+        self.assertEqual(
+            base,
+            hints_service.cache_key(
+                "cafe_order", "medium", ["点单饮品"], "Hi there?", "I want coffee.", ""
+            ),
+        )
+        self.assertNotEqual(
+            base,
+            hints_service.cache_key(
+                "cafe_order", "medium", ["点单饮品"], "Hi there?", "I want coffee.", "n1"
+            ),
+        )
+
     def test_other_users_session_hint_hidden(self):
         sid = self._start()
         _, other = self.register()

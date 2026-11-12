@@ -260,6 +260,12 @@ class HintItem(BaseModel):
     tag: str
 
 
+class HintsIn(BaseModel):
+    """「换一批」带 nonce：参与缓存 key 并绕过缓存命中；不传就按原口径查缓存。"""
+
+    nonce: str | None = Field(default=None, max_length=32)
+
+
 class HintsOut(BaseModel):
     """手动输入提示（任务二）：source=llm 是模型生成，frames 是场景通用句型回退。"""
 

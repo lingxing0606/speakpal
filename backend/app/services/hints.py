@@ -103,11 +103,17 @@ def _release(key: str, event: threading.Event) -> None:
 
 
 # ---------------------------------------------------------------- 缓存
-def cache_key(scene_id: str, difficulty: str, goals, question: str, last_user: str) -> str:
-    """sha256(场景|难度|目标|问句|上一句用户发言) 前 32 位；不落原文。"""
-    raw = "|".join(
-        [scene_id, difficulty or "", " / ".join(goals or []), question or "", last_user or ""]
-    )
+def cache_key(
+    scene_id: str, difficulty: str, goals, question: str, last_user: str, nonce: str = ""
+) -> str:
+    """sha256(场景|难度|目标|问句|上一句用户发言)+nonce 前 32 位；不落原文。
+
+    nonce 只在「换一批」时带：参与 key 并绕过缓存命中，不传时 key 与原来完全一致。
+    """
+    parts = [scene_id, difficulty or "", " / ".join(goals or []), question or "", last_user or ""]
+    if nonce:
+        parts.append(f"nonce:{nonce}")
+    raw = "|".join(parts)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
@@ -276,8 +282,12 @@ def generate_hints(
     history: list,
     db=None,
     llm: LLMConfig | None = None,
+    nonce: str = "",
 ) -> dict:
-    """返回 {hints, source, cached}；任何失败都落在场景句型，不抛异常。"""
+    """返回 {hints, source, cached}；任何失败都落在场景句型，不抛异常。
+
+    `nonce` 只在「换一批」时带：参与 cache_key、绕过缓存命中，强制重新生成。
+    """
     goals = [g for g in (plan or {}).get("goals") or [] if g]
     question = next(
         (str(t.get("content") or "") for t in reversed(history or []) if t.get("role") == "ai"),
@@ -296,8 +306,8 @@ def generate_hints(
         # 没有密钥就只给通用句型，连缓存也不查（口径与「哪些维度算分」一样明确）
         return fallback
 
-    key = cache_key(scene["id"], difficulty, goals, question, last_user)
-    if db is not None:
+    key = cache_key(scene["id"], difficulty, goals, question, last_user, nonce)
+    if db is not None and not nonce:
         cached = cache_get(db, key)
         if cached is not None:
             return {"hints": cached, "source": "llm", "cached": True}

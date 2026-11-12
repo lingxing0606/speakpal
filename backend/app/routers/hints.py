@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
 from ..models import PracticeSession, User
-from ..schemas import HintsOut
+from ..schemas import HintsIn, HintsOut
 from ..security import get_current_user
 from ..services.hints import generate_hints
 from ..services.llm_config import LLMConfig, get_llm_config
@@ -32,11 +32,15 @@ def _load_plan(sess: PracticeSession) -> dict:
 @router.post("/sessions/{session_id}/hint", response_model=HintsOut)
 def get_hint(
     session_id: int,
+    body: HintsIn | None = None,
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
     llm: LLMConfig = Depends(get_llm_config),
 ):
-    """练习中「这么说更顺」的提示：缓存 → 模型 → 通用句型，从不报错打断练习。"""
+    """练习中「这么说更顺」的提示：缓存 → 模型 → 通用句型，从不报错打断练习。
+
+    `nonce` 由「换一批」带：参与缓存 key 并绕过缓存命中，强制重新生成。
+    """
     sess = db.get(PracticeSession, session_id)
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -47,5 +51,13 @@ def get_hint(
         raise HTTPException(status_code=404, detail="场景不存在")
     history = [{"role": t.role, "content": t.content} for t in sess.turns]
     return HintsOut(
-        **generate_hints(scene, sess.difficulty, _load_plan(sess), history, db, llm)
+        **generate_hints(
+            scene,
+            sess.difficulty,
+            _load_plan(sess),
+            history,
+            db,
+            llm,
+            (body.nonce or "").strip() if body else "",
+        )
     )
