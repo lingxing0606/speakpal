@@ -2,6 +2,10 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 const STORAGE_KEY = 'sp_llm'
+// 报告口径偏好单独存：报告页要先用本地值渲染，再被服务端覆盖（规格 B7）
+const SCALE_KEY = 'speakpal.reportScale'
+const CET_VIEW_KEY = 'speakpal.reportCetView'
+const SCALE_IDS = ['ielts', 'cefr', 'toefl', 'duolingo', 'cet']
 
 function readSaved() {
   try {
@@ -9,6 +13,11 @@ function readSaved() {
   } catch {
     return {}
   }
+}
+
+function readScale() {
+  const saved = localStorage.getItem(SCALE_KEY)
+  return SCALE_IDS.includes(saved) ? saved : 'ielts'
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -26,6 +35,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const prefDifficulty = ref(saved.pref_difficulty || '')
   // 新词范围（gaokao/cet4/cet6）：服务端为准，本地只做兜底缓存
   const wordScope = ref(saved.word_scope || '')
+  // 报告默认量表（本地先渲染，服务端为准）与四六级展示方式（range | pass，只存本地）
+  const reportScale = ref(readScale())
+  const reportCetView = ref(localStorage.getItem(CET_VIEW_KEY) === 'pass' ? 'pass' : 'range')
+  const cetPassOnly = computed(() => reportCetView.value === 'pass')
 
   /** 本浏览器是否已配置对话模型密钥 */
   const configured = computed(() => !!apiKey.value.trim())
@@ -83,6 +96,22 @@ export const useSettingsStore = defineStore('settings', () => {
     persist()
   }
 
+  /** 默认量表：本地先存，报告页/设置页共用；服务端值为准时由调用方覆盖 */
+  function setReportScale(value) {
+    reportScale.value = SCALE_IDS.includes(value) ? value : 'ielts'
+    localStorage.setItem(SCALE_KEY, reportScale.value)
+  }
+
+  /** 四六级展示方式：range（分数段）| pass（只看通过水平），只存本地 */
+  function setReportCetView(value) {
+    reportCetView.value = value === 'pass' ? 'pass' : 'range'
+    localStorage.setItem(CET_VIEW_KEY, reportCetView.value)
+  }
+
+  function setCetPassOnly(value) {
+    setReportCetView(value ? 'pass' : 'range')
+  }
+
   function clear() {
     apiKey.value = ''
     baseUrl.value = ''
@@ -119,6 +148,12 @@ export const useSettingsStore = defineStore('settings', () => {
     setPrefDifficulty,
     wordScope,
     setWordScope,
+    reportScale,
+    setReportScale,
+    reportCetView,
+    setReportCetView,
+    cetPassOnly,
+    setCetPassOnly,
     configured,
     ttsConfigured,
     masked,
