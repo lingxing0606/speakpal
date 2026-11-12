@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 
 import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
@@ -14,6 +14,67 @@ const saving = ref(false)
 const draft = ref({ id: null, title: '', body: '' })
 const menuFor = ref(null)
 const confirming = ref(null)
+
+// 编辑卡 FLIP：从底部按钮（或点开的卡片）长到列表首位；取消时反向收回按钮
+const editorEl = ref(null)
+const newNoteBtn = ref(null)
+const editorContentShown = ref(true)
+const closing = ref(false)
+let editorStyleTimer = null
+
+function reduceMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+async function openEditor(from) {
+  editorContentShown.value = false
+  editing.value = true
+  await nextTick()
+  const el = editorEl.value
+  const target = el?.getBoundingClientRect()
+  if (!el || !target || !from?.width || !target.width || reduceMotion()) {
+    editorContentShown.value = true
+    return
+  }
+  const dx = from.left - target.left
+  const dy = from.top - target.top
+  const sx = from.width / target.width
+  const sy = from.height / target.height
+  el.style.transformOrigin = 'top left'
+  el.style.transition = 'none'
+  el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`
+  el.style.opacity = '0'
+  await nextTick()
+  requestAnimationFrame(() => {
+    // 先强制回流：否则起点与终点在同一帧计算，浏览器直接跳变、没有过渡
+    void el.offsetWidth
+    el.style.transition = 'transform 320ms cubic-bezier(0.2,0.7,0.2,1), opacity 160ms ease-out'
+    el.style.transform = 'translate(0px, 0px) scale(1, 1)'
+    el.style.opacity = '1'
+    editorContentShown.value = true
+  })
+  clearTimeout(editorStyleTimer)
+  editorStyleTimer = setTimeout(() => {
+    el.style.transition = ''
+    el.style.transform = ''
+    el.style.opacity = ''
+  }, 420)
+}
+
+// 列表退场：opacity 1→0 + 上移 8px，140ms，不做 stagger
+function fadeListOut(el, done) {
+  if (reduceMotion()) {
+    done()
+    return
+  }
+  el.animate(
+    [
+      { opacity: 1, transform: 'translateY(0px)' },
+      { opacity: 0, transform: 'translateY(-8px)' },
+    ],
+    { duration: 140, easing: 'ease-out' }
+  ).finished.then(done, done)
+}
 
 async function load() {
   loading.value = true
@@ -36,17 +97,46 @@ onMounted(load)
 
 function startNew() {
   draft.value = { id: null, title: '', body: '' }
-  editing.value = true
+  openEditor(newNoteBtn.value?.getBoundingClientRect())
 }
 
-function startEdit(note) {
+function startEdit(note, event) {
   draft.value = { id: note.id, title: note.title || '', body: note.body || '' }
-  editing.value = true
+  openEditor(event?.currentTarget?.getBoundingClientRect() || newNoteBtn.value?.getBoundingClientRect())
 }
 
-function cancel() {
+function finishCancel() {
+  closing.value = false
   editing.value = false
+  editorContentShown.value = true
   draft.value = { id: null, title: '', body: '' }
+}
+
+async function cancel() {
+  if (closing.value) return
+  const el = editorEl.value
+  const btn = newNoteBtn.value
+  if (!el || !btn || reduceMotion()) {
+    finishCancel()
+    return
+  }
+  closing.value = true
+  const a = el.getBoundingClientRect()
+  const b = btn.getBoundingClientRect()
+  const dx = b.left - a.left
+  const dy = b.top - a.top
+  const sx = b.width / a.width
+  const sy = b.height / a.height
+  await el
+    .animate(
+      [
+        { transform: 'translate(0px, 0px) scale(1, 1)', opacity: 1 },
+        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, opacity: 0 },
+      ],
+      { duration: 260, easing: 'cubic-bezier(0.2,0.7,0.2,1)', fill: 'forwards' }
+    )
+    .finished.catch(() => {})
+  finishCancel()
 }
 
 async function save() {
@@ -101,11 +191,9 @@ function when(iso) {
 
 <template>
   <div class="min-h-screen bg-canvas pb-20 sm:pb-0">
-    <AppHeader title="笔记">
-      <button class="sp-btn-primary !px-3.5 !py-2 text-[13px]" @click="startNew">新建</button>
-    </AppHeader>
+    <AppHeader title="笔记" />
 
-    <main class="sp-shell pb-16 pt-10">
+    <main class="sp-shell pb-40 pt-10">
       <div class="mb-8">
         <div class="sp-eyebrow">笔记</div>
         <h1 class="sp-title mt-2">随手记下想记住的说法</h1>
@@ -113,7 +201,8 @@ function when(iso) {
       </div>
       <p v-if="error" class="sp-alert-error mb-4">{{ error }}</p>
 
-      <div v-if="editing" class="sp-card mx-auto max-w-3xl p-6 sm:p-8">
+      <div v-if="editing" ref="editorEl" class="sp-card mx-auto max-w-3xl p-6 sm:p-8">
+        <div :class="editorContentShown ? 'opacity-100 transition-opacity duration-[180ms] delay-[120ms] ease-out' : 'opacity-0'">
         <input
           v-model="draft.title"
           class="sp-input border-0 !text-lg !font-semibold focus:ring-0"
@@ -126,26 +215,29 @@ function when(iso) {
           placeholder="写点什么…"
         ></textarea>
         <div class="mt-4 flex items-center gap-2">
-          <button class="sp-btn-primary" :disabled="saving || !draft.body.trim()" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
-          <button class="sp-btn-ghost" @click="cancel">取消</button>
+          <button class="sp-btn-primary" :disabled="saving || closing || !draft.body.trim()" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
+          <button class="sp-btn-ghost" :disabled="closing" @click="cancel">取消</button>
+        </div>
         </div>
       </div>
 
+      <Transition :css="false" @leave="fadeListOut">
+        <div v-if="!editing">
       <div v-if="loading" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="正在加载"><div v-for="i in 6" :key="i" class="sp-skeleton h-36 rounded-2xl"></div></div>
 
-      <div v-else-if="!editing && notes.length === 0" class="sp-card">
+      <div v-else-if="notes.length === 0" class="sp-card">
         <EmptyState icon="notes" title="还没有笔记" text="练习里遇到想记住的说法，随手写在这里。">
           <button class="sp-btn-primary" @click="startNew">写第一条</button>
         </EmptyState>
       </div>
 
-      <div v-else-if="!editing" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div
           v-for="(n, ni) in notes"
           :key="n.id"
           :style="{ '--i': Math.min(ni, 12) }"
           class="sp-reveal sp-hover group flex min-h-[9rem] cursor-pointer flex-col justify-between gap-4 rounded-2xl bg-white p-5 ring-1 ring-line/80"
-          @click="startEdit(n)"
+          @click="startEdit(n, $event)"
         >
           <div class="min-w-0">
             <div class="truncate font-semibold text-ink">{{ n.title || '无标题' }}</div>
@@ -162,7 +254,23 @@ function when(iso) {
           </div>
         </div>
       </div>
+        </div>
+      </Transition>
     </main>
+
+    <!-- 底部动作条：窄屏悬在 TabBar 之上，编辑态隐藏（由编辑卡内的保存/取消承接） -->
+    <div class="sticky bottom-16 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-canvas/0 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:bottom-0">
+      <div class="sp-shell flex justify-end">
+        <button
+          ref="newNoteBtn"
+          class="sp-btn-primary w-full py-3 transition duration-[120ms] ease-out sm:w-auto sm:!py-2.5"
+          :class="editing ? 'pointer-events-none translate-y-2 opacity-0' : ''"
+          @click="startNew"
+        >
+          ＋ 新建笔记
+        </button>
+      </div>
+    </div>
 
     <div v-if="confirming" class="fixed inset-0 z-40 flex items-center justify-center bg-ink/30 px-4">
       <div class="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lift">
