@@ -7,6 +7,7 @@ import { streamTurn } from '../api/stream'
 import AppHeader from '../components/AppHeader.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 import EmptyState from '../components/EmptyState.vue'
+import HintCard from '../components/HintCard.vue'
 import { useSessionStore } from '../stores/session'
 import { startAudioCapture } from '../utils/audio'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
@@ -45,7 +46,7 @@ const SPEECH_RATES = [
   { value: 1.15, label: '快' },
 ]
 
-// 句型脚手架：卡住时给三种说法，用提示不扣分
+// 句型脚手架：卡住时给三条场景句式，用提示不扣分
 const frames = ref([])
 const framesOpen = ref(false)
 const framesLoading = ref(false)
@@ -119,10 +120,15 @@ async function attachRecordings(id) {
   }
 }
 
-// 手动输入条打开后 8 秒没动键盘，就在输入框上方递三条可用说法；每次进练习页只递一次
+// ---- 动态提示卡：8 秒自动 / ? 手动 / 预取 / 换一批（规格见 docs/ui-visual.md 7.3）----
 const hintVisible = ref(false)
-const hintOffered = ref(false)
-const hintFrames = computed(() => frames.value.slice(0, 3))
+const hintOffered = ref(false) // 本轮是否已自动递过
+const hints = ref([])
+const hintSource = ref('frames')
+const hintLoading = ref(false)
+const hintRefreshLeft = ref(2) // 每轮换一批上限
+const hintDegraded = ref(false) // 本会话已降到通用句型，不再重试模型
+const hintGhostLayer = ref(null)
 let hintTimer = null
 
 function clearHintTimer() {
@@ -132,12 +138,64 @@ function clearHintTimer() {
   }
 }
 
+function framesAsHints() {
+  return frames.value.slice(0, 3).map((f) => ({ en: f.en, zh: f.zh, tag: '通用句型' }))
+}
+
+// 取提示：失败不弹错，回场景句型（与后端降级同一口径）
+async function fetchHints({ refresh = false } = {}) {
+  if (!session.sessionId || hintLoading.value) return false
+  hintLoading.value = true
+  try {
+    const body = refresh
+      ? { nonce: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}` }
+      : {}
+    const { data } = await api.post(`/sessions/${session.sessionId}/hint`, body)
+    hints.value = data?.hints || []
+    hintSource.value = data?.source === 'llm' ? 'llm' : 'frames'
+    if (hintSource.value !== 'llm') hintDegraded.value = true
+    return true
+  } catch {
+    return false
+  } finally {
+    hintLoading.value = false
+  }
+}
+
+async function useFramesFallback() {
+  await ensureFrames()
+  const list = framesAsHints()
+  if (!list.length) return false
+  hints.value = list
+  hintSource.value = 'frames'
+  return true
+}
+
+async function showHints({ force = false } = {}) {
+  if (!manualOpen.value) return
+  if (hintVisible.value && !force) return
+  if (hintDegraded.value) {
+    if (await useFramesFallback()) hintVisible.value = true
+    return
+  }
+  if (hints.value.length) {
+    hintVisible.value = true
+    return
+  }
+  if (hintLoading.value) {
+    hintVisible.value = true
+    return
+  }
+  hintVisible.value = true
+  const ok = await fetchHints()
+  if (!ok) await useFramesFallback()
+  if (!hints.value.length) hintVisible.value = false
+}
+
 async function offerHint() {
   if (hintOffered.value || !manualOpen.value || manualText.value.trim()) return
   hintOffered.value = true
-  await ensureFrames()
-  // 场景没有句型提示时不要挂一行空提示
-  if (frames.value.length && manualOpen.value && !manualText.value.trim()) hintVisible.value = true
+  await showHints()
 }
 
 function scheduleHint() {
@@ -151,18 +209,29 @@ function hideHint() {
   clearHintTimer()
 }
 
-watch([manualOpen, manualText], ([open, text]) => {
-  // 一打字就收起；关掉输入条也收起
-  if (!open || text.trim()) {
-    hideHint()
-    return
-  }
-  scheduleHint()
-})
+// ? 手动入口：自动递过、已有草稿时都能用
+function requestHint() {
+  hintOffered.value = true
+  showHints({ force: true })
+}
 
-// 点一条就把句式填进输入框，光标放末尾
-function useHintFrame(f) {
-  manualText.value = f.en
+async function refreshHints() {
+  if (hintLoading.value || hintRefreshLeft.value <= 0) return
+  hintRefreshLeft.value -= 1
+  const ok = await fetchHints({ refresh: true })
+  if (!ok) hintRefreshLeft.value += 1
+}
+
+// 预取下一轮：不显示卡片，点开即得
+function prefetchHints() {
+  if (hintDegraded.value) return
+  fetchHints()
+}
+
+// 点条目：覆盖草稿、光标置末尾、输入框闪一次；英文 ghost 从条目飞进输入框
+function pickHint(hint, event) {
+  const rowRect = event?.currentTarget?.getBoundingClientRect() || null
+  manualText.value = hint.en
   recognizedText.value = ''
   pendingAudio = null
   pendingBlob = null
@@ -173,8 +242,50 @@ function useHintFrame(f) {
     el.focus()
     const len = el.value.length
     el.setSelectionRange(len, len)
+    if (reducedMotion()) return
+    el.animate(
+      [
+        { backgroundColor: 'rgba(213, 241, 234, 0.6)' },
+        { backgroundColor: 'rgba(255, 255, 255, 0)' },
+      ],
+      { duration: 120, easing: 'ease-out' }
+    )
+    if (rowRect) flyHintGhost(hint.en, rowRect, el.getBoundingClientRect())
   })
 }
+
+function flyHintGhost(text, fromRect, toRect) {
+  const layer = hintGhostLayer.value
+  if (!layer) return
+  const el = document.createElement('span')
+  el.textContent = text
+  el.className = 'pointer-events-none absolute whitespace-nowrap text-[13px] font-medium text-ink'
+  layer.appendChild(el)
+  const rect = el.getBoundingClientRect()
+  const startX = fromRect.left + fromRect.width / 2
+  const startY = fromRect.top + fromRect.height / 2
+  el.style.left = `${startX - rect.width / 2}px`
+  el.style.top = `${startY - rect.height / 2}px`
+  const dx = toRect.left + 10 - startX
+  const dy = toRect.top + 12 - startY
+  el.animate(
+    [
+      { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.92)`, opacity: 0.85 },
+    ],
+    { duration: 260, easing: 'cubic-bezier(0.3,0.9,0.25,1)', fill: 'forwards' }
+  ).finished.then(() => el.remove(), () => el.remove())
+}
+
+watch([manualOpen, manualText], ([open, text]) => {
+  // 一打字就收起，并且本轮不再用 8 秒自动打扰；关掉输入条也收起
+  if (!open || text.trim()) {
+    if (text.trim()) hintOffered.value = true
+    hideHint()
+    return
+  }
+  scheduleHint()
+})
 
 let recognizer = null
 let capturer = null
@@ -473,6 +584,7 @@ onUnmounted(() => {
   goalTimers.forEach((t) => clearTimeout(t))
   goalTimers.length = 0
   flightLayer.value?.replaceChildren()
+  hintGhostLayer.value?.replaceChildren()
   if (recognizer) recognizer.abort?.()
 })
 
@@ -577,6 +689,7 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
   }
   sending.value = true
   error.value = ''
+  hintVisible.value = false
   const mine = { role: 'user', content: text, mode }
   session.turns.push(mine)
   // 拿响应式代理（不是原对象），之后挂录音才会刷新界面
@@ -633,6 +746,11 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
       if (added.length) animateAchieved(added)
     }
     if (data.should_finish) canFinish.value = true
+    // 新一轮：重置提示状态并静默预取，点开即得
+    hintRefreshLeft.value = 2
+    hintOffered.value = false
+    hints.value = []
+    prefetchHints()
     speakSmart(data.ai_reply, { rate: speechRate.value })
     scrollBottom()
     return true
@@ -915,13 +1033,31 @@ async function finish() {
         v-else-if="!session.turns.length"
         icon="practice"
         title="准备好就开口"
-        text="点下面的麦克风说一句英文，说不出来可以「手动输入」或看「三种说法」。"
+        text="点下面的麦克风说一句英文，说不出来可以「手动输入」或看「场景句型」。"
       />
     </main>
 
     <footer v-if="!blocked" class="sticky bottom-0 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-canvas/0 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
       <div class="sp-shell-narrow">
-      <div class="space-y-3 rounded-card bg-white/95 p-4 shadow-dock ring-1 ring-line/80 backdrop-blur sm:p-5">
+      <div class="relative space-y-3 rounded-card bg-white/95 p-4 shadow-dock ring-1 ring-line/80 backdrop-blur sm:p-5">
+        <Transition
+          enter-active-class="sp-hint-card-enter"
+          leave-active-class="sp-hint-card-leave"
+          enter-from-class="sp-hint-card-enter-from"
+          leave-to-class="sp-hint-card-leave-to"
+        >
+          <HintCard
+            v-if="hintVisible && manualOpen"
+            :hints="hints"
+            :source="hintSource"
+            :loading="hintLoading && !hints.length"
+            :busy="hintLoading && hints.length > 0"
+            :can-refresh="hintRefreshLeft > 0"
+            @pick="pickHint"
+            @refresh="refreshHints"
+            @close="hideHint"
+          />
+        </Transition>
         <p v-if="!manualOpen" class="text-center text-[11px] text-ink-mute">{{ progressHint }}</p>
 
         <p v-if="error" class="sp-alert-error">{{ error }}</p>
@@ -948,7 +1084,7 @@ async function finish() {
 
         <div v-if="framesOpen" class="rounded-xl bg-canvas p-3 ring-1 ring-line">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-ink-soft">三种说法 · 用提示不扣分</span>
+            <span class="text-xs font-medium text-ink-soft">场景句型 · 用提示不扣分</span>
             <button class="text-[11px] text-ink-mute hover:text-ink-soft" @click="framesOpen = false">收起</button>
           </div>
           <p v-if="framesLoading" class="mt-2 text-xs text-ink-mute">正在取…</p>
@@ -969,19 +1105,6 @@ async function finish() {
         </div>
 
         <div v-if="manualOpen" class="space-y-2">
-          <div class="min-h-[26px]">
-            <div v-if="hintVisible" class="flex flex-wrap items-center gap-1.5">
-              <span class="text-xs text-ink-mute">不知道怎么说？试试这些用法：</span>
-              <button
-                v-for="f in hintFrames"
-                :key="f.en"
-                class="sp-chip-line transition hover:bg-brand-50"
-                @click="useHintFrame(f)"
-              >
-                {{ f.en }}
-              </button>
-            </div>
-          </div>
           <p v-if="recognizedText" class="text-xs text-brand-700">
             这是识别到的内容，确认或改一下，按 Enter 发送。
           </p>
@@ -998,7 +1121,17 @@ async function finish() {
             <button class="sp-btn-ghost shrink-0" @click="closeManual">收起</button>
           </div>
           <div class="flex items-center justify-between">
-            <span class="text-[11px] text-ink-mute">收起不会丢掉你写的内容。</span>
+            <button
+              class="inline-flex h-6 min-w-[40px] items-center gap-1 rounded-lg px-1 text-[11px] text-ink-mute transition hover:text-brand-700"
+              aria-label="生成一条针对当前问题的提示"
+              @click="requestHint"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 18h6M10 21h4" />
+                <path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1.1 2h5c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3Z" />
+              </svg>
+              ? 提示
+            </button>
             <button v-if="manualText" class="text-[11px] text-danger hover:underline" @click="discardManual">清空草稿</button>
           </div>
         </div>
@@ -1007,7 +1140,7 @@ async function finish() {
           <div class="flex flex-col gap-1.5">
             <button ref="manualBtn" class="sp-btn-secondary" :disabled="sending" @click="openManual">手动输入</button>
             <button class="sp-btn-ghost !px-2 !py-1 text-[11px]" :disabled="sending" @click="toggleFrames">
-              三种说法
+              场景句型
             </button>
           </div>
 
@@ -1049,5 +1182,7 @@ async function finish() {
 
     <!-- chip 飞行副本的落点层：固定覆盖视口，脱离吸顶条的层级限制 -->
     <div ref="flightLayer" class="pointer-events-none fixed inset-0 z-50" aria-hidden="true"></div>
+    <!-- 提示填入时的英文 ghost 落点层 -->
+    <div ref="hintGhostLayer" class="pointer-events-none fixed inset-0 z-50" aria-hidden="true"></div>
   </div>
 </template>

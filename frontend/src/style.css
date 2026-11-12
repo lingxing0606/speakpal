@@ -291,6 +291,37 @@
     @apply translate-x-4;
   }
 
+  /* 动态提示卡：输入区上沿的浮层，不参与文档流（出现时不重排聊天） */
+  .sp-hint-card {
+    @apply absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-2xl bg-white/95 shadow-dock ring-1 ring-line/80 backdrop-blur sm:left-5 sm:right-auto sm:w-[380px];
+  }
+
+  .sp-hint-card-enter {
+    transition: transform 240ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 240ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  .sp-hint-card-leave {
+    transition: transform 180ms ease-out, opacity 180ms ease-out;
+  }
+
+  .sp-hint-card-enter-from {
+    opacity: 0;
+    transform: translateY(8px) scaleY(0.94);
+    transform-origin: bottom;
+  }
+
+  .sp-hint-card-leave-to {
+    opacity: 0;
+    transform: translateY(8px) scaleY(0.96);
+    transform-origin: bottom;
+  }
+
+  /* 提示条目：出现/换新时升入（stagger 用 --hi） */
+  .sp-hint-row-in {
+    animation: sp-hint-row-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: calc(var(--hi, 0) * 40ms);
+  }
+
   /* 录音按钮呼吸圈 */
   .sp-mic-pulse::after {
     content: '';
@@ -351,5 +382,33 @@
   }
   100% {
     transform: scale(1);
+  }
+}
+
+@keyframes sp-hint-row-in {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 减少动态：提示卡只淡入、不位移（覆盖全局 0.001ms 的压缩） */
+@media (prefers-reduced-motion: reduce) {
+  .sp-hint-card-enter,
+  .sp-hint-card-leave {
+    transition-duration: 120ms !important;
+  }
+
+  .sp-hint-card-enter-from,
+  .sp-hint-card-leave-to {
+    transform: none;
+  }
+
+  .sp-hint-row-in {
+    animation: none;
   }
 }
