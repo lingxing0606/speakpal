@@ -87,8 +87,8 @@ def weighted_total(scores, mode=None):
     if not pairs or total_w <= 0:
         # 认不出作答模式（只剩共享维度）时退回等权平均，总比不出分好
         vals = [float(v) for v in scores.values() if v is not None]
-        return int(round(sum(vals) / len(vals))) if vals else None
-    return int(round(sum(s * w for s, w in pairs) / total_w))
+        return _score_int(sum(vals) / len(vals)) if vals else None
+    return _score_int(sum(s * w for s, w in pairs) / total_w)
 
 
 def comparable_score(scores):
@@ -96,7 +96,7 @@ def comparable_score(scores):
     vals = [float(scores[d]) for d in SHARED_DIMS if scores.get(d) is not None]
     if not vals:
         return None
-    return int(round(sum(vals) / len(vals)))
+    return _score_int(sum(vals) / len(vals))
 
 
 def comparable_band(scores):
@@ -135,6 +135,15 @@ def round_band(band):
         return None
     b = min(b, BAND_MAX)
     return math.floor(round(b * 2, 6) + 0.5) / 2.0
+
+
+def _score_int(value):
+    """0–100 分取整：半值向上（floor(x+0.5)），不用 Python 的银行家舍入。
+
+    与 docs/rubric-band.md §4.2 的 to_band 同一规则：62.5→63、67.5→68；
+    原 `int(round())` 会给出 62/68 这种不一致结果。
+    """
+    return int(math.floor(float(value) + 0.5))
 
 
 def band_to_cefr(band):
@@ -186,7 +195,7 @@ def report_bands(dimension_bands):
         if b is None:
             continue
         bands[name] = b
-        scores[name] = int(round(band_to_score(b)))
+        scores[name] = _score_int(band_to_score(b))
     mode = infer_answer_mode(scores)
     total = weighted_total(scores, mode)
     band = score_to_band(total) if total is not None else None
