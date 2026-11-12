@@ -401,10 +401,9 @@ function logout() {
     </AppHeader>
 
     <main class="sp-shell pb-16 pt-10">
-      <div class="mb-8">
+      <div class="mb-6">
         <div class="sp-eyebrow">设置</div>
         <h1 class="sp-title mt-2">账号、密钥与偏好</h1>
-        <p class="sp-lede">密钥只存在你自己的浏览器里；练习数据按账号存在服务端，可以随时自己删掉。</p>
       </div>
       <div class="sp-grid items-start">
       <aside class="lg:sticky lg:top-24 lg:col-span-3">
@@ -425,7 +424,7 @@ function logout() {
         <button class="sp-btn-ghost mt-4 hidden w-full justify-start lg:inline-flex" @click="logout">退出登录</button>
       </aside>
 
-      <div class="min-w-0 space-y-5 lg:col-span-9">
+      <div class="min-w-0 space-y-5 pb-6 lg:col-span-9">
       <p v-if="onboarding" class="sp-alert-warn">
         配一下你自己的模型密钥，之后每次练习都用它调用评分模型。
         <button class="ml-2 font-medium underline" @click="router.push('/')">先跳过</button>
@@ -698,12 +697,6 @@ function logout() {
           <p v-if="accountState.error" class="text-xs text-danger">{{ accountState.error }}</p>
         </div>
       </section>
-
-
-
-      <p class="pb-4 text-center text-xs text-ink-mute">
-        密钥只在你的浏览器里；练习数据按账号存在服务端，可以随时自己删掉。
-      </p>
       </div>
       </div>
     </main>
