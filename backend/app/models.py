@@ -18,6 +18,8 @@ class User(Base):
     # 设置页的偏好：练习难度（easy|medium|hard）、新词词库范围（gaokao|cet4|cet6）
     practice_difficulty = Column(String(16), default="medium")
     word_scope = Column(String(16), default="cet4")
+    # 报告默认展示的量表（ielts/cefr/toefl/duolingo/cet），见 evaluation/scales.py
+    report_scale = Column(String(8), default="ielts")
     created_at = Column(DateTime, default=utcnow)
 
     sessions = relationship("PracticeSession", back_populates="user")

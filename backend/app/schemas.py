@@ -164,6 +164,9 @@ class ReportOut(BaseModel):
     scoring_detail: Dict[str, Any] = {}
     # 本轮目标达成（老报告为空 plan，报告页据此隐藏这一块）
     plan: SessionPlan = SessionPlan()
+    # 多量表派生视图（雅思/CEFR/托福/多邻国/四六级），见 evaluation/scales.py；
+    # 不落库：有 band 就现算，旧报告自动获得
+    scales: Dict[str, Any] = {}
     note: str = "分数由 AI 估算，仅供参考。"
 
 
@@ -296,11 +299,14 @@ class PreferencesOut(BaseModel):
 
     practice_difficulty: str = "medium"  # easy | medium | hard
     word_scope: str = "cet4"  # 新词从哪个词库取：gaokao | cet4 | cet6
+    # 报告默认量表：ielts | cefr | toefl | duolingo | cet（见 evaluation/scales.py）
+    report_scale: str = "ielts"
 
 
 class PreferencesIn(BaseModel):
     practice_difficulty: str | None = None
     word_scope: str | None = None
+    report_scale: str | None = None
 
 
 class VocabWordOut(BaseModel):

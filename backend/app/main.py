@@ -78,6 +78,8 @@ def _ensure_schema():
         user_prefs = {
             "practice_difficulty": "VARCHAR(16) DEFAULT 'medium'",
             "word_scope": "VARCHAR(16) DEFAULT 'cet4'",
+            # 报告默认量表：旧库补列后按默认值读，不需要回填
+            "report_scale": "VARCHAR(8) DEFAULT 'ielts'",
         }
         for name, ddl in user_prefs.items():
             if name not in cols:

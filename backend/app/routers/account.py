@@ -34,6 +34,7 @@ from ..services import wordbank
 from ..services.dashboard import build_dashboard
 from ..timeutil import utcnow
 from ..services.user_data import delete_user_data
+from evaluation.scales import DEFAULT_SCALE, SCALE_IDS
 
 router = APIRouter(prefix="/api/me", tags=["me"])
 
@@ -88,10 +89,12 @@ def update_my_profile(
 
 @router.get("/settings", response_model=PreferencesOut)
 def get_my_settings(user: User = Depends(get_current_user)):
-    """设置页偏好：练习难度、新词词库范围。跟着账号走，换设备也在。"""
+    """设置页偏好：练习难度、新词词库范围、报告默认量表。跟着账号走，换设备也在。"""
     return PreferencesOut(
         practice_difficulty=(user.practice_difficulty or "medium"),
         word_scope=(user.word_scope or wordbank.default_scope()),
+        # 旧账号没有这一列的值时回默认，不返回空字符串
+        report_scale=(user.report_scale or DEFAULT_SCALE),
     )
 
 
@@ -112,11 +115,19 @@ def update_my_settings(
         if scope not in wordbank.scope_ids():
             raise HTTPException(status_code=400, detail="单词范围不存在")
         user.word_scope = scope
+    if body.report_scale is not None:
+        scale = body.report_scale.strip().lower()
+        if scale not in SCALE_IDS:
+            raise HTTPException(
+                status_code=400, detail="量表只能是 ielts / cefr / toefl / duolingo / cet"
+            )
+        user.report_scale = scale
     db.commit()
     db.refresh(user)
     return PreferencesOut(
         practice_difficulty=(user.practice_difficulty or "medium"),
         word_scope=(user.word_scope or wordbank.default_scope()),
+        report_scale=(user.report_scale or DEFAULT_SCALE),
     )
 
 

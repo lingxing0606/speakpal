@@ -40,6 +40,7 @@ from app.main import app  # noqa: E402
 from app.services import llm_config, outbound  # noqa: E402
 from app.services.rules import TASK_CHECKS  # noqa: E402
 from evaluation import bands  # noqa: E402
+from evaluation.scales import scales_for_band  # noqa: E402
 from app.db import engine  # noqa: E402
 
 
@@ -635,6 +636,104 @@ class CriticTests(SessionTests):
         self.assertEqual(plan["review"], "rule")
         self.assertEqual(plan["achieved"], [labels[0], labels[1]])
         self.assertIn(labels[2], plan["comment"])
+
+
+class ReportScaleTests(SessionTests):
+    """报告出参的多量表：有 band 就派生，不落库、不新增列。"""
+
+    def _finish(self, sid):
+        with mock.patch(
+            "app.services.scoring.httpx.Client", _ScriptedClient.with_text(_REPORT_JSON)
+        ), mock.patch("app.services.agent._request_json", return_value=None):
+            return self.client.post(f"/api/sessions/{sid}/finish", headers=self.headers)
+
+    def test_report_derives_every_scale_from_band(self):
+        sid = self._start()
+        self._turn(sid)
+        rep = self._finish(sid).json()
+        self.assertEqual(rep["source"], "llm")
+        payload = rep["scales"]
+        self.assertEqual(payload["version"], "2026-11")
+        self.assertEqual(payload["primary"], "ielts")
+        items = payload["items"]
+        self.assertEqual(items["ielts"]["value"], rep["band"])
+        self.assertEqual(items["ielts"]["display"], f"{rep['band']:.1f}")
+        self.assertEqual(items["cefr"]["value"], rep["cefr"])
+        self.assertEqual(items["cet"]["tier"], "reference")
+        # 出参与纯函数同源（换算表本身在 test_scales.py 逐档覆盖）
+        self.assertEqual(payload, scales_for_band(rep["band"], rep["bands"]))
+        # 维度只派生 IELTS + CEFR
+        dims = payload["dimensions"]
+        self.assertTrue(dims)
+        for one in dims.values():
+            self.assertEqual(set(one), {"ielts", "cefr"})
+
+    def test_report_endpoint_repeats_the_same_scales(self):
+        sid = self._start()
+        self._turn(sid)
+        finished = self._finish(sid).json()
+        fetched = self.client.get(f"/api/sessions/{sid}/report", headers=self.headers).json()
+        self.assertEqual(fetched["scales"], finished["scales"])
+
+    def test_mock_report_has_no_scale_items(self):
+        sid = self._start()
+        self._turn(sid)
+        with mock.patch(
+            "app.services.scoring.httpx.Client", type("C", (_FakeClient,), {"status": 503})
+        ):
+            rep = self.client.post(f"/api/sessions/{sid}/finish", headers=self.headers).json()
+        self.assertEqual(rep["source"], "mock")
+        self.assertIsNone(rep["scales"]["items"])
+        self.assertEqual(rep["scales"]["reason"], "not_scored")
+
+    def test_old_report_with_band_only_gets_scales(self):
+        """旧报告只有 band，没有多量表列，读时也要补齐。"""
+        from app.db import SessionLocal
+        from app.models import Report, PracticeSession
+
+        sid = self._start()
+        db = SessionLocal()
+        try:
+            rep = Report(session_id=sid, total_score=74, band=6.5, cefr="B2", source="llm")
+            db.add(rep)
+            db.get(PracticeSession, sid).status = "finished"
+            db.commit()
+        finally:
+            db.close()
+        body = self.client.get(f"/api/sessions/{sid}/report", headers=self.headers).json()
+        self.assertEqual(body["band"], 6.5)
+        self.assertEqual(body["scales"]["items"]["ielts"]["value"], 6.5)
+        self.assertEqual(body["scales"]["items"]["cefr"]["value"], "B2")
+        self.assertEqual(body["scales"]["items"]["toefl"]["display"], "72–94")
+        self.assertEqual(body["scales"]["items"]["cet"]["cet4"], "500–599")
+
+
+class PreferencesTests(ApiTestCase):
+    """报告量表偏好：默认 ielts，跟账号走，非法值拒绝。"""
+
+    def test_report_scale_defaults_to_ielts_and_persists(self):
+        _, headers = self.register()
+        first = self.client.get("/api/me/settings", headers=headers).json()
+        self.assertEqual(first["report_scale"], "ielts")
+        r = self.client.patch(
+            "/api/me/settings", json={"report_scale": "toefl"}, headers=headers
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["report_scale"], "toefl")
+        again = self.client.get("/api/me/settings", headers=headers).json()
+        self.assertEqual(again["report_scale"], "toefl")
+        # 其它偏好不受影响
+        self.assertEqual(again["practice_difficulty"], "medium")
+
+    def test_report_scale_rejects_unknown_value(self):
+        _, headers = self.register()
+        # 高考没有分数，不在白名单里
+        for value in ("gaokao", "IELTS-9", ""):
+            with self.subTest(value=value):
+                r = self.client.patch(
+                    "/api/me/settings", json={"report_scale": value}, headers=headers
+                )
+                self.assertEqual(r.status_code, 400, r.text)
 
 
 from datetime import date, datetime, timedelta  # noqa: E402
