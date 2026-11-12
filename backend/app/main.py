@@ -14,6 +14,7 @@ from .routers import (
     admin,
     auth,
     exercises,
+    hints,
     reports,
     scenes,
     sessions,
@@ -141,6 +142,21 @@ def _ensure_schema():
         if "source" not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE study_items ADD COLUMN source VARCHAR(16) DEFAULT ''"))
+    if "hint_cache" not in tables:
+        # 提示缓存：只存 sha256 key 与生成结果，不存对话原文（幂等补表）
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE hint_cache ("
+                    "key TEXT NOT NULL PRIMARY KEY, "
+                    "payload TEXT NOT NULL, "
+                    "created_at DATETIME NOT NULL, "
+                    "hits INTEGER DEFAULT 0)"
+                )
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_hint_cache_created ON hint_cache (created_at)")
+            )
 
 
 _ensure_schema()
@@ -169,6 +185,7 @@ app.include_router(reports.router)
 app.include_router(account.router)
 app.include_router(system.router)
 app.include_router(exercises.router)
+app.include_router(hints.router)
 app.include_router(tts.router)
 app.include_router(study.router)
 

@@ -34,9 +34,11 @@ sys.path.insert(0, str(_BACKEND))
 sys.path.insert(0, str(_BACKEND.parent))  # evaluation 包在仓库根目录
 
 from fastapi.testclient import TestClient  # noqa: E402
+import httpx  # noqa: E402
 
 from app import security  # noqa: E402
 from app.main import app  # noqa: E402
+from app.services import hints as hints_service  # noqa: E402
 from app.services import llm_config, outbound  # noqa: E402
 from app.services.rules import TASK_CHECKS  # noqa: E402
 from evaluation import bands  # noqa: E402
@@ -357,6 +359,28 @@ _REPORT_JSON = _json.dumps(
     ensure_ascii=False,
 )
 
+# 手动输入提示：模型正常返回的两条
+_HINT_JSON = _json.dumps(
+    {
+        "hints": [
+            {"en": "I'd like a medium latte, please.", "zh": "我要一杯中杯拿铁。", "tag": "直接回答"},
+            {"en": "Could I get it with oat milk?", "zh": "可以换成燕麦奶吗？", "tag": "补一个要求"},
+        ]
+    },
+    ensure_ascii=False,
+)
+
+
+class _HintClient(_FakeClient):
+    """提示接口的模型替身：回合法 JSON，并记下被调用次数（验证缓存命中）。"""
+
+    calls = 0
+    payload = {"choices": [{"message": {"content": _HINT_JSON}}]}
+
+    def post(self, *a, **k):
+        type(self).calls += 1
+        return super().post(*a, **k)
+
 
 def _sse_lines(*pieces):
     for piece in pieces:
@@ -636,6 +660,127 @@ class CriticTests(SessionTests):
         self.assertEqual(plan["review"], "rule")
         self.assertEqual(plan["achieved"], [labels[0], labels[1]])
         self.assertIn(labels[2], plan["comment"])
+
+
+class HintTests(SessionTests):
+    """手动输入提示：缓存命中、坏 JSON、超时、无 key 都回退，且不泄露目标清单。"""
+
+    def setUp(self):
+        super().setUp()
+        hints_service.reset_state()
+        _HintClient.calls = 0
+
+    def _hint(self, sid, client_cls=None, headers=None):
+        with mock.patch("app.services.hints.httpx.Client", client_cls or _HintClient):
+            return self.client.post(
+                f"/api/sessions/{sid}/hint", headers=headers or self.headers
+            )
+
+    def test_hints_from_model_then_cache_hit(self):
+        sid = self._start()
+        self._turn(sid, "I am a student, hint cache case.")
+        first = self._hint(sid)
+        self.assertEqual(first.status_code, 200, first.text)
+        body = first.json()
+        self.assertEqual(body["source"], "llm")
+        self.assertFalse(body["cached"])
+        self.assertEqual(len(body["hints"]), 2)
+        self.assertEqual(body["hints"][0]["tag"], "直接回答")
+        self.assertEqual(_HintClient.calls, 1)
+        second = self._hint(sid).json()
+        self.assertTrue(second["cached"])
+        self.assertEqual(_HintClient.calls, 1, "命中缓存后不再打上游")
+
+    def test_bad_json_falls_back_to_frames(self):
+        sid = self._start()
+        self._turn(sid, "I am a student, bad json case.")
+        body = self._hint(sid, _ScriptedClient.with_text("not json at all")).json()
+        self.assertEqual(body["source"], "frames")
+        self.assertFalse(body["cached"])
+        self.assertEqual([h["tag"] for h in body["hints"]], ["通用句型"] * 3)
+
+    def test_timeout_falls_back_to_frames(self):
+        class TimeoutClient:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, *a, **k):
+                raise httpx.ConnectTimeout("timeout")
+
+        sid = self._start()
+        self._turn(sid, "I am a student, timeout case.")
+        body = self._hint(sid, TimeoutClient).json()
+        self.assertEqual(body["source"], "frames")
+        self.assertTrue(body["hints"])
+
+    def test_missing_key_falls_back_without_calling_model(self):
+        sid = self._start()
+        self._turn(sid, "I am a student, no key case.")
+        no_key = {k: v for k, v in self.headers.items() if k != "X-LLM-Key"}
+        body = self._hint(sid, _HintClient, no_key).json()
+        self.assertEqual(body["source"], "frames")
+        self.assertEqual(body["hints"][0]["tag"], "通用句型")
+        self.assertEqual(_HintClient.calls, 0)
+
+    def test_hints_do_not_leak_goal_labels(self):
+        sid = self._start()
+        self._turn(sid, "I am a student, goal leak case.")
+        leaking = _json.dumps(
+            {
+                "hints": [
+                    {"en": "Say something.", "zh": "请说「自我介绍」这段。", "tag": "直接回答"},
+                    {"en": "Could I get it with oat milk?", "zh": "可以换成燕麦奶吗？", "tag": "补一个要求"},
+                ]
+            },
+            ensure_ascii=False,
+        )
+        body = self._hint(sid, _ScriptedClient.with_text(leaking)).json()
+        self.assertEqual(body["source"], "llm")
+        self.assertEqual(len(body["hints"]), 1, "含目标清单原文的提示要丢掉")
+        self.assertNotIn("自我介绍", _json.dumps(body["hints"], ensure_ascii=False))
+        self.assertEqual(set(body), {"hints", "source", "cached"})
+
+    def test_all_hints_invalid_falls_back(self):
+        sid = self._start()
+        self._turn(sid, "I am a student, invalid hints case.")
+        bad = _json.dumps(
+            {
+                "hints": [
+                    {
+                        "en": "one two three four five six seven eight nine ten eleven twelve thirteen",
+                        "zh": "太长",
+                        "tag": "直接回答",
+                    },
+                    {"en": "No zh", "zh": "", "tag": ""},
+                ]
+            },
+            ensure_ascii=False,
+        )
+        body = self._hint(sid, _ScriptedClient.with_text(bad)).json()
+        self.assertEqual(body["source"], "frames")
+
+    def test_circuit_breaker_stops_calling_model(self):
+        sid = self._start()
+        self._turn(sid, "I am a student, breaker case.")
+        failing = type("Failing", (_FakeClient,), {"status": 500})
+        for _ in range(hints_service.FAIL_THRESHOLD):
+            self.assertEqual(self._hint(sid, failing).json()["source"], "frames")
+        _HintClient.calls = 0
+        body = self._hint(sid, _HintClient).json()
+        self.assertEqual(body["source"], "frames")
+        self.assertEqual(_HintClient.calls, 0, "熔断期内不再打上游")
+
+    def test_other_users_session_hint_hidden(self):
+        sid = self._start()
+        _, other = self.register()
+        r = self.client.post(f"/api/sessions/{sid}/hint", headers=other)
+        self.assertEqual(r.status_code, 404)
 
 
 class ReportScaleTests(SessionTests):

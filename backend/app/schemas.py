@@ -252,6 +252,22 @@ class SceneFramesOut(BaseModel):
     frames: List[SceneFrame] = []
 
 
+class HintItem(BaseModel):
+    """一条可以照着说的提示：英文 / 中文 / 这条在答什么（3–5 字）。"""
+
+    en: str
+    zh: str
+    tag: str
+
+
+class HintsOut(BaseModel):
+    """手动输入提示（任务二）：source=llm 是模型生成，frames 是场景通用句型回退。"""
+
+    hints: List[HintItem] = []
+    source: str = "frames"  # llm | frames
+    cached: bool = False
+
+
 class RecommendationOut(BaseModel):
     recommended_difficulty: str  # easy | medium | hard
     last_band: float | None = None
