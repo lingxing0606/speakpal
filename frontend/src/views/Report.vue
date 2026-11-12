@@ -1,5 +1,5 @@
 <script setup>
-import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue'
+import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
@@ -20,8 +20,6 @@ const report = ref(null)
 const error = ref('')
 const drillError = ref('')
 const missing = ref(false)
-const showDetail = ref(false)
-const showFeatures = ref(false)
 const meta = ref(null)
 
 const MODE_LABELS = { typed: '打字', voice: '录音', mixed: '混合' }
@@ -112,45 +110,16 @@ const showMockSettingsLink = computed(
   () => mockReason.value === 'not_configured' || mockReason.value === 'invalid_key' || !mockReason.value
 )
 const hasScore = computed(() => report.value?.total_score !== null && report.value?.total_score !== undefined)
-const scoringDims = computed(() => report.value?.scoring_detail?.dimensions || {})
-const hasDetail = computed(() => Object.keys(scoringDims.value).length > 0)
 // 本轮目标达成：老报告没有 plan 字段，整块不显示
 const reportPlan = computed(() => report.value?.plan || {})
 const reportGoals = computed(() => reportPlan.value.goals || [])
 const reportAchieved = computed(() => reportPlan.value.achieved || [])
-
-function evidenceText(d) {
-  const inputs = d?.inputs
-  if (!inputs || typeof inputs !== 'object') return ''
-  const parts = []
-  for (const [k, v] of Object.entries(inputs)) {
-    if (v === null || v === undefined || v === '') continue
-    const label = featureLabels[k] || k
-    if (Array.isArray(v)) {
-      if (v.length) parts.push(`${label}：${v.join('、')}`)
-    } else if (typeof v === 'number') {
-      parts.push(`${label}：${Number.isInteger(v) ? v : v.toFixed(2)}`)
-    } else {
-      parts.push(`${label}：${v}`)
-    }
-    if (parts.length >= 6) break
-  }
-  return parts.join(' · ')
-}
 
 const bandText = computed(() => {
   const r = report.value
   if (!r || r.band === null || r.band === undefined) return ''
   const band = typeof r.band === 'number' ? r.band.toFixed(1) : r.band
   return r.cefr ? `${r.cefr} · 雅思 ${band}` : `雅思 ${band}`
-})
-
-// 综合分怎么来的：有评分依据时说明是融合分，别再说「AI 估算」，否则和下方的融合说明互相打架
-const scoreNote = computed(() => {
-  const r = report.value
-  if (!r) return ''
-  if (hasDetail.value) return '综合分 = 模型分与可测规则分融合；有可测证据的维度同时给出规则分。'
-  return r.note || ''
 })
 
 function dimBand(name) {
@@ -178,6 +147,103 @@ const displayFeatures = computed(() => {
   return out
 })
 
+// ---- 页签：概览 / 逐句纠错 / 指标（规格 2.1–2.3）----
+const TABS = computed(() => [
+  { key: 'overview', label: '概览', count: 0 },
+  { key: 'fixes', label: '逐句纠错', count: report.value?.sentence_fixes?.length || 0 },
+  { key: 'metrics', label: '指标', count: Object.keys(displayFeatures.value).length },
+])
+const tab = ref('overview')
+// 1 = 向后（索引变大），-1 = 向前；进出场位移方向用它
+const tabDir = ref(1)
+const tabEls = []
+const railEl = ref(null)
+const railNatural = ref(0)
+const tabInd = reactive({ x: 0, w: 0, show: false })
+const tabAnimating = ref(false)
+
+function reducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function measureTab(key) {
+  const i = TABS.value.findIndex((t) => t.key === key)
+  const el = tabEls[i]
+  if (!el || !el.offsetWidth) return null
+  return { x: el.offsetLeft, w: el.offsetWidth }
+}
+
+function placeIndicator(key, withAnim) {
+  const m = measureTab(key)
+  if (!m) {
+    tabInd.show = false
+    return
+  }
+  tabAnimating.value = withAnim
+  tabInd.x = m.x
+  tabInd.w = m.w
+  tabInd.show = true
+}
+
+// 切换前若已滚过页签条，先把窗口立即滚回它的吸顶位置（无动画）
+function alignRail() {
+  const target = Math.max(0, railNatural.value - 64)
+  if (window.scrollY > target) window.scrollTo({ top: target })
+}
+
+function setTab(next) {
+  if (next === tab.value) return
+  const from = TABS.value.findIndex((t) => t.key === tab.value)
+  const to = TABS.value.findIndex((t) => t.key === next)
+  if (to < 0) return
+  tabDir.value = to > from ? 1 : -1
+  alignRail()
+  placeIndicator(next, true)
+  tab.value = next
+}
+
+function onTabKeydown(event, i) {
+  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+  event.preventDefault()
+  const delta = event.key === 'ArrowRight' ? 1 : -1
+  const next = (i + delta + TABS.value.length) % TABS.value.length
+  setTab(TABS.value[next].key)
+  nextTick(() => tabEls[next]?.focus())
+}
+
+// mode="out-in"：旧页先退（160ms），新页再进（240ms，延迟 80ms）
+function tabEnter(el, done) {
+  if (reducedMotion()) {
+    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: 'ease-out' }).finished.then(done, done)
+    return
+  }
+  el.animate(
+    [
+      { opacity: 0, transform: `translateX(${tabDir.value * 16}px)` },
+      { opacity: 1, transform: 'translateX(0)' },
+    ],
+    { duration: 240, delay: 80, easing: 'cubic-bezier(0.2,0.7,0.2,1)', fill: 'backwards' }
+  ).finished.then(done, done)
+}
+
+function tabLeave(el, done) {
+  if (reducedMotion()) {
+    el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: 'ease-out' }).finished.then(done, done)
+    return
+  }
+  el.animate(
+    [
+      { opacity: 1, transform: 'translateX(0)' },
+      { opacity: 0, transform: `translateX(${-tabDir.value * 16}px)` },
+    ],
+    { duration: 160, easing: 'ease-out' }
+  ).finished.then(done, done)
+}
+
+function onResize() {
+  placeIndicator(tab.value, false)
+}
+
 onMounted(async () => {
   try {
     const { data } = await api.get(`/sessions/${route.params.id}/report`)
@@ -191,6 +257,10 @@ onMounted(async () => {
     }
     error.value = '加载报告失败：' + (e?.response?.data?.detail || e.message)
   }
+  await nextTick()
+  if (railEl.value) railNatural.value = railEl.value.getBoundingClientRect().top + window.scrollY
+  placeIndicator(tab.value, false)
+  window.addEventListener('resize', onResize)
   try {
     const { data } = await api.get(`/sessions/${route.params.id}`)
     meta.value = data
@@ -202,7 +272,10 @@ onMounted(async () => {
   recordings.value = blobs
 })
 
-onUnmounted(() => stopRecording())
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  stopRecording()
+})
 
 // 本地录音（只在录这次练习的浏览器里有）：{ 第几句用户发言: Blob }
 const recordings = ref({})
@@ -457,7 +530,36 @@ function again() {
           这次录音和打字都有：发音、流利度只统计录音的句子，「文字表达」只统计打字的句子。
         </div>
 
-        <div class="sp-grid items-start">
+        <div ref="railEl" class="sp-tab-rail border-b border-line/60">
+          <div class="sp-shell flex h-full items-center">
+            <div class="sp-segment relative" role="tablist" aria-label="报告分页">
+              <span
+                class="pointer-events-none absolute inset-y-1 left-0 rounded-full bg-white shadow-soft ring-1 ring-line/80"
+                :class="tabAnimating ? 'transition-[transform,width] duration-[320ms] ease-[cubic-bezier(0.3,0.9,0.25,1)]' : ''"
+                :style="{ width: `${tabInd.w}px`, transform: `translateX(${tabInd.x}px)`, opacity: tabInd.show ? 1 : 0 }"
+                aria-hidden="true"
+              ></span>
+              <button
+                v-for="(t, i) in TABS"
+                :key="t.key"
+                :ref="(el) => (tabEls[i] = el)"
+                role="tab"
+                :aria-selected="tab === t.key"
+                :tabindex="tab === t.key ? 0 : -1"
+                class="sp-segment-item relative z-10"
+                @click="setTab(t.key)"
+                @keydown="onTabKeydown($event, i)"
+              >
+                {{ t.label }}
+                <span v-if="t.count" class="sp-num text-[12px] font-normal text-ink-mute">{{ t.count }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <Transition :css="false" mode="out-in" @enter="tabEnter" @leave="tabLeave">
+        <div :key="tab" class="pt-5">
+        <div v-if="tab === 'overview'" class="sp-grid items-start">
           <aside class="space-y-5 lg:sticky lg:top-24 lg:col-span-4 lg:col-start-9 lg:row-start-1">
         <div
           v-if="hasScore"
@@ -482,7 +584,6 @@ function again() {
         >
           <div class="flex items-baseline justify-between">
             <div class="font-semibold text-ink">{{ Object.keys(report.dimensions).length }} 个维度</div>
-            <div class="text-xs text-ink-mute">模型分与可测规则分融合</div>
           </div>
           <div v-for="(v, k) in report.dimensions" :key="k" class="mb-4 mt-4 last:mb-0">
             <div class="flex items-baseline justify-between text-sm">
@@ -502,35 +603,16 @@ function again() {
           <div class="sp-eyebrow">点评</div>
           <p class="mt-2 text-sm leading-7 text-ink-soft">{{ report.comment }}</p>
         </div>
-        <div class="flex flex-col gap-2.5">
-          <button class="sp-btn-primary w-full py-3" @click="nextPractice">按推荐再练一次</button>
-          <div class="grid grid-cols-2 gap-2.5">
-            <button class="sp-btn-secondary" @click="again">再来一次</button>
-            <button class="sp-btn-secondary" @click="router.push('/history')">看历史</button>
-          </div>
-        </div>
           </aside>
 
           <div class="min-w-0 space-y-5 lg:col-span-8 lg:col-start-1 lg:row-start-1">
-        <div v-if="topFixes.length" class="sp-card flex flex-wrap items-center justify-between gap-3 p-5">
-          <div class="min-w-0">
-            <div class="font-semibold text-ink">最该改的 {{ topFixes.length }} 句</div>
-            <p class="mt-0.5 text-xs leading-5 text-ink-mute">
-              跟读相似度 ≥ {{ Math.round(drills.pass_threshold * 100) }}% 算过。
-            </p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="sp-chip-brand">已通过 {{ passedCount }}/{{ topFixes.length }}</span>
-            <router-link to="/pronunciation" class="font-medium text-brand-700 underline-offset-2 hover:underline">
-              练 ship / sheep
-            </router-link>
-          </div>
-        </div>
-
         <div v-if="reportGoals.length" class="sp-card p-6">
-          <div class="flex items-baseline justify-between">
+          <div class="flex items-baseline justify-between gap-2">
             <div class="sp-section-title">本轮目标达成</div>
-            <span class="text-xs text-ink-mute">{{ reportAchieved.length }}/{{ reportGoals.length }}</span>
+            <div class="flex items-center gap-2">
+              <span v-if="reportPlan.review === 'rule'" class="sp-chip-line !py-0.5 !text-[11px]">规则判定</span>
+              <span class="text-xs text-ink-mute">{{ reportAchieved.length }}/{{ reportGoals.length }}</span>
+            </div>
           </div>
           <ul class="mt-3 flex flex-wrap gap-1.5">
             <li
@@ -543,16 +625,41 @@ function again() {
             </li>
           </ul>
           <p v-if="reportPlan.comment" class="mt-2 text-xs leading-5 text-ink-soft">{{ reportPlan.comment }}</p>
-          <p v-if="reportPlan.review === 'rule'" class="mt-1 text-[11px] leading-5 text-ink-mute">
-            目标达成按关键词规则判定，模型这次没有参与复盘。
-          </p>
+        </div>
+
+        <button
+          v-if="report.sentence_fixes.length"
+          class="sp-card flex w-full items-center justify-between gap-3 p-5 text-left transition duration-200 hover:ring-brand-200"
+          @click="setTab('fixes')"
+        >
+          <div class="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <span class="font-semibold text-ink">{{ report.sentence_fixes.length }} 句可以改</span>
+            <span v-if="topFixes.length" class="text-xs text-ink-mute">已通过 {{ passedCount }}/{{ topFixes.length }}</span>
+          </div>
+          <span class="shrink-0 text-sm font-medium text-brand-700">去看</span>
+        </button>
+
+        <div class="flex flex-col gap-2.5">
+          <button class="sp-btn-primary w-full py-3" @click="nextPractice">按推荐再练一次</button>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button class="sp-btn-secondary" @click="again">再来一次</button>
+            <button class="sp-btn-secondary" @click="router.push('/history')">看历史</button>
+          </div>
+        </div>
+          </div>
+        </div>
+
+        <div v-else-if="tab === 'fixes'" class="mx-auto w-full max-w-3xl space-y-5">
+        <div v-if="topFixes.length" class="sp-card flex flex-wrap items-center justify-between gap-3 p-5">
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <span class="sp-chip-brand">已通过 {{ passedCount }}/{{ topFixes.length }}</span>
+            <router-link to="/pronunciation" class="font-medium text-brand-700 underline-offset-2 hover:underline">
+              练 ship / sheep
+            </router-link>
+          </div>
         </div>
 
         <div class="sp-card p-6">
-          <div class="flex items-baseline justify-between">
-            <div class="sp-section-title">逐句纠错</div>
-            <span v-if="report.sentence_fixes.length" class="text-xs text-ink-mute">{{ report.sentence_fixes.length }} 句</span>
-          </div>
           <EmptyState
             v-if="!report.sentence_fixes.length"
             compact
@@ -647,71 +754,28 @@ function again() {
             </div>
           </div>
         </div>
+        </div>
 
+        <div v-else class="mx-auto w-full max-w-3xl space-y-5">
         <div v-if="Object.keys(displayFeatures).length" class="sp-card p-6">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <div class="font-semibold text-ink">{{ typedOnly ? '文字表达指标' : '流利度与表达指标' }}</div>
-              <div class="mt-0.5 text-xs text-ink-mute">词数、语速这些可测数字，想看再展开。</div>
-            </div>
-            <button class="sp-btn-ghost shrink-0 py-1.5" @click="showFeatures = !showFeatures">
-              {{ showFeatures ? '收起' : '展开' }}
-            </button>
-          </div>
-          <div v-if="showFeatures" class="mt-3.5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+          <div class="font-semibold text-ink">{{ typedOnly ? '文字表达指标' : '流利度与表达指标' }}</div>
+          <div class="mt-3.5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
             <div v-for="(v, k) in displayFeatures" :key="k" class="rounded-xl bg-canvas px-3.5 py-3 ring-1 ring-line/60">
               <div class="text-[11px] text-ink-mute">{{ featureLabels[k] }}</div>
               <div class="sp-num mt-1 text-[15px] font-semibold text-ink">{{ v }}</div>
             </div>
           </div>
         </div>
-
-        <div v-if="hasDetail" class="sp-card p-6">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <div class="font-semibold text-ink">评分依据</div>
-              <div class="mt-0.5 text-xs text-ink-mute">想核对分数怎么来的再展开，学习者只看分数和等级就行。</div>
-            </div>
-            <button class="sp-btn-ghost shrink-0 py-1.5" @click="showDetail = !showDetail">
-              {{ showDetail ? '收起' : '展开' }}
-            </button>
-          </div>
-          <div v-if="showDetail" class="mt-3">
-            <p v-if="scoreNote" class="text-xs leading-5 text-ink-soft">{{ scoreNote }}</p>
-            <p v-if="bandText" class="mt-1 text-xs leading-5 text-ink-mute">
-              band 是本模式口径（按这次是录音还是打字换算）；历史曲线用的是跨模式可比口径。
-            </p>
-            <p class="mt-1 text-xs leading-5 text-ink-soft">
-              每个维度先由模型打分，再用可测规则分（词数、语速、TTR 等）校准；「最终」才是算进综合分的那一列。
-            </p>
-            <div v-if="report.scoring_detail.note" class="mt-1 text-xs leading-5 text-ink-mute">
-              {{ report.scoring_detail.note }}
-            </div>
-            <div v-for="(d, k) in scoringDims" :key="k" class="mt-3 rounded-xl bg-canvas p-3.5 text-sm ring-1 ring-line/60">
-              <div class="flex flex-wrap items-baseline justify-between gap-1">
-                <span class="font-medium text-ink-soft">{{ dimLabels[k] || k }}</span>
-                <span class="text-[11px] text-ink-mute">
-                  模型 {{ d.model_score ?? '—' }} · 规则 {{ d.rule_score ?? '—' }} · 最终 {{ d.final_score ?? '—' }}
-                </span>
-              </div>
-              <div v-if="d.clamped" class="mt-1.5 text-xs text-warn">{{ d.clamp_reason }}</div>
-              <div class="mt-1.5 text-xs leading-5 text-ink-soft">{{ d.note }}</div>
-              <div v-if="evidenceText(d)" class="mt-1 text-[11px] leading-5 text-ink-mute">{{ evidenceText(d) }}</div>
-            </div>
-
-            <div class="mt-4 rounded-xl bg-canvas p-3.5 text-[11px] leading-5 text-ink-mute ring-1 ring-line/60">
-              <div class="mb-1 font-medium text-ink-soft">综合分怎么算</div>
-              <div>纯录音：发音 20 · 流利度 20 · 语法词汇（语言复杂度）30 · 任务完成度（语用得体性）30</div>
-              <div>纯打字：文字表达 35 · 语法词汇（语言复杂度）35 · 任务完成度（语用得体性）30</div>
-              <div>混合：发音 15 · 流利度 15 · 文字表达 20 · 语法词汇（语言复杂度）25 · 任务完成度（语用得体性）25</div>
-              <div class="mt-1">缺的维度按剩余权重归一，不按 0 分算；跨模式只比「可比 band」（语法词汇 + 任务完成度）。</div>
-            </div>
-          </div>
+        <EmptyState
+          v-else
+          compact
+          icon="chart"
+          title="这次没有可测指标"
+          text="录音或打字多聊几轮，词数、语速这些数字就会出现。"
+        />
         </div>
-
-
-          </div>
         </div>
+        </Transition>
       </div>
     </main>
   </div>
