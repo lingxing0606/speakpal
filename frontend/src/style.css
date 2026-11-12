@@ -258,6 +258,21 @@
     @apply bg-coral-600 hover:bg-coral-700;
   }
 
+  /* 练习页目标条：吸在页头下沿（页头 h-16），高度固定不随目标数变化 */
+  .sp-goal-strip {
+    @apply sticky top-16 z-10 h-12 bg-canvas/[0.92] backdrop-blur-md transition-[height,border-color] duration-200 ease-out sm:h-14;
+  }
+
+  /* 报告页页签条：与页头同为半透明纸底，滚动时内容从下方穿过 */
+  .sp-tab-rail {
+    @apply sticky top-16 z-10 h-[52px] bg-canvas/80 backdrop-blur-md;
+  }
+
+  /* chip 落地脉冲：飞行副本到达前 80ms 触发一次 */
+  .sp-chip-pop {
+    animation: sp-chip-land 180ms ease-out;
+  }
+
   /* 录音按钮呼吸圈 */
   .sp-mic-pulse::after {
     content: '';
@@ -294,5 +309,29 @@
   100% {
     transform: scale(1.6);
     opacity: 0;
+  }
+}
+
+@keyframes sp-chip-land {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes sp-goal-count {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
   }
 }

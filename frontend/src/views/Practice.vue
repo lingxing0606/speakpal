@@ -28,6 +28,9 @@ const confirmingFinish = ref(false)
 const canFinish = ref(false)
 const error = ref('')
 const chatEl = ref(null)
+// 目标条：吸顶区、飞行副本容器
+const stripEl = ref(null)
+const flightLayer = ref(null)
 const micBtn = ref(null)
 const manualBtn = ref(null)
 const manualOpen = ref(false)
@@ -221,6 +224,166 @@ const progressHint = computed(() => {
   return '可以点「结束并出报告」看评分'
 })
 
+// ---- 目标条：吸顶描边、首次展开、达成飞行（规格 1.3）----
+const stripScrolled = ref(false)
+// chip 的展示态：比服务端数据晚 340ms 翻转，等飞行副本快落地再变形
+const shapeAchieved = ref([])
+const poppingGoals = ref([])
+const countPulsing = ref(false)
+const stripInlineHeight = ref(null)
+const stripContentShown = ref(true)
+const allGoalsDone = computed(() => planGoals.value.length > 0 && planAchieved.value.length >= planGoals.value.length)
+const stripBorder = computed(() => {
+  if (allGoalsDone.value) return 'border-brand-100'
+  return stripScrolled.value ? 'border-line/70' : 'border-transparent'
+})
+
+// 副本与脉冲的定时器，离开页面时统一清
+const goalTimers = []
+
+function reducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function stripTargetHeight() {
+  return window.matchMedia('(min-width: 640px)').matches ? 56 : 48
+}
+
+function onPageScroll() {
+  stripScrolled.value = window.scrollY > 8
+}
+
+// 目标条首次出现：先在同一个 tick 里压到 0 高，下一帧再长到固定高
+function beginStripEnter() {
+  if (reducedMotion()) return
+  stripContentShown.value = false
+  stripInlineHeight.value = '0px'
+}
+
+function finishStripEnter() {
+  if (reducedMotion()) {
+    stripContentShown.value = true
+    return
+  }
+  requestAnimationFrame(() => {
+    stripInlineHeight.value = `${stripTargetHeight()}px`
+    stripContentShown.value = true
+  })
+  goalTimers.push(
+    setTimeout(() => {
+      stripInlineHeight.value = null
+    }, 260)
+  )
+}
+
+function measureChip(index) {
+  const el = stripEl.value?.querySelector(`[data-goal="${index}"]`)
+  return el ? el.getBoundingClientRect() : null
+}
+
+// 飞行起点：刚到达的 AI 气泡顶部中点；气泡在视口外时退到对话区可视底边上方 24px
+function flightSource() {
+  const nodes = document.querySelectorAll('[data-role="ai"]')
+  const bubble = nodes.length ? nodes[nodes.length - 1].getBoundingClientRect() : null
+  if (bubble && bubble.bottom > 0 && bubble.top < window.innerHeight) {
+    return { left: bubble.left + bubble.width / 2, top: bubble.top }
+  }
+  const chat = chatEl.value?.getBoundingClientRect()
+  const bottom = chat ? Math.min(chat.bottom, window.innerHeight) : window.innerHeight
+  const left = chat ? chat.left + chat.width / 2 : window.innerWidth / 2
+  return { left, top: bottom - 24 }
+}
+
+// 与目标 chip 同尺寸的副本：直线插值 + 中途右弧，420ms 落到 chip 上再淡出
+function spawnFlight(goal, from, to) {
+  const layer = flightLayer.value
+  if (!layer || !to) return
+  const width = to.width || 88
+  const height = to.height || 24
+  const el = document.createElement('span')
+  el.textContent = goal
+  el.className =
+    'pointer-events-none absolute inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-brand-50 px-2.5 text-[11px] font-medium text-brand-700 ring-1 ring-brand-100'
+  el.style.position = 'absolute'
+  el.style.left = `${from.left - width / 2}px`
+  el.style.top = `${from.top}px`
+  el.style.width = `${width}px`
+  el.style.height = `${height}px`
+  el.style.justifyContent = 'center'
+  layer.appendChild(el)
+  const dx = to.left - (from.left - width / 2)
+  const dy = to.top - from.top
+  const arc = width * 0.08
+  const flight = el.animate(
+    [
+      { transform: 'translate(0px, 0px) scale(0.96)', opacity: 0.92 },
+      { transform: `translate(${dx * 0.5 + arc}px, ${dy * 0.5}px) scale(1.04)`, offset: 0.5, opacity: 1 },
+      { transform: `translate(${dx}px, ${dy}px) scale(1)`, opacity: 1 },
+    ],
+    { duration: 420, easing: 'cubic-bezier(0.3,0.9,0.25,1)', fill: 'forwards' }
+  )
+  flight.finished.then(
+    () => {
+      const fade = el.animate([{ opacity: 1 }, { opacity: 0 }], {
+        duration: 120,
+        easing: 'ease-out',
+        fill: 'forwards',
+      })
+      fade.finished.then(
+        () => el.remove(),
+        () => el.remove()
+      )
+    },
+    () => el.remove()
+  )
+}
+
+// 达成飞行：同屏最多 3 个副本，其余只做 chip 变形；间隔 70ms
+function animateAchieved(added) {
+  const goals = planGoals.value
+  if (reducedMotion()) {
+    shapeAchieved.value = [...new Set([...shapeAchieved.value, ...added])]
+    return
+  }
+  const from = flightSource()
+  added.forEach((goal, i) => {
+    const index = goals.indexOf(goal)
+    const landAt = 420 + i * 70
+    const flipAt = Math.max(0, landAt - 80)
+    if (i < 3) {
+      const to = measureChip(index)
+      if (to) goalTimers.push(setTimeout(() => spawnFlight(goal, from, to), i * 70))
+    }
+    goalTimers.push(
+      setTimeout(() => {
+        shapeAchieved.value = [...new Set([...shapeAchieved.value, goal])]
+        poppingGoals.value = [...poppingGoals.value, goal]
+        goalTimers.push(
+          setTimeout(() => {
+            poppingGoals.value = poppingGoals.value.filter((g) => g !== goal)
+          }, 220)
+        )
+      }, flipAt)
+    )
+  })
+  goalTimers.push(
+    setTimeout(() => {
+      countPulsing.value = true
+      goalTimers.push(
+        setTimeout(() => {
+          countPulsing.value = false
+        }, 200)
+      )
+    }, 420)
+  )
+}
+
+// 带着 plan 进页面（首页开练 / 刷新回填）：目标条在第一帧就是 0 高，再由 onMounted 展开
+if (planGoals.value.length && !reducedMotion()) {
+  stripContentShown.value = false
+  stripInlineHeight.value = '0px'
+}
+
 // 进对话前先确认有密钥：不让人听完开场白、录完一句才被拒
 const blocked = ref(false)
 const blockReason = ref('')
@@ -253,6 +416,11 @@ onMounted(async () => {
     blockReason.value = ''
     return
   }
+  window.addEventListener('scroll', onPageScroll, { passive: true })
+  onPageScroll()
+  // 带着 plan 进页面（首页开练 / 刷新回填）：chip 直接就是已达成的样子
+  shapeAchieved.value = [...planAchieved.value]
+  if (planGoals.value.length) finishStripEnter()
   await loadSession(id)
 })
 
@@ -266,6 +434,7 @@ async function loadSession(id) {
         router.replace(`/report/${id}`)
         return
       }
+      if (data.plan?.goals?.length) beginStripEnter()
       session.restore(
         id,
         { id: data.scene_id, name: data.scene_name },
@@ -273,6 +442,8 @@ async function loadSession(id) {
         (data.turns || []).map((t) => ({ role: t.role, content: t.content, mode: t.input_mode })),
         data.plan
       )
+      shapeAchieved.value = [...planAchieved.value]
+      if (data.plan?.goals?.length) finishStripEnter()
       attachRecordings(id)
       scrollBottom()
       // 回填时不重播开场白，否则刷新一次就念一遍
@@ -298,12 +469,17 @@ onUnmounted(() => {
   stopRecording()
   stopTimer()
   clearHintTimer()
+  window.removeEventListener('scroll', onPageScroll)
+  goalTimers.forEach((t) => clearTimeout(t))
+  goalTimers.length = 0
+  flightLayer.value?.replaceChildren()
   if (recognizer) recognizer.abort?.()
 })
 
 function scrollBottom() {
   nextTick(() => {
-    if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight
+    // main 不再是滚动容器：整页滚动，保持最后一条气泡贴底
+    window.scrollTo({ top: document.documentElement.scrollHeight })
   })
 }
 
@@ -447,7 +623,15 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
       error.value = '模型这一轮没有响应（超时、限流或服务异常），上面是预设的追问。可以继续说，或稍后再试。'
     }
     // 目标进度以服务端为准：老会话没有 plan，就不更新
+    const hadPlan = planGoals.value.length > 0
     session.setPlan(data.plan)
+    if (!hadPlan && planGoals.value.length) {
+      // 老会话补上目标：条直接出现，不做飞行
+      shapeAchieved.value = [...planAchieved.value]
+    } else if (planGoals.value.length) {
+      const added = planAchieved.value.filter((g) => !shapeAchieved.value.includes(g))
+      if (added.length) animateAchieved(added)
+    }
     if (data.should_finish) canFinish.value = true
     speakSmart(data.ai_reply, { rate: speechRate.value })
     scrollBottom()
@@ -572,6 +756,59 @@ async function finish() {
       <router-link to="/settings" class="sp-btn-ghost hidden sm:inline-flex">设置</router-link>
     </AppHeader>
 
+    <div
+      v-if="planGoals.length"
+      ref="stripEl"
+      class="sp-goal-strip border-b"
+      :class="stripBorder"
+      :style="stripInlineHeight ? { height: stripInlineHeight } : undefined"
+    >
+      <div
+        class="sp-shell-narrow flex h-full items-center gap-3 transition-opacity duration-[120ms] ease-out"
+        :class="stripContentShown ? 'opacity-100 delay-[60ms]' : 'opacity-0'"
+      >
+        <div class="shrink-0" aria-live="polite">
+          <span class="sr-only">已达成 {{ planAchieved.length }} / 共 {{ planGoals.length }} 个目标</span>
+          <div class="flex items-baseline gap-1.5" aria-hidden="true">
+            <span class="hidden text-[11px] text-ink-mute sm:inline">本轮目标</span>
+            <span
+              class="sp-num text-[13px]"
+              :class="allGoalsDone ? 'text-brand-700' : 'text-ink'"
+              :style="countPulsing ? { animation: 'sp-goal-count 180ms ease-out' } : undefined"
+            >
+              {{ planAchieved.length }}/{{ planGoals.length }}
+            </span>
+          </div>
+        </div>
+        <div
+          class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_12px,black_calc(100%_-_12px),transparent)] [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <span
+            v-for="(g, gi) in planGoals"
+            :key="g"
+            :data-goal="gi"
+            class="inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium transition-colors duration-[160ms] ease-out"
+            :class="[
+              shapeAchieved.includes(g) ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-white text-ink-mute ring-1 ring-line',
+              poppingGoals.includes(g) ? 'sp-chip-pop' : '',
+            ]"
+          >
+            <span class="relative flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true">
+              <span
+                class="absolute h-2.5 w-2.5 rounded-full ring-1 ring-line transition-opacity duration-[120ms] ease-out"
+                :class="shapeAchieved.includes(g) ? 'opacity-0' : 'opacity-100'"
+              ></span>
+              <span
+                class="absolute text-[12px] leading-none transition-opacity duration-[120ms] ease-out"
+                :class="shapeAchieved.includes(g) ? 'opacity-100' : 'opacity-0'"
+              >✓</span>
+            </span>
+            {{ g }}
+          </span>
+        </div>
+      </div>
+    </div>
+
     <div v-if="blocked" class="sp-shell-narrow py-12">
       <div class="sp-card mx-auto max-w-lg p-7 ring-brand-100">
         <div class="font-semibold text-ink">{{ blockReason || '进对话前要先接入一个模型密钥' }}</div>
@@ -589,23 +826,7 @@ async function finish() {
       </div>
     </div>
 
-    <main v-if="!blocked" ref="chatEl" class="sp-shell-narrow flex-1 space-y-4 overflow-y-auto pb-6 pt-8">
-      <div v-if="planGoals.length" class="rounded-xl bg-white px-3.5 py-2.5 text-xs leading-5 ring-1 ring-line/80">
-        <div class="flex items-baseline justify-between">
-          <span class="font-medium text-ink">本轮 {{ planGoals.length }} 个目标</span>
-          <span class="text-ink-mute">达成 {{ planAchieved.length }}/{{ planGoals.length }}</span>
-        </div>
-        <ul class="mt-1.5 flex flex-wrap gap-1.5">
-          <li
-            v-for="g in planGoals"
-            :key="g"
-            class="sp-chip-line"
-            :class="planAchieved.includes(g) ? 'text-brand-700' : 'text-ink-mute'"
-          >
-            {{ planAchieved.includes(g) ? '✓' : '○' }} {{ g }}
-          </li>
-        </ul>
-      </div>
+    <main v-if="!blocked" ref="chatEl" class="sp-shell-narrow flex-1 space-y-4 pb-6 pt-4">
       <div
         v-for="(t, i) in session.turns"
         :key="i"
@@ -614,6 +835,7 @@ async function finish() {
       >
         <span v-if="t.role === 'ai'" class="mb-0.5 hidden shrink-0 sm:inline-flex" aria-hidden="true"><BrandLogo :size="28" /></span>
         <div
+          :data-role="t.role"
           :class="
             t.role === 'ai'
               ? 'rounded-[1.25rem] rounded-bl-md bg-white text-ink ring-1 ring-line/80'
@@ -824,5 +1046,8 @@ async function finish() {
       </div>
       </div>
     </footer>
+
+    <!-- chip 飞行副本的落点层：固定覆盖视口，脱离吸顶条的层级限制 -->
+    <div ref="flightLayer" class="pointer-events-none fixed inset-0 z-50" aria-hidden="true"></div>
   </div>
 </template>
