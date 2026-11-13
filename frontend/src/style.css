@@ -296,6 +296,31 @@
     @apply translate-x-4;
   }
 
+  /* 学词页：词形 / 选项 / 三步指示 / 拼写占位 */
+  .sp-word {
+    @apply font-semibold leading-none tracking-tight text-ink;
+    font-family: Georgia, 'Times New Roman', 'Songti SC', serif;
+    font-size: 34px;
+  }
+
+  @media (min-width: 640px) {
+    .sp-word {
+      font-size: 40px;
+    }
+  }
+
+  .sp-pick {
+    @apply flex h-12 w-full items-center gap-3 rounded-xl bg-white px-4 text-left text-sm text-ink ring-1 ring-line transition duration-150;
+  }
+
+  .sp-step-dots {
+    @apply flex items-center gap-1.5;
+  }
+
+  .sp-diff {
+    @apply inline-block h-[3px] w-6 rounded-full bg-sand-200;
+  }
+
   /* 动态提示卡：输入区上沿的浮层，不参与文档流（出现时不重排聊天） */
   .sp-hint-card {
     @apply absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-2xl bg-white/95 shadow-dock ring-1 ring-line/80 backdrop-blur sm:left-5 sm:right-auto sm:w-[380px];

@@ -117,16 +117,22 @@ function openScope(sc) {
           </span>
         </a>
 
-        <!-- 自由扩充留到第二批：本批只占位，不做导入与 AI 补卡 -->
-        <div class="sp-card-soft flex items-start justify-between gap-4 p-5" aria-disabled="true">
+        <!-- 自由扩充：粘贴导入，词库外词可走 AI 补卡 -->
+        <router-link
+          to="/study/custom"
+          class="sp-card-soft sp-hover group flex items-start justify-between gap-4 p-5"
+        >
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-[18px] font-semibold leading-7 text-ink">自由扩充</span>
               <span class="sp-chip-line">自建</span>
             </div>
-            <div class="mt-1 text-xs text-ink-mute">手动添加 · 从报告取词</div>
+            <div class="mt-1 text-xs text-ink-mute">粘贴导入 · 词库外词 AI 补卡</div>
           </div>
-        </div>
+          <span class="sp-arrow h-6 w-6 shrink-0" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </span>
+        </router-link>
       </div>
     </main>
 

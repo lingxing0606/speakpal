@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import MnemonicCard from '../components/MnemonicCard.vue'
 import TabBar from '../components/TabBar.vue'
 
 const route = useRoute()
@@ -62,12 +63,20 @@ const PULL_OPTIONS = [10, 20, 30]
 const pullCount = ref(10)
 
 const bankWords = computed(() => bankData.value?.items || [])
-const scopeSubtitle = computed(() =>
-  bankData.value ? `${bankData.value.name} · 已学 ${bankData.value.learned} / ${bankData.value.total}` : ''
-)
+const isCustom = computed(() => scopeId.value === 'custom')
+const scopeSubtitle = computed(() => {
+  if (isCustom.value) return '自由扩充'
+  return bankData.value ? `${bankData.value.name} · 已学 ${bankData.value.learned} / ${bankData.value.total}` : ''
+})
 
 async function fetchVocab(scope) {
   const wanted = String(scope || scopeId.value || '').trim().toLowerCase()
+  if (wanted === 'custom') {
+    // 自由扩充没有静态词库，新词 tab 用导入卡
+    bankData.value = null
+    bankLoading.value = false
+    return
+  }
   bankLoading.value = true
   bankTip.value = ''
   bankTipBad.value = false
@@ -90,7 +99,7 @@ async function fetchVocab(scope) {
 }
 
 async function setPullCount(n) {
-  if (pullCount.value === n) return
+  if (isCustom.value || pullCount.value === n) return
   pullCount.value = n
   await fetchVocab(scopeId.value)
 }
@@ -122,6 +131,181 @@ async function addBankWords() {
     bankBusy.value = false
   }
 }
+
+// ---- 三步学习入口：把当前批次交给学词页 ----
+const BATCH_KEY = 'speakpal.studyBatch'
+
+function startLearning(words) {
+  const list = (words || [])
+    .slice(0, 50)
+    .map((w) => ({
+      term: String(w.term || '').trim(),
+      meaning_zh: String(w.meaning_zh || '').trim(),
+      example: String(w.example || '').trim(),
+      example_zh: String(w.example_zh || '').trim(),
+      phonetic: String(w.phonetic || '').trim(),
+      pos: String(w.pos || '').trim(),
+      related: w.related && typeof w.related === 'object' ? w.related : {},
+    }))
+    .filter((w) => w.term)
+  if (!list.length) return
+  sessionStorage.setItem(
+    BATCH_KEY,
+    JSON.stringify({
+      scope: scopeId.value,
+      scopeName: isCustom.value ? '自由扩充' : bankData.value?.name || scopeId.value,
+      words: list,
+    })
+  )
+  router.push(`/study/${scopeId.value}/learn`)
+}
+
+// ---- 自由扩充：粘贴导入 ----
+const importText = ref('')
+const importRows = ref([])
+const importSummary = ref('')
+const importError = ref('')
+const importing = ref(false)
+const importBatch = ref([])
+const expandedImport = ref(new Set())
+const knownTerms = ref(new Set())
+const knownLoaded = ref(false)
+let importTimer = null
+
+function parseImportText(raw) {
+  const seen = new Set()
+  const rows = []
+  let total = 0
+  for (const chunk of String(raw || '').split(/\n+/)) {
+    let line = chunk.trim()
+    if (!line) continue
+    let term = line
+    let meaning = ''
+    const cjk = line.search(/[\u4e00-\u9fff]/)
+    if (cjk > 0) {
+      const head = line.slice(0, cjk).trim()
+      if (/^[A-Za-z][A-Za-z'’\- ]*$/.test(head)) {
+        term = head
+        meaning = line.slice(cjk).trim()
+      }
+    }
+    term = term.replace(/\s+/g, ' ').trim()
+    if (!/^[A-Za-z][A-Za-z'’\- ]*$/.test(term) || term.length > 32) continue
+    const key = term.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    total += 1
+    if (rows.length < 50) rows.push({ term, meaning_zh: meaning })
+  }
+  return { rows, total, truncated: Math.max(0, total - 50) }
+}
+
+const importParsed = computed(() => parseImportText(importText.value))
+
+async function loadKnownTerms() {
+  if (knownLoaded.value) return
+  const scopes = ['gaokao', 'cet4', 'cet6']
+  const results = await Promise.all(
+    scopes.map((scope) => api.get('/study/vocab', { params: { scope, limit: 200 } }).catch(() => null))
+  )
+  const set = new Set()
+  for (const result of results) {
+    for (const word of result?.data?.items || []) {
+      set.add(String(word.term || '').toLowerCase())
+    }
+  }
+  knownTerms.value = set
+  knownLoaded.value = true
+}
+
+function isKnownItem(item) {
+  const key = String(item?.term || '').toLowerCase()
+  if (knownTerms.value.has(key)) return true
+  if (!knownLoaded.value) {
+    const related = item?.related || {}
+    return ['synonyms', 'antonyms', 'similar'].some(
+      (k) => Array.isArray(related[k]) && related[k].length
+    )
+  }
+  return false
+}
+
+async function doImport() {
+  const parsed = importParsed.value
+  if (importing.value || !parsed.rows.length) return
+  importing.value = true
+  importError.value = ''
+  importSummary.value = ''
+  importBatch.value = []
+  const rows = parsed.rows.map((row) => ({ ...row, status: 'queued', item: null }))
+  importRows.value = rows
+
+  // 后端是整批导入，这里只做逐条排队 → 生成中的视觉状态
+  let cursor = 0
+  clearInterval(importTimer)
+  importTimer = setInterval(() => {
+    const row = importRows.value[cursor]
+    if (row && row.status === 'queued') row.status = 'generating'
+    cursor += 1
+  }, 120)
+
+  try {
+    await loadKnownTerms()
+    const text = rows.map((row) => (row.meaning_zh ? `${row.term} ${row.meaning_zh}` : row.term)).join('\n')
+    const { data } = await api.post('/study/words/import', { text, use_ai: true })
+    const items = data?.items || []
+    const byTerm = new Map(items.map((item) => [String(item.term || '').toLowerCase(), item]))
+    let missing = 0
+    let duplicate = 0
+    importRows.value = rows.map((row) => {
+      const item = byTerm.get(row.term.toLowerCase())
+      if (!item) {
+        duplicate += 1
+        return { ...row, status: 'duplicate' }
+      }
+      const known = isKnownItem(item)
+      const hasMeaning = !!String(item.meaning_zh || '').trim()
+      const hasExample = !!String(item.example || '').trim()
+      if (!known && (!hasMeaning || !hasExample)) {
+        missing += 1
+        return { ...row, status: 'missing', item }
+      }
+      return { ...row, status: known ? 'added' : 'ai', item }
+    })
+    importBatch.value = items
+    if (!items.length) {
+      importSummary.value = '这些词之前都学过'
+    } else {
+      importSummary.value = `导入 ${items.length} 个` + (missing ? `，${missing} 个缺释义` : '')
+      if (duplicate) importSummary.value += `，${duplicate} 个之前学过`
+    }
+  } catch (e) {
+    importError.value = '导入失败：' + (e?.response?.data?.detail || e.message)
+  } finally {
+    clearInterval(importTimer)
+    importTimer = null
+    importing.value = false
+  }
+}
+
+function toggleImportExpand(term) {
+  const next = new Set(expandedImport.value)
+  if (next.has(term)) next.delete(term)
+  else next.add(term)
+  expandedImport.value = next
+}
+
+watch(importText, () => {
+  if (importing.value) return
+  if (importRows.value.length || importSummary.value || importError.value || importBatch.value.length) {
+    importRows.value = []
+    importSummary.value = ''
+    importError.value = ''
+    importBatch.value = []
+    expandedImport.value = new Set()
+  }
+})
+
 
 // ---- 语法卡库：四组各 15 张，整组加入后进「复习」 ----
 const grammarLib = ref(null)
@@ -197,11 +381,15 @@ onMounted(async () => {
   window.addEventListener('scroll', onScroll, { passive: true })
   onScroll()
   await Promise.all([fetchVocab(scopeId.value), loadCounts()])
+  if (isCustom.value) await loadKnownTerms()
   if (tab.value === 'grammar') await loadGrammar()
   if (tab.value === 'spoken') await loadSpoken()
 })
 
-onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', onScroll)
+  clearInterval(importTimer)
+})
 
 watch(
   () => route.query.tab,
@@ -215,10 +403,12 @@ watch(
   () => route.params.scope,
   (v) => {
     if (v) fetchVocab(v)
+    if (String(v || '').toLowerCase() === 'custom') loadKnownTerms()
   }
 )
 
 watch(tab, (id) => {
+  if (id === 'new' && isCustom.value) loadKnownTerms()
   if (id === 'grammar' && !grammarLib.value && !grammarLoading.value) loadGrammar()
   if (id === 'spoken' && !spokenLib.value && !spokenLoading.value) loadSpoken()
 })
@@ -260,7 +450,75 @@ function switchTab(id) {
     <main class="sp-shell sp-page-in pb-16 pt-8">
       <!-- 新词 -->
       <div v-if="tab === 'new'" class="mx-auto max-w-4xl">
-        <div class="sp-card p-5">
+        <!-- 自由扩充：粘贴导入 -->
+        <div v-if="isCustom" class="sp-card p-5">
+          <div class="font-semibold text-ink">导入词表</div>
+          <textarea
+            v-model="importText"
+            rows="6"
+            class="sp-input mt-3 resize-y"
+            placeholder="一行一个词，可带中文&#10;serendipity&#10;resilient 有韧性的&#10;一次最多 50 个，单词不超过 32 个字符"
+          ></textarea>
+
+          <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-mute">
+            <span v-if="importParsed.truncated">已截断 {{ importParsed.truncated }} 个</span>
+            <span class="ml-auto">{{ importParsed.rows.length }} / 50</span>
+            <button class="sp-btn-primary !px-4 !py-2 text-xs" :disabled="importing || !importParsed.rows.length" @click="doImport">
+              {{ importing ? '导入中…' : '导入' }}
+            </button>
+          </div>
+
+          <p v-if="importError" class="sp-alert-error mt-3">{{ importError }}</p>
+
+          <ul v-if="importRows.length" class="mt-4 divide-y divide-line/60 border-t border-line/60">
+            <li v-for="row in importRows" :key="row.term" class="py-2.5">
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex min-w-0 items-start gap-2">
+                  <span v-if="row.status === 'queued'" class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-sand-200"></span>
+                  <span v-else-if="row.status === 'generating'" class="mt-1 h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600"></span>
+                  <span v-else-if="row.status === 'missing'" class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-amber-400"></span>
+                  <span v-else class="mt-1.5 h-2 w-2 shrink-0 rounded-full" :class="row.status === 'duplicate' ? 'bg-sand-200' : 'bg-brand-400'"></span>
+
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                      <span class="text-sm font-medium text-ink">{{ row.term }}</span>
+                      <span v-if="row.meaning_zh" class="text-[11px] text-ink-mute">{{ row.meaning_zh }}</span>
+                    </div>
+                    <MnemonicCard
+                      v-if="row.status === 'ai' && expandedImport.has(row.term)"
+                      :key="row.term"
+                      :term="row.item.term"
+                      :meaning-zh="row.item.meaning_zh"
+                      :related="row.item.related"
+                    />
+                  </div>
+                </div>
+
+                <div class="flex shrink-0 items-center gap-2 text-[11px]">
+                  <button
+                    v-if="row.status === 'ai'"
+                    class="sp-chip-line !py-0.5 !text-[11px]"
+                    @click="toggleImportExpand(row.term)"
+                  >AI 生成词卡</button>
+                  <span v-if="row.status === 'added' || row.status === 'ai'" class="text-ink-mute">已加入</span>
+                  <template v-else-if="row.status === 'missing'">
+                    <span class="inline-flex items-center gap-1 text-amber-700"><span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>缺释义</span>
+                    <span class="text-ink-mute">已存词</span>
+                  </template>
+                  <span v-else-if="row.status === 'duplicate'" class="text-ink-mute">之前学过</span>
+                </div>
+              </div>
+            </li>
+          </ul>
+
+          <p v-if="importSummary" class="mt-3 text-[11px] leading-5 text-ink-soft">{{ importSummary }}</p>
+          <button v-if="importBatch.length" class="sp-btn-primary mt-3 w-full" @click="startLearning(importBatch)">
+            开始学这 {{ importBatch.length }} 个
+          </button>
+        </div>
+
+        <!-- 静态词库：选一批 -->
+        <div v-else class="sp-card p-5">
           <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
             <div class="min-w-0">
               <div class="font-semibold text-ink">学新单词</div>
@@ -283,9 +541,6 @@ function switchTab(id) {
                   {{ opt }}
                 </button>
               </div>
-              <button class="sp-btn-primary !px-3 !py-1.5 text-xs" :disabled="bankBusy || !bankWords.length" @click="addBankWords">
-                {{ bankBusy ? '加入中…' : `加入这 ${bankWords.length} 个` }}
-              </button>
             </div>
           </div>
 
@@ -311,6 +566,15 @@ function switchTab(id) {
           >
             {{ bankTip }}
           </p>
+
+          <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button class="sp-btn-primary flex-1" :disabled="bankBusy || !bankWords.length" @click="startLearning(bankWords)">
+              开始学这 {{ bankWords.length }} 个
+            </button>
+            <button class="sp-btn-ghost text-[11px]" :disabled="bankBusy || !bankWords.length" @click="addBankWords">
+              {{ bankBusy ? '加入中…' : '直接加入' }}
+            </button>
+          </div>
         </div>
       </div>
 

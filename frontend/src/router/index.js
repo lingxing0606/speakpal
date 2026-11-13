@@ -12,6 +12,7 @@ import Report from '../views/Report.vue'
 import Review from '../views/Review.vue'
 import Settings from '../views/Settings.vue'
 import StudyHome from '../views/StudyHome.vue'
+import StudyLearn from '../views/StudyLearn.vue'
 import StudyScope from '../views/StudyScope.vue'
 
 const router = createRouter({
@@ -25,6 +26,7 @@ const router = createRouter({
     { path: '/history', component: History },
     { path: '/review', component: Review },
     { path: '/study', component: StudyHome },
+    { path: '/study/:scope/learn', component: StudyLearn },
     { path: '/study/:scope', component: StudyScope },
     { path: '/notes', component: Notes },
     { path: '/pronunciation', component: Pronunciation },
