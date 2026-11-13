@@ -379,6 +379,10 @@ _WORD_ASSIST_JSON = _json.dumps(
         "root": "源自 Serendip（斯里兰卡古称）",
         "association": "像在旧书里翻到一张藏宝图",
         "collocations": ["pure serendipity", "a moment of serendipity", "by serendipity"],
+        "confusable": [
+            {"term": "serendipitous", "meaning_zh": "意外发现的"},
+            {"term": "fortunate", "meaning_zh": "幸运的"},
+        ],
         "scene_example": "Meeting her was pure serendipity.",
     },
     ensure_ascii=False,
@@ -401,6 +405,23 @@ class _WordAssistClient(_FakeClient):
 
     calls = 0
     payload = {"choices": [{"message": {"content": _WORD_ASSIST_JSON}}]}
+
+    def post(self, *a, **k):
+        type(self).calls += 1
+        return super().post(*a, **k)
+
+
+_SENTENCE_JSON = _json.dumps(
+    {"ok": False, "suggestion": "把 I break 改成 I broke。"},
+    ensure_ascii=False,
+)
+
+
+class _SentenceClient(_FakeClient):
+    """造句反馈的模型替身。"""
+
+    calls = 0
+    payload = {"choices": [{"message": {"content": _SENTENCE_JSON}}]}
 
     def post(self, *a, **k):
         type(self).calls += 1
@@ -1234,6 +1255,7 @@ class _WordAssistBase(ApiTestCase):
         finally:
             db.close()
         _WordAssistClient.calls = 0
+        _SentenceClient.calls = 0
         _, self.auth = self.register()
         self.headers = {**self.auth, **LLM_HEADERS}
 
@@ -1264,6 +1286,14 @@ class _WordAssistBase(ApiTestCase):
         }
         return self.client.post("/api/study/words/learn", json=body, headers=self.headers)
 
+    def _check(self, term, sentence, client=None, headers=None):
+        with mock.patch("app.services.word_assist.httpx.Client", client or _SentenceClient):
+            return self.client.post(
+                "/api/study/words/sentence-check",
+                json={"term": term, "sentence": sentence},
+                headers=headers or self.headers,
+            )
+
 
 class WordAssistTests(_WordAssistBase):
     def test_assist_from_model_then_cache_hit(self):
@@ -1281,6 +1311,32 @@ class WordAssistTests(_WordAssistBase):
         self.assertTrue(second["cached"])
         self.assertEqual(second["assist"], body["assist"])
         self.assertEqual(_WordAssistClient.calls, 1, "命中缓存后不再打上游")
+
+    def test_confusable_missing_is_empty(self):
+        payload = _json.loads(_WORD_ASSIST_JSON)
+        payload.pop("confusable")
+        text = _json.dumps(payload, ensure_ascii=False)
+        body = self._assist("zephyr", client=_ScriptedClient.with_text(text)).json()
+        self.assertIsNotNone(body["assist"])
+        self.assertEqual(body["assist"]["confusable"], [])
+
+    def test_confusable_filters_bad_items(self):
+        payload = _json.loads(_WORD_ASSIST_JSON)
+        payload["confusable"] = [
+            {"term": ""},
+            {"term": "brake", "meaning_zh": "刹车"},
+            "break",
+            {"term": "break", "meaning_zh": "休息"},
+        ]
+        text = _json.dumps(payload, ensure_ascii=False)
+        body = self._assist("zephyr", client=_ScriptedClient.with_text(text)).json()
+        self.assertEqual(
+            body["assist"]["confusable"],
+            [
+                {"term": "brake", "meaning_zh": "刹车"},
+                {"term": "break", "meaning_zh": "休息"},
+            ],
+        )
 
     def test_given_meaning_wins_over_model(self):
         body = self._assist("serendipity", "我的释义").json()
@@ -1429,6 +1485,47 @@ class WordLearnTests(_WordAssistBase):
         )
         self.assertEqual(r.status_code, 200, r.text)
         self.assertNotEqual(r.json()["id"], mine["id"])
+
+
+class SentenceCheckTests(_WordAssistBase):
+    def test_model_feedback(self):
+        r = self._check("break", "I break the ice yesterday.")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["suggestion"], "把 I break 改成 I broke。")
+        self.assertEqual(_SentenceClient.calls, 1)
+
+    def test_ok_with_suggestion(self):
+        text = _json.dumps({"ok": True, "suggestion": "可以再加一个时间状语。"}, ensure_ascii=False)
+        body = self._check("break", "I broke the ice.", client=_ScriptedClient.with_text(text)).json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["suggestion"], "可以再加一个时间状语。")
+
+    def test_bad_json_falls_back(self):
+        body = self._check(
+            "break", "I break the ice.", client=_ScriptedClient.with_text("not json")
+        ).json()
+        self.assertEqual(body, {"ok": True, "suggestion": None})
+
+    def test_timeout_falls_back(self):
+        body = self._check("break", "I break the ice.", client=_TimeoutClient).json()
+        self.assertEqual(body, {"ok": True, "suggestion": None})
+
+    def test_missing_key_falls_back_without_calling_model(self):
+        body = self._check(
+            "break", "I break the ice.", headers=dict(self.auth)
+        ).json()
+        self.assertEqual(body, {"ok": True, "suggestion": None})
+        self.assertEqual(_SentenceClient.calls, 0)
+
+    def test_empty_sentence_rejected(self):
+        r = self.client.post(
+            "/api/study/words/sentence-check",
+            json={"term": "break", "sentence": "   "},
+            headers=self.headers,
+        )
+        self.assertEqual(r.status_code, 400)
 
 
 class SpellingCardHintTests(ApiTestCase):

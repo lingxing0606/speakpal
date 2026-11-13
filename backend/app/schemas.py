@@ -343,6 +343,18 @@ class WordLearnIn(BaseModel):
     used: bool = False
 
 
+class WordSentenceIn(BaseModel):
+    """用步造句反馈：term + 用户写的一句话。"""
+
+    term: str = Field(min_length=1, max_length=64)
+    sentence: str = Field(min_length=1, max_length=500)
+
+
+class WordSentenceOut(BaseModel):
+    ok: bool = True
+    suggestion: str | None = None
+
+
 class NoteIn(BaseModel):
     title: str | None = Field(default=None, max_length=128)
     body: str = ""

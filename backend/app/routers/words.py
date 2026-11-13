@@ -16,6 +16,8 @@ from ..schemas import (
     WordImportIn,
     WordImportOut,
     WordLearnIn,
+    WordSentenceIn,
+    WordSentenceOut,
 )
 from ..security import get_current_user
 from ..services import wordbank
@@ -24,6 +26,7 @@ from ..services.study import item_out, learned_word_terms
 from ..services.word_assist import (
     MAX_IMPORT,
     assist_word,
+    check_sentence,
     is_word,
     normalize_term,
     parse_import,
@@ -78,6 +81,22 @@ def word_assist(
     if not is_word(term):
         raise HTTPException(status_code=400, detail="term 必须是一个英文单词")
     return WordAssistOut(**assist_word(term, body.meaning_zh, db, llm))
+
+
+@router.post("/sentence-check", response_model=WordSentenceOut)
+def sentence_check(
+    body: WordSentenceIn,
+    user: User = Depends(get_current_user),
+    llm: LLMConfig = Depends(get_llm_config),
+):
+    """用步造句反馈；失败一律中性通过，不阻塞学习流程。"""
+    term = normalize_term(body.term)
+    if not is_word(term):
+        raise HTTPException(status_code=400, detail="term 必须是一个英文单词")
+    sentence = (body.sentence or "").strip()
+    if not sentence:
+        raise HTTPException(status_code=400, detail="sentence 不能为空")
+    return WordSentenceOut(**check_sentence(term, sentence, llm))
 
 
 @router.post("/import", response_model=WordImportOut)
