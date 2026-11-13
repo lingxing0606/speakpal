@@ -231,7 +231,7 @@ def build_story(styles):
 
     meta_rows = [
         ["产品名称", "SpeakPal · 可验证的 AI 英语口语诊断陪练", "代码版本", "后端 FastAPI 0.2.0 / 前端 speakpal-frontend@0.2.0"],
-        ["文档版本", "v2.1（对齐当前仓库全量实现）", "更新日期", "2026-11-01"],
+        ["文档版本", "v2.2（对齐当前仓库全量实现）", "更新日期", "2026-11-13"],
         ["核心技术栈", "Vue 3 + Vite + Tailwind CSS / FastAPI + SQLAlchemy 2 + SQLite", "验证工具链", "Python 纯标准库 evaluation/ + tools/check_content.py"],
         ["适用读者", "竞赛评委、前后端开发者、测试与运维人员", "覆盖范围", "架构设计、数据模型、API 规格、融合评分、SM-2 闭环、信效度验证与部署"],
     ]
@@ -299,7 +299,7 @@ def build_story(styles):
          "PBKDF2-SHA256（12 万次迭代）+ JWT（含 token_version 代次）+ 私网 IP 拦截",
          "app/security.py, app/services/outbound.py"],
         ["多轮场景对练", "6 大场景、3 档难度、句型脚手架、SSE 流式回复",
-         "保留最近 8 轮上下文；SSE 完整生成后落库，失败自动回退普通接口",
+         "保留最近 8 条消息（约 4 轮问答）上下文；SSE 完整生成后落库，失败自动回退普通接口",
          "app/routers/sessions.py, src/api/stream.js"],
         ["双模态与音频", "Web Speech 语音转写、Web Audio 停顿检测、本地回放",
          "50ms 窗口 RMS > 0.02 判有声，≥0.15s 静默记停顿；MediaRecorder + IndexedDB 本地存音频",
@@ -341,7 +341,7 @@ def build_story(styles):
     story.append(
         Paragraph(
             "系统采用前后端分离 + 离线评估包共享特征层的三层架构。开发与演示环境下，前端运行于 Vite Dev Server（127.0.0.1:5173），"
-            "通过 /api 反向代理与 FastAPI 后端（127.0.0.1:8000）通信；后端经 SQLAlchemy 2.x 访问 SQLite（backend/speakpal.db，7 张表），"
+            "通过 /api 反向代理与 FastAPI 后端（127.0.0.1:8000）通信；后端经 SQLAlchemy 2.x 访问 SQLite（backend/speakpal.db，10 张表），"
             "并通过 httpx 调用 OpenAI 兼容大模型接口与可选 TTS 接口。evaluation/ 包既可作为离线 CLI 独立运行，又被后端运行时直接导入，"
             "以保证线上报告与离线验证的特征提取、档位换算口径完全一致。",
             S["Body"],
@@ -349,17 +349,17 @@ def build_story(styles):
     )
     arch_lines = [
         "【浏览器端 Chrome / Edge (127.0.0.1:5173)】",
-        "  ├─ Vue 3 SPA：9 个业务视图 (Login / Home / Practice / Report / History / Study / Notes / Pronunciation / Settings) + catch-all 兜底",
+        "  ├─ Vue 3 SPA：12 个页面视图 (Login / Home / Practice / Report / History / Review / StudyHome / StudyScope / StudyLearn / Notes / Pronunciation / Settings) + catch-all 兜底",
         "  ├─ 语音与音频层：Web Speech API (转写 & 内置朗读) · Web Audio API (50ms RMS 包络采样) · MediaRecorder + IndexedDB (本地录音回放)",
         "  └─ 通信与状态层：Pinia (auth / session / settings) · Axios (Bearer JWT + X-LLM-Key / X-TTS-Key 头注入) · Fetch + ReadableStream (SSE)",
         "          │ HTTP REST / JSON 与 Server-Sent Events（开发环境经 Vite /api 代理转发）",
         "          ▼",
         "【FastAPI 后端服务 (uvicorn 127.0.0.1:8000)】",
-        "  ├─ 路由层 routers/：auth · scenes · sessions · reports · exercises · study · account · system · tts · admin（共 52 条 /api 端点）",
-        "  ├─ 服务层 services/：llm (多轮对话 & SSE) · scoring (评分编排) · rules (规则分与融合) · srs (SM-2) · study · dashboard",
+        "  ├─ 路由层 routers/：auth · scenes · sessions · reports · exercises · hints · study · words · account · system · tts · admin（共 61 个 /api 操作，落在 54 条路径上）",
+        "  ├─ 服务层 services/：agent (目标规划 / Critic / 结束判定) · llm (多轮对话 & SSE) · scoring (评分编排) · rules (规则分与融合) · srs (SM-2) · study · dashboard",
         "  │                    · wordbank · library · pronunciation · outbound (SSRF 防护) · llm_config · storage · user_data",
-        "  ├─ 共享计算层：直接复用仓库根目录 evaluation.features（文本/语音特征）与 evaluation.bands（权重 / IELTS Band / CEFR / 可比档）",
-        "  └─ 数据与静态层：SQLAlchemy 2.x → SQLite（7 张表）│ 内置离线题库 data/*.json │ 运营后台 /admin 与离线 Swagger /docs",
+        "  ├─ 共享计算层：直接复用仓库根目录 evaluation.features（文本/语音特征）、evaluation.bands（权重 / IELTS Band / CEFR / 可比档）与 evaluation.scales（多量表）",
+        "  └─ 数据与静态层：SQLAlchemy 2.x → SQLite（10 张表）│ 内置离线题库 data/*.json │ 运营后台 /admin 与离线 Swagger /docs │ tests/ unittest 回归",
     ]
     story.append(make_code_box(arch_lines, S))
     story.append(Spacer(1, 2.5 * mm))
@@ -405,10 +405,10 @@ def build_story(styles):
         )
     )
 
-    story.append(Paragraph("3.2 数据库表结构设计（7 张核心表）", S["H2"]))
+    story.append(Paragraph("3.2 数据库表结构设计（10 张核心表）", S["H2"]))
     story.append(
         Paragraph(
-            "backend/app/models.py 定义 7 张 SQLAlchemy ORM 实体。所有时间戳以 UTC 无时区写入，接口出参统一由 timeutil.utc_iso 格式化为带 Z 的 ISO-8601 串，前端按本地时区展示。",
+            "backend/app/models.py 定义 10 张 SQLAlchemy ORM 实体。所有时间戳以 UTC 无时区写入，接口出参统一由 timeutil.utc_iso 格式化为带 Z 的 ISO-8601 串，前端按本地时区展示。",
             S["Body"],
         )
     )
@@ -435,6 +435,15 @@ def build_story(styles):
         ["notes\n(Note)", "PK: id\nFK: user_id, session_id",
          "title, body, session_id, created_at, updated_at",
          "随堂学习笔记表，支持关联特定练习会话；标题留空时自动截取正文首行"],
+        ["review_events\n(ReviewEvent)", "PK: id\nFK: user_id, item_id",
+         "result（again|hard|good）, interval_before, interval_after, created_at",
+         "每次复习提交的结果日志；「今天复习了几张」「这条笔记今天复习过没有」按本地日从这张表统计"],
+        ["note_links\n(NoteLink)", "PK: id\nFK: note_id, item_id",
+         "term, start, end, created_at",
+         "笔记正文命中的学习卡（纯文本自动识别）；start/end 是正文里的字符位置，同一个词多次出现会留多行"],
+        ["note_link_mutes\n(NoteLinkMute)", "PK: note_id + item_id",
+         "created_at",
+         "用户手动取消的误关联；同一 (note, item) 只留一行，重新识别时跳过"],
     ]
     story.append(make_table(db_headers, db_rows, [26 * mm, 33 * mm, 52 * mm, 63 * mm], S))
     story.append(Spacer(1, 2.5 * mm))
@@ -457,10 +466,10 @@ def build_story(styles):
 
     # ========== 4 API ==========
     story.append(PageBreak())
-    story.append(Paragraph("4. 后端 API 接口全景规格（52 条端点）", S["H1"]))
+    story.append(Paragraph("4. 后端 API 接口全景规格（61 个操作 / 54 条路径）", S["H1"]))
     story.append(
         Paragraph(
-            "后端按业务域划分为 10 个路由模块，共 <b>52 条 /api 端点</b>（51 条路由注册 + GET /api/health），另有 3 个 HTML 页面入口（/、/admin、/docs）。"
+            "后端按业务域划分为 12 个路由模块，共 <b>61 个 /api 操作</b>（60 条路由注册 + GET /api/health），落在 54 条 /api 路径上；另有 3 个 HTML 页面入口（/、/admin、/docs）。"
             "通用约定：① 用户态接口使用 Authorization: Bearer &lt;JWT&gt;，Token 失效时响应头附带 X-Auth-Reason（expired / password_changed / user_gone / token_invalid），并在 CORS 中显式暴露该头；"
             "② 管理台接口使用 X-Admin-Key 头（读接口错密钥 401，写接口 403）；"
             "③ 大模型与语音密钥由浏览器通过 X-LLM-Key、X-LLM-Base-Url、X-LLM-Model、X-TTS-Key 等请求头按次传入，服务端不落库、不回显。"
@@ -480,13 +489,17 @@ def build_story(styles):
          "读取诊断报告（综合分、Band、CEFR、维度分、scoring_detail 融合明细、流利度特征、逐句纠错）"],
         ["专项训练\nexercises.py（4）", "GET /api/sessions/{id}/drills\nPOST /api/sessions/{id}/drills/{idx}/attempt\nGET /api/pronunciation/minimal-pairs\nPOST /api/pronunciation/check", "用户",
          "报告错句跟读队列（含历史最高相似度与 0.85 阈值）；提交跟读转写判分；2 组 × 10 对最小对立对题组；发音辨析判定（correct / partner_heard / reason）"],
-        ["SM-2 学习闭环\nstudy.py（18）", "GET /api/study/today\nGET /api/study/due | /summary\nPOST /api/study/items\nPOST /api/study/items/{id}/review\nDELETE /api/study/items/{id}\nGET|POST /api/study/vocab(/add)\nGET|POST /api/study/grammar(/add)\nGET|POST /api/study/spoken(/add)\nGET|POST /api/notes，GET|PATCH|DELETE /api/notes/{id}", "用户",
-         "今日待复习队列与模块汇总；手动建卡、提交复习（支持 grade 评分或 answer 客观判分驱动 SM-2）；高考/四级/六级词库、语法卡、口语卡查询与批量加卡（自动去重）；随堂笔记 CRUD"],
+        ["SM-2 学习闭环\nstudy.py（21）", "GET /api/study/today\nGET /api/study/due | /summary\nGET /api/study/items\nPOST /api/study/items\nPOST /api/study/items/{id}/review\nDELETE /api/study/items/{id}\nGET|POST /api/study/vocab(/add)\nGET|POST /api/study/grammar(/add)\nGET|POST /api/study/spoken(/add)\nGET|POST /api/notes，GET|PATCH|DELETE /api/notes/{id}\nGET /api/notes/{id}/links\nPOST /api/notes/{id}/mutes，DELETE /api/notes/{id}/mutes/{item_id}", "用户",
+         "今日待复习队列与模块汇总；手动建卡、提交复习（支持 grade 评分或 answer 客观判分驱动 SM-2）；高考/四级/六级词库、语法卡、口语卡查询与批量加卡（自动去重）；随堂笔记 CRUD 与「笔记 ↔ 已学词」知识链接"],
+        ["提示\nhints.py（1）", "POST /api/sessions/{id}/hint", "用户",
+         "按会话目标与最近发言给 3 条可用句式提示；模型不可用时降级为本地句型"],
+        ["单词工具\nwords.py（4）", "POST /api/study/words/assist\nPOST /api/study/words/sentence-check\nPOST /api/study/words/import\nPOST /api/study/words/learn", "用户",
+         "查词助手（释义 / 例句 / 近反义）；造句检查；批量导入生词；把单词加入学习清单"],
         ["个人中心与看板\naccount.py（7）", "PATCH /api/me/profile\nGET|PATCH /api/me/settings\nGET /api/me/dashboard\nGET /api/me/recommendation\nDELETE /api/me/data | /account", "用户",
          "改昵称/密码（改密需旧密码，token_version+1 并返回新 Token）；同步难度与词库偏好；学习看板（连续天数 / 12 周热力图 / 维度均分 / 近 7 天变化）；难度建议；清练习记录（scope=records）或注销账号（confirm='注销'）"],
         ["系统与语音\nsystem.py / tts.py（4）", "GET /api/config/llm\nPOST /api/config/llm/test\nGET /api/system/storage\nPOST /api/tts\nGET /api/health", "用户 ×4\n公开",
          "查询默认 LLM 配置；实测浏览器传入 Key 的连通性；查看数据库路径/大小/可写性；TTS 合成（无 Key 409 tts_not_configured，被拒 502 tts_key_invalid，不可达 502 tts_unavailable）；健康检查"],
-        ["运营管理台\nadmin.py（6）", "GET /api/admin/stats | /users | /sessions\nPATCH|DELETE /api/admin/users/{id}\nDELETE /api/admin/data\nPUT /api/admin/storage", "管理\nX-Admin-Key",
+        ["运营管理台\nadmin.py（7）", "GET /api/admin/stats | /users | /sessions\nPATCH|DELETE /api/admin/users/{id}\nDELETE /api/admin/data\nPUT /api/admin/storage", "管理\nX-Admin-Key",
          "全局统计、用户概览、最近会话（limit clamp 到 1–100）；重置用户昵称/密码、删除用户及数据；清全库（confirm='删除'）；改数据目录（环境变量锁定时 409 env_override）"],
     ]
     story.append(make_table(api_headers, api_rows, [26 * mm, 46 * mm, 16 * mm, 86 * mm], S))
@@ -592,6 +605,16 @@ def build_story(styles):
             "<b>单一换算锚</b>：全项目只在 evaluation/bands.py 定义一次 <b>S = 10 × B + 10</b>（反向 B = (S − 10) / 10），向最近 0.5 档取整（floor(B×2+0.5)/2），区间 3.0–9.0；"
             "S &lt; 40 分不给 band（显示低于 A2）。CEFR 映射：≥8.5 → C2，≥7.0 → C1，≥5.5 → B2，≥4.0 → B1，≥3.0 → A2。"
             "综合分与 band 由代码按维度加权算出并落库，<b>不是模型给一个 total 就存</b>。",
+            S["Body"],
+        )
+    )
+
+    story.append(
+        Paragraph(
+            "<b>多量表展示</b>：报告在雅思之外追加各考试的展示值（evaluation/scales.py，量表版本 2026-11，展示顺序 雅思 → CEFR → 托福 → 多邻国 → 四六级）："
+            "托福 / 多邻国按 CEFR 档给官方区间（如 B2 → 托福 72–94、多邻国 90–115），四六级无官方 CEFR 换算、只做水平段参考（tier=reference）；"
+            "高考英语不给分数，只标内容难度「难度 ≈ A2–B1」。<b>逐维度只映射雅思 + CEFR</b>——其余考试只有整卷总分或不同构念的子分，硬映射不成立。"
+            "换算是确定性的、不落库，旧报告读时自动补齐；band 为空（&lt; 40 分）时不给量表值，降级报告标「本次不计分」。",
             S["Body"],
         )
     )
@@ -790,8 +813,8 @@ def build_story(styles):
     def_rows = [
         ["后端监听地址", "127.0.0.1:8000", "start-backend.bat", "前端监听地址", "127.0.0.1:5173", "frontend/vite.config.js"],
         ["JWT 有效期", "10080 分钟（7 天）", "app/config.py", "默认大模型", "deepseek-chat", "app/config.py"],
-        ["对话保留上下文", "最近 8 轮", "app/services/llm.py", "建议结束轮次", "用户发言 ≥ 4 轮", "app/routers/sessions.py"],
-        ["对话 / 评分温度", "0.7 / 0.2", "llm.py / scoring.py", "压分触发 / 回落", "高 20 分压回 +10", "app/services/rules.py"],
+        ["对话保留上下文", "最近 8 条消息（约 4 轮）", "app/services/llm.py", "建议结束条件", "3 目标达成或 6 轮上限", "app/services/agent.py"],
+        ["对话 / 评分温度", "0.7 / 0.2", "llm.py / scoring.py", "压分触发 / 回落", "高 20 分压回规则分 +10", "app/services/rules.py"],
         ["有声判定 RMS", "0.02（50ms 采样）", "src/utils/audio.js", "跟读通关相似度", "≥ 0.85", "app/routers/exercises.py"],
         ["停顿计入阈值", "≥ 0.15 s", "src/utils/audio.js", "SM-2 间隔上限 / ease 域", "60 天 / [1.3, 2.8]", "app/services/srs.py"],
         ["默认难度 / 词库", "medium / cet4", "app/models.py", "建议评估样本量", "≥ 20 条", "docs/validation.md"],
@@ -804,11 +827,11 @@ def build_story(styles):
     story.append(Paragraph("8.4 已知限制与技术债", S["H2"]))
     td_headers = ["编号", "问题", "影响", "建议"]
     td_rows = [
-        ["TD-A", "finish 无「最少轮次」校验，0 轮也能出降级报告", "数据质量差，管理台「未完成」语义模糊", "要求 user_turns ≥ 1（或 2）才允许出报告，否则 400"],
-        ["TD-B", "difficulty / role / status 无枚举约束", "脏数据可入库，前端下拉之外的写入不受控", "Pydantic 用 Literal 约束；数据库加 CheckConstraint 或 Enum"],
-        ["TD-C", "无自动化测试与 CI", "回归全靠手点；改 features.py 可能悄悄改变报告口径", "先补 pytest + TestClient 接口测试与 agreement.py 已知值测试"],
+        ["TD-A", "finish 无「最少轮次」校验", "—", "已修复：无 user turn 时返回 400（sessions.py:321-324）"],
+        ["TD-B", "role / status 仍无枚举约束（difficulty 已白名单校验）", "脏数据仍可绕过前端写入这两列", "给 status / role 加 CheckConstraint 或 Enum"],
+        ["TD-C", "无 CI 配置与 lint 配置", "backend/tests 已有 167 条 unittest 全绿（test_api.py / test_scales.py，2026-11-13）", "接 CI 跑 unittest；agreement.py 已知值测试仍缺"],
         ["TD-D", "音频阈值硬编码（RMS 0.02、停顿 0.15s）", "不同麦克风 / 噪声环境下语速与停顿失真", "暴露为配置项，或做环境噪声自校准"],
-        ["TD-E", "历史列表无分页；管理台用户概览为 N+1 查询", "会话或用户量上千后首屏 / 管理台明显变慢", "加 limit / offset；改 GROUP BY 聚合 SQL"],
+        ["TD-E", "历史列表无分页；管理台 N+1 查询", "—", "已修复：sessions.py:470-484 支持 limit/offset；admin.py:84-94 已改 GROUP BY"],
         ["TD-F", "语音识别依赖 Chrome 且走云端", "网络受限时转写失败，Firefox / Safari 不可用", "已有「手动输入」兜底；如需更稳可接后端 ASR"],
         ["TD-G", "规则权重未在真人标注数据上校准", "规则分的绝对水平缺外部效度支撑", "采集 20–30 条真人评分后用 evaluation/ 反推校准权重"],
         ["TD-H", "发音维度仅由转写推断", "方法论上最大短板", "接入音素级 ASR 置信度或强制对齐（如 wav2vec2）替代「从转写猜发音」"],
@@ -819,8 +842,8 @@ def build_story(styles):
     story.append(
         make_callout(
             "演进优先级建议",
-            "P0：真实 LLM Key 下的完整回归 + 报告 source 标记可观测；P1：采集 20–30 条真人评分产出真实 agreement 报告（把「可验证」从工程自测升级为真实结论，是本题核心加分点）；"
-            "P2：补 pytest 与 agreement.py 已知值测试、发音维度接入声学证据；P3：场景配置化（存库 / JSON，支持教师自定义场景与 rubric）、部署方案落地（Nginx + Docker Compose）。",
+            "P0：真实 LLM Key 下的完整回归（报告 source 标记已完成）；P1：采集 20–30 条真人评分产出真实 agreement 报告（把「可验证」从工程自测升级为真实结论，是本题核心加分点）；"
+            "P2：补 agreement.py 已知值测试、发音维度接入声学证据；P3：场景配置化（存库 / JSON，支持教师自定义场景与 rubric）、部署方案落地（Nginx + Docker Compose）。",
             S,
         )
     )

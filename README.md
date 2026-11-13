@@ -2,7 +2,7 @@
 
 > **传智杯 AI-Web 网页开发挑战赛参赛作品**
 > 代码版本：`v0.2.0`（后端 `FastAPI(title="SpeakPal API", version="0.2.0")` / 前端 `speakpal-frontend@0.2.0`）
-> 文档版本：`v2.1` · 更新日期：`2026-11-01`
+> 文档版本：`v2.2` · 更新日期：`2026-11-13`
 > 核心定位：**真实场景多轮口语对练 + 模型与可测规则融合诊断 + 离线统计可验证闭环 + SM-2 间隔重复学习闭环**
 
 ---
@@ -20,7 +20,7 @@
 
 以下内容**不在**当前实现范围内，请勿据此推断系统已具备相应能力：
 
-- **不做声学测评**：发音维度由大模型**依据转写文本推断**，正常报告注脚为「分数由模型分与可测规则分融合得出，仅供参考」。
+- **不做声学测评**：发音维度由大模型**依据转写文本推断**；报告页该维标题固定显示「发音清晰度」（`Report.vue:43`），只是给人看的栏目名，不代表声学清晰度测量。正常报告注脚为「分数由模型分与可测规则分融合得出，仅供参考」。
 - **不保存原始音频**：仅入库录音的**统计元信息**（时长、有声时长、停顿序列），录音文件只存在于浏览器本地 IndexedDB，用于回放。
 - **无真实人工评分数据**：`evaluation/demo_data.csv` 是固定随机种子（`seed=42`）生成的 20 条合成数据，仅用于验证统计脚本链路可跑通，**不构成任何有效性结论**。
 - **无多租户 / 班级 / 教师端**：管理台只做只读统计与账号运维。
@@ -86,16 +86,17 @@
 │       ├── main.py                 # 应用入口、CORS、幂等表结构迁移、路由挂载
 │       ├── config.py               # 配置解析、弱密钥自动轮换、数据目录优先级解析
 │       ├── db.py                   # SQLAlchemy Engine 与 Session 生命周期管理
-│       ├── models.py               # 7 张核心 ORM 表模型定义
+│       ├── models.py               # 10 张核心 ORM 表模型定义
 │       ├── schemas.py              # Pydantic 入参校验与响应 DTO
 │       ├── security.py             # PBKDF2 散列、JWT 签发校验、Admin 鉴权
 │       ├── timeutil.py             # UTC 时间戳与带 Z ISO8601 格式化工具
 │       ├── data/                   # 离线教研数据包（wordbanks ×3 / grammar ×4 / spoken.json）
-│       ├── routers/                # 10 个路由模块（auth / scenes / sessions / reports /
-│       │                           #   exercises / study / account / system / tts / admin）
-│       ├── services/               # 16 个领域服务（llm / scoring / rules / srs / study /
+│       ├── routers/                # 12 个路由模块（auth / scenes / sessions / reports /
+│       │                           #   exercises / hints / study / words / account / system / tts / admin）
+│       ├── services/               # 20 个领域服务（agent / llm / scoring / rules / srs / study /
 │       │                           #   dashboard / wordbank / library / pronunciation /
 │       │                           #   outbound / llm_config / storage …）
+│       ├── tests/                  # unittest 回归（test_api.py / test_scales.py）
 │       └── static/                 # 运营后台单页（admin.html）与离线 Swagger UI 静态资源
 ├── frontend/                       # Vue 3 + Vite 前端工程
 │   ├── package.json                # 前端依赖与脚本定义
@@ -103,18 +104,20 @@
 │   ├── public/                     # 品牌 Logo 与 Favicon 矢量资源
 │   └── src/
 │       ├── main.js / App.vue / style.css
-│       ├── router/index.js         # 10 条路由（9 个业务视图 + catch-all）与认证守卫
+│       ├── router/index.js         # 13 条业务路由 + catch-all 兜底与认证守卫
 │       ├── api/                    # Axios 实例封装（client.js）与 SSE 流式客户端（stream.js）
 │       ├── stores/                 # Pinia 状态仓库（auth / session / settings）
-│       ├── components/             # AppHeader / StudyDashboard / TabBar / BrandLogo /
-│       │                           #   SceneIcon / CountUp / EmptyState / BackLink
+│       ├── components/             # AppHeader / HintCard / StudyDashboard / TabBar / BrandLogo /
+│       │                           #   SceneIcon / CountUp / EmptyState / BackLink / MnemonicCard
 │       ├── utils/                  # 语音转写（speech.js）、音频包络（audio.js）、
 │       │                           #   录音存储（recordings.js）、密钥门禁（llmGate.js）
-│       └── views/                  # 9 大页面视图（Login / Home / Practice / Report /
-│                                   #   History / Study / Notes / Pronunciation / Settings）
+│       └── views/                  # 12 个页面视图（Login / Home / Practice / Report /
+│                                   #   History / Review / StudyHome / StudyScope / StudyLearn /
+│                                   #   Notes / Pronunciation / Settings）
 ├── evaluation/                     # 离线评分信效度统计验证子系统（同时供后端提取特征）
 │   ├── agreement.py                # ICC(2,1)/ICC(2,k)、Kappa、Pearson/Spearman、MAE/RMSE、Bland-Altman
 │   ├── bands.py                    # 维度权重、0-100 分与 IELTS Band / CEFR 映射、跨模式可比档
+│   ├── scales.py                   # 多量表换算（雅思 / CEFR / 托福 / 多邻国 / 四六级）
 │   ├── features.py                 # 文本流利度与词汇多样性（TTR / MTLD）及音频停顿特征提取
 │   ├── validate.py                 # CLI 验证报告生成器
 │   ├── make_demo.py                # 固定随机种子合成演示数据生成脚本
@@ -204,7 +207,7 @@ SpeakPal 采用**浏览器端自带密钥（Bring Your Own Key）**安全架构�
 
 1. **注册/登录**：访问 `http://127.0.0.1:5173/login` 创建账号。
 2. **配置密钥**：在 `/settings` 填入 DeepSeek / OpenAI 兼容 API Key 并测试通过。
-3. **开启对练**：在首页选择「求职面试」或「咖啡店点单」，使用麦克风录音或打字完成 2–4 轮对话（可展开「句型提示」辅助表达）。
+3. **开启对练**：在首页选择「求职面试」或「咖啡店点单」，使用麦克风录音或打字对话：3 个目标都达成、或到 6 轮上限，就会提示可以出报告（无目标的老会话回退 4 轮；可展开「句型提示」辅助表达）。
 4. **查看诊断报告**：点击「结束并出报告」，查看综合分、IELTS Band / CEFR 等级、各维规则分与模型分融合明细、流利度客观特征，以及逐句地道改写。
 5. **跟读与复习**：在报告页直接点击「跟读重说」训练错句（相似度 ≥0.85 通关），随后进入「学习」（`/study`）模块体验 SM-2 卡片复习、词汇拓展与语法/口语专项训练。
 
@@ -311,7 +314,7 @@ python tools/generate_pdf.py
 
 ## 10. 接口规模
 
-后端按业务域划分为 10 个路由模块，共 **52 条 `/api` 端点**（51 条路由注册 + `GET /api/health`），另有 3 个非 API 页面入口：`/` 与 `/admin`（管理控制台 HTML）、`/docs`（离线 Swagger UI）。
+后端按业务域划分为 12 个路由模块，共 **61 个 `/api` 操作**（60 个路由注册 + `GET /api/health`），落在 **54 条 `/api` 路径**上（2026-11-13 取自 `GET /openapi.json`），另有 3 个非 API 页面入口：`/` 与 `/admin`（管理控制台 HTML）、`/docs`（离线 Swagger UI）。
 
 | 模块 | 前缀 | 端点数 | 职责 |
 |---|---|---|---|
@@ -320,11 +323,13 @@ python tools/generate_pdf.py
 | `sessions.py` | `/api` | 6 | 建会话、提交轮次（普通/流式）、结束出报告、会话详情、历史列表 |
 | `reports.py` | `/api` | 1 | 读取诊断报告 |
 | `exercises.py` | `/api` | 4 | 跟读重说队列与判分、最小对立对题组与判定 |
-| `study.py` | `/api` | 18 | SM-2 学习闭环（今日队列/复习/建卡/词库/语法/口语）与随堂笔记 CRUD |
+| `hints.py` | `/api` | 1 | 句型提示 |
+| `study.py` | `/api` | 21 | SM-2 学习闭环（今日队列/复习/建卡/词库/语法/口语）与随堂笔记 CRUD |
+| `words.py` | `/api/study/words` | 4 | 单词助手、导入、已学列表、造句检查 |
 | `account.py` | `/api/me` | 7 | 个人资料、偏好设置、学习看板、难度建议、清数据与注销 |
 | `system.py` | `/api` | 3 | LLM 配置查询、密钥连通性测试、存储状态 |
 | `tts.py` | `/api` | 1 | 语音合成 |
-| `admin.py` | `/api/admin` | 6 | 全局统计、用户管理、清库、改数据目录 |
+| `admin.py` | `/api/admin` | 7 | 全局统计、用户管理、清库、改数据目录 |
 
 > 完整清单以运行期的 `GET /openapi.json` 为准——路由变动时先查它，勿依赖手抄表格。
 

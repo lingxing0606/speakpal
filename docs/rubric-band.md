@@ -118,6 +118,9 @@ IELTS 官方不认证 4.0 以下的等级，所以 A2 那一行是【自定】�
 | job_interview | 自我介绍 / 项目或经历 / 本人职责或角色 / 挑战或结果 / 反问或收尾 |
 | cafe_order | 点单饮品 / 规格（冷热或大小）/ 加料或餐点 / 堂食或外带 / 结账或致谢 |
 | ielts_part1 | 直接回答 / 给出原因或细节 / 举例 / 延伸或对比 |
+| hotel_checkin | 预订或证件 / 房型与天数 / 价格或付款 / 设施或早餐 / 礼貌收尾 |
+| airport_checkin | 证件或航班 / 行李 / 座位偏好 / 时间或登机口 / 礼貌收尾 |
+| restaurant_order | 人数或预订 / 菜品 / 饮料 / 忌口或要求 / 结账 |
 
 清单本身是【自定】（按场景任务分析法拆的，没有外部出处）；命中判定由规则（关键词）与 LLM 双路给出，
 两者不一致的样本进人工标注集，用来校准。
@@ -360,10 +363,29 @@ D:\python\python.exe -m evaluation.validate --csv evaluation/demo_data.csv `
 **合成数据上的实测**（`demo_data.csv`，n=20，仅证明脚本通路，不是真实结论）：
 exact_rate 0.70、adjacent_rate 1.00、平均差 0.30 档、kappa 0.49（中等）。真实结论必须换成真人标注。
 
+**0–100 分取整**（总分与 `comparable_score`）：`evaluation/bands.py` 的 `_score_int()` 用 `floor(x + 0.5)`，半值向上——62.5 → 63、67.5 → 68，不用 Python 的银行家舍入（`int(round())` 会给 62/68 这种不一致结果）。维度分当前仍走 `rules.py:411` 的 `int(round())`，半值取偶，与总分口径未完全统一，最多差 1 分。
+
 ### 4.3 样本量与结论
 
 n < 10 时 kappa 的置信区间宽到没有意义：只打印「样本不足，不作结论」。
 n ≥ 20 才在报告里写一致性数字（对齐 `docs/validation.md` 的采样要求）。
+
+### 4.4 多量表展示（`evaluation/scales.py`）
+
+band 是唯一权威锚，0–100 分是它的等价表示，托福 / 多邻国 / 四六级只是 band 的「视图」：换算是确定性的，不落库、不新增报告分数列，旧报告读时现算补齐（`report_view.py:18-22`）。
+
+| 量表 | 是否给分 | 口径 |
+|---|---|---|
+| 雅思 IELTS | ✅ 官方 | 逐维 band 0.5 步长；总分与档位同源 |
+| CEFR | ✅ 官方 | 由 band 分段推出（§1.2） |
+| 托福 TOEFL | ✅ 官方区间 | 按 CEFR 档给区间（B2 → 72–94；A2 → <42；`scales.py:28-59`） |
+| 多邻国 Duolingo | ✅ 官方区间 | B2 → 90–115；A2 → 10–55 |
+| 四六级 CET | ⚠️ 参考 | 无官方 CEFR 换算，只做水平段参考（`tier=reference`），如 B2 → CET-4 500–599 / CET-6 450–549 |
+| 高考 | ❌ 不给分 | 只给内容难度标签「难度 ≈ A2–B1」（`GAOKAO_LABEL`）：无官方换算且构念不同 |
+
+- 展示顺序与偏好白名单：`ielts → cefr → toefl → duolingo → cet`（`scales.py:16`；`account.py:118-124` 校验 `report_scale`）。
+- **逐维度只映射雅思 + CEFR**（`scales.py:74-86`）：托福/多邻国/四六级只有整卷总分或不同构念的子分，没有与发音/流利度对应的描述语，硬映射不成立。
+- 量表版本 `2026-11`（`scales.py:13`）；band 为空（<40 分）时 `items=null` 且 `reason=below_a2`，降级报告给 `reason=not_scored`，都不截到 40 分。
 
 ---
 
@@ -454,6 +476,8 @@ D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
 |---|---|---|
 | `evaluation/features.py` | `find_fillers()` 位置判定；`lexical_diversity()` 短文本回退 TTR；`mtld` 不足 50 词输出 `None`；新增 `diversity_metric / diversity` 字段 | ✅ 已完成 |
 | `evaluation/bands.py` | `score_to_band / band_to_score / band_to_cefr / cefr_of_score / cefr_distance / report_bands`（纯标准库，全项目唯一换算入口） | ✅ 已完成 |
+| `evaluation/scales.py` | 多量表视图（雅思 / CEFR / 托福 / 多邻国 / 四六级；高考只给难度标签），逐维只映射雅思 + CEFR | ✅ 已完成（§4.4） |
+| `backend/tests/` | 167 条 unittest 全绿（2026-11-13），含 band 取整与多量表换算表 | ✅ 已完成 |
 | `evaluation/make_demo.py` | 档位改 CEFR 字母；重新生成 `demo_data.csv`（ICC 未变：0.9022 / 0.9486） | ✅ 已完成 |
 | `evaluation/validate.py` | `--system-band` 接线：一致率、档位距离、Cohen kappa（多数票 + 分人）；stdout 强制 UTF-8 | ✅ 已完成 |
 | `backend/app/services/scoring.py` | 模型直接输出 band；`original` 必须来自用户转写（否则丢弃）；降级报告不计分、不虚构句子 | ✅ 已完成 |
@@ -479,7 +503,7 @@ D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
 ## 8. 明确不声称的东西
 
 - 不是雅思官方评分，band 为模型 + 规则的估算。
-- 不是音素级发音测评；发音维度只有文本推断和转写置信度代理。
+- 不是音素级发音测评；发音维度只有文本推断，转写置信度与同句重读一致性代理尚未接入（§3.5）。
 - **语法准确度目前没有规则分**，只有模型判断；规则分只测语言范围（§3.6）。
 - 规则权重在**真实标注数据上尚未校准**，§3 全部数值为初版【自定】。
 - n < 20 不做任何一致性结论；`demo_data.csv` 的合成结果不算证据。

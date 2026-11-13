@@ -17,7 +17,7 @@
 
 ### MVP（必须做）
 - 注册 / 登录（账号 + 密码 + JWT），每个用户独立历史
-- 3 个场景：求职面试 / 咖啡店点单 / 雅思 Part 1
+- 6 个场景：求职面试 / 咖啡店点单 / 雅思 Part 1 / 酒店入住 / 机场值机 / 餐厅点餐
 - 语音录入 + 转写（Web Speech API）
 - 多轮对话 + 追问
 - 评分卡（综合分 + 视作答方式 3–5 个维度分）
@@ -126,7 +126,7 @@ speakpal/
 
 ### Practice 练习页（需登录）
 - 路由 `/practice/:id`，会话 id 在地址栏里——刷新不丢，能从历史「继续练习」回到同一场
-- 顶部：场景名 + 当前轮次（如 2/4）；难度显示中文（简单/中等/困难），不显示 `medium` 这种原值
+- 顶部：场景名 + 目标进度（「3 个目标已达成 N 个」，无目标老会话按轮次提示）；难度显示中文（简单/中等/困难），不显示 `medium` 这种原值
 - 进页面用 `GET /api/sessions/{id}` 回填历史对话与 `status`：`finished` 的会话直接给报告入口，不再让人往里说
 - 对话区：AI 气泡在左、用户气泡在右，逐条出现
 - 麦克风按钮：点击开始录音，实时显示转写文字；再点结束。识别结果先进**输入条**确认再发送，失败给中文文案（如「没有麦克风权限」），不裸露 `not-allowed` 这类英文码
@@ -147,8 +147,8 @@ speakpal/
 - **每条纠错带错误类型标签**（`error_type`：拼写 / 语法 / 僵硬 / 啰嗦，见 §16.4）和「加入学习清单」；`stiffness` 的卡额外显示 `natural`（更自然的说法 + 为什么）。
   拼写类、僵硬类由后端自动落成学习卡草稿，用户不必手动点；语法/啰嗦类由用户自己决定加不加。
 - 「评分依据（可复现）」默认收起，展开看每维模型分/规则分/最终分/钳制原因/输入特征
-- **顶卡不要出现「分数由 AI 估算」**：那是降级/mock 的兜底文案。正常报告顶卡显示 `scoring_note`（「分数由模型分与可测指标融合得出」），
-  否则同一张卡上「AI 估算」和「模型分与可测指标融合」并存，等于自己打自己。
+- **顶卡不要出现「分数由 AI 估算」**：这是已作废的旧口径。正常报告顶卡显示 `scoring_note`（「分数由模型分与可测规则分融合得出」），降级报告写「示例报告（模型不可用） · 本次不计分」，
+  否则同一张卡上两种说法并存，等于自己打自己。
 - **跟读失败要在跟读面板里就地提示**：识别错、相似度不达标，提示出现在按钮下方，不要塞进页面顶部全局错误条——用户正看着面板，顶部提示在视口外，看起来就是「点了没反应」。
 - **报告页的 band 要标口径**：顶卡给的是本模式加权档；历史/成长曲线用的是 `comparable_band`（共享两维）。同一场混合会话两个值差 0.5 是正常的，报告页至少要么标「本模式口径」，要么旁白能解释清楚。
 - 降级报告用琥珀横幅（不是红色——那不是用户做错），按 `mock_reason` 分文案：「未配置/兜底密钥失效」给「去设置」，「服务不可用」只提示稍后重试
@@ -348,7 +348,11 @@ speakpal/
     }
   ],
   "comment": "整体表达清楚，能完成面试任务；建议多用具体项目细节，减少填充词。",
-  "note": "分数由 AI 估算，仅供参考。"
+  "band": 6.5,
+  "cefr": "B2",
+  "source": "llm",
+  "answer_mode": "voice",
+  "note": "分数由模型分与可测规则分融合得出，仅供参考。"
 }
 ```
 
@@ -365,6 +369,9 @@ drill_attempts(id, report_id, item_index, transcript, similarity, created_at)   
 study_items(id, user_id, kind, term, context, meaning_zh, example, related_json,
             source_session_id, ease, interval_days, due_at, reps, lapses, created_at)  -- 见 §16.1
 notes(id, user_id, title, body, session_id, created_at, updated_at)              -- 见 §16.3
+review_events(id, user_id, item_id, result, interval_before, interval_after, created_at)  -- result: again | hard | good
+note_links(id, note_id, item_id, term, start, end, created_at)                   -- 笔记正文命中的学习卡
+note_link_mutes(note_id, item_id, created_at)                                    -- 用户取消的误关联
 ```
 
 > 学习卡与笔记的字段语义、调度规则、错误类型枚举在 **§16**；这里只列表名，避免两处各写一份。
@@ -372,36 +379,51 @@ notes(id, user_id, title, body, session_id, created_at, updated_at)             
 ## 8. AI 设计
 
 ### 8.1 对话（考官/店员）
-System prompt 模板：
+System prompt 按场景角色拼装（`llm.py:65-71`）：
 
 ```
-你是 {场景角色}。用户是英语学习者，正在练习口语。
-要求：
-1. 用简短、口语化的英语提问，每次只问一个问题。
-2. 用户回答后，先自然回应一句，再追问一个相关问题。
-3. 最多 {max_turns} 轮，语气友好。
-4. 不要在对话中纠正语法，纠错留给复盘。
-5. 难度={difficulty}：简单用短句常用词；困难用更长、更自然的表达。
+You are {scene.role}. The user is an English learner practicing speaking.
+Ask short, natural, conversational questions. Ask only one question at a time.
+After the user answers, briefly acknowledge, then ask one relevant follow-up.
+Do not correct grammar during the conversation; correction is handled later.
+Difficulty: {difficulty}. Keep it friendly.
 ```
+
+在这之后追加目标引导块（`llm.py:47-61`）：把 `all goals` / `already covered` / `still missing` 递给模型，要求「缺目标时用一句短问自然引过去、目标覆盖完就轻松追问、不要报出目标清单」。
+
+对话只带最近 8 条消息（`llm.py:74` 的 `history[-8:]`，约 4 轮问答）；出报告与 Critic 用全量轮次。
 
 ### 8.2 评分（复盘）
-输入整段对话记录，按 rubric 打分，输出严格 JSON：
+输入整段对话记录，模型按 IELTS band 描述符给**每维 band**（0.5 步长、3.0–9.0），输出严格 JSON：
 
 ```
-{"total": 0-100,
- "dimensions": {"pronunciation":0-100,"fluency":0-100,"grammar_vocab":0-100,"task_completion":0-100},
- "sentence_fixes": [{"original":"","better":"","reason":""}],
+{"bands": {"pronunciation": 3.0-9.0, "fluency": 3.0-9.0, "grammar_vocab": 3.0-9.0,
+           "task_completion": 3.0-9.0, "written_expression": 3.0-9.0},
+ "sentence_fixes": [{"original": "", "better": "", "reason": "",
+                     "error_type": "spelling|grammar|stiffness|wordiness",
+                     "natural": "", "word": "",
+                     "related": {"synonyms": [], "antonyms": [], "similar": []}}],
  "comment": "",
- "note": "分数由 AI 估算，仅供参考。"}
+ "note": ""}
 ```
 
-注意：pronunciation 基于转写文本与表达流畅度估算，标注「AI 估算」，不要宣称精确发音测评。
+维度出现规则：`pronunciation` / `fluency` 只在有录音轮时给（只看录音轮）、`written_expression` 只在有打字轮时给（只看打字轮）；`grammar_vocab` 与 `task_completion` 恒给（看全部轮次）。
+
+落库前还要过**规则分融合**（`services/rules.py`）：
+
+1. band → 0–100 用单一锚 `S = 10B + 10`（`evaluation/bands.py:106-110`），取整 `floor(x+0.5)`（`:140-146`）。
+2. 可测规则分：流利度（语速 / 停顿占比 / 填充词率）、语言范围（MTLD / 平均句长 / 复杂句标记）、任务清单命中率（`rules.py:356-358`）。
+3. 逐维融合 `final = (1-w)·模型分 + w·规则分`；模型分比规则分**高出 20 分以上**时压回 `规则分 + 10`（`rules.py:50-51`、`:296-327`），只压不抬。规则权重：流利度 0.5、语法词汇 0.35、任务完成 0.6（`rules.py:43-48`）。
+4. 综合分按作答模式加权（voice / typed / mixed，`bands.py:33-52`），再折回 band 与 CEFR；跨模式比较只用 `comparable_band`（共享两维）。
+5. 报告注脚固定为「分数由模型分与可测规则分融合得出，仅供参考」（`scoring.py:16`、`report_view.py:50`）；降级报告写「示例报告（模型不可用） · 本次不计分」。
+
+发音维度没有规则证据，只有模型依据转写文本的推断（`rules.py:363-371`），不做声学测评。
 
 ## 9. 技术栈
 
 - 前端：Vue3 + Vite + Tailwind CSS + Pinia + axios
 - 后端：FastAPI + SQLAlchemy + SQLite
-- 认证：密码用 passlib[bcrypt] 哈希，令牌用 PyJWT
+- 认证：密码用 PBKDF2-HMAC-SHA256（标准库 hashlib，12 万次迭代 + 16 字节随机盐）哈希，令牌用 PyJWT；不用 bcrypt，避免原生编译依赖
 - AI：一家 LLM API（DeepSeek / 通义 / 文心 / OpenAI 均可）
 - 语音：浏览器 Web Speech API（SpeechRecognition 转写 + speechSynthesis 朗读），免 key
 - 部署：前端 Vercel/Netlify，后端一台云服务器；或前端打包由 FastAPI 静态托管
@@ -410,17 +432,17 @@ System prompt 模板：
 
 | 周 | 目标 |
 |---|---|
-| 第 1 周 | 搭架子 + 注册登录（JWT）+ 3 个场景配置 + 语音转写 + AI 对话端到端跑通 |
+| 第 1 周 | 搭架子 + 注册登录（JWT）+ 场景配置 + 语音转写 + AI 对话端到端跑通 |
 | 第 2 周 | 评分 rubric + 复盘报告 + 逐句纠错 + 历史记录（按用户） |
 | 第 3 周 | UI 打磨 + 场景扩充 + 部署 + 演练答辩 demo |
 
 ## 11. 风险与降级
 
-- 浏览器 STT 仅 Chrome 稳定 → 演示固定用 Chrome；后端 STT 做兜底。
-- 评分主观 → 明确 rubric + 标「AI 估算」。
+- 浏览器 STT 仅 Chrome 稳定 → 演示固定用 Chrome；失败可切「手动输入」。
+- 评分主观 → 明确 rubric + 模型分与规则分融合口径（注脚写「分数由模型分与可测规则分融合得出」）。
 - 大模型延迟 → 流式输出 + loading 态 + 超时重试。
 - 麦克风权限 → 演示前预授权并彩排。
-- 密码安全 → 只存 bcrypt 哈希，绝不存明文；JWT secret 放环境变量。
+- 密码安全 → PBKDF2-HMAC-SHA256 哈希（12 万次迭代 + 随机盐），绝不存明文；JWT secret 放环境变量。
 
 ## 12. 校赛演示脚本（约 30 秒）
 
@@ -500,7 +522,7 @@ System prompt 模板：
   旧的 `/admin/stats`、`/admin/users`、`/admin/sessions` 仍用 `require_admin`（`admin.py:23-25`，401），两者别混。
 - 两个确认词别串：清记录是「删除」（`Settings.vue:112`，也用于 `/admin/data`），注销是「注销」（`Settings.vue:158`）。
 - 注销不可恢复，前端二次确认要显示账号名与影响范围（`Settings.vue:320` 已做）。
-- **「演示前清空所有用户数据」连账号一起清**（用户 11-01 要求）：7 张表全 0 行，`users` 也清空 → 打开站点就是登录页，需要重新注册，不再有预置账号。
+- **「演示前清空所有用户数据」连账号一起清**（用户 11-01 要求）：10 张表全 0 行（含 `note_links` / `note_link_mutes` / `review_events`），`users` 也清空 → 打开站点就是登录页，需要重新注册，不再有预置账号。
   要删得干净：连接启用 `secure_delete`，删完 `VACUUM`（`freelist_count=0` 表示没有可恢复的空闲页）；残留的 `.tmp` 测试库、`backend/backups` 备份都不该留。
 - **库清了不等于这台机器干净**：`localStorage` 里的模型 key、难度、词库范围不跟着数据库清空，属于浏览器数据；要「从头演示」得清一次站点数据，或退出登录 + 设置页删本地密钥。
 
