@@ -270,7 +270,7 @@
 
   /* 报告页页签条：与页头同为半透明纸底，滚动时内容从下方穿过 */
   .sp-tab-rail {
-    @apply sticky top-16 z-10 h-[52px] bg-canvas/80 backdrop-blur-md;
+    @apply sticky top-16 z-10 h-[52px] bg-canvas/[0.92] backdrop-blur-md;
   }
 
   /* chip 落地脉冲：飞行副本到达前 80ms 触发一次 */

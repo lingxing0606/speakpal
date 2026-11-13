@@ -495,7 +495,6 @@ function logout() {
 
       <section id="prefs" class="sp-card scroll-mt-24 p-6 sm:p-7">
         <h2 class="sp-section-title">练习偏好</h2>
-        <p class="mt-1 text-xs leading-5 text-ink-soft">新开的练习用这一档，历史和报告里的「再练一次」也用这一档。</p>
         <div class="mt-4 inline-flex rounded-xl bg-canvas p-1 ring-1 ring-line">
           <button
             v-for="d in DIFFICULTIES"
@@ -554,7 +553,6 @@ function logout() {
             ></button>
           </div>
           <p v-if="reportPrefError" class="mt-2 text-[11px] leading-5 text-danger">{{ reportPrefError }}</p>
-          <p class="mt-2 text-[11px] leading-5 text-ink-mute">报告页也能临时切换；换设备登录后以账号里的默认值为准。</p>
         </div>
 
         <p class="mt-3 text-xs leading-5 text-ink-mute">

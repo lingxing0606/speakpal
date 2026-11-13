@@ -128,6 +128,7 @@ const pillBoxEl = ref(null)
 const pillHidden = ref(false)
 const scaleInfoOpen = ref(false)
 const scaleInfoEl = ref(null)
+const scaleInfoTrigger = ref(null)
 const ghostEls = []
 let switchToken = 0
 
@@ -292,9 +293,9 @@ async function pickScale(id, event) {
     }
   }
 
-  // 2) 新值 ghost：从被点 chip 中心飞进药丸中心（200ms，延迟 60ms）
+  // 2) 新值 ghost：从被点 chip 中心飞进药丸中心（200ms，延迟 40ms）
   await nextTick()
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  await new Promise((resolve) => setTimeout(resolve, 40))
   if (token !== switchToken) return
   const box = pillBoxEl.value
   const style = pillTextStyle() || oldStyle
@@ -343,10 +344,12 @@ function onScaleKeydown(event, i) {
 }
 
 // 换算说明：桌面居中卡 / 窄屏底部 sheet
-async function openScaleInfo() {
+async function openScaleInfo(event) {
+  scaleInfoTrigger.value = event?.currentTarget || document.activeElement
   scaleInfoOpen.value = true
   await nextTick()
   const el = scaleInfoEl.value
+  el?.focus({ preventScroll: true })
   if (!el || reducedMotion()) return
   const narrow = window.matchMedia('(max-width: 639px)').matches
   el.animate(
@@ -382,10 +385,38 @@ async function closeScaleInfo() {
     await anim.finished.catch(() => {})
   }
   scaleInfoOpen.value = false
+  await nextTick()
+  scaleInfoTrigger.value?.focus({ preventScroll: true })
 }
 
 function onScaleInfoKeydown(event) {
   if (event.key === 'Escape' && scaleInfoOpen.value) closeScaleInfo()
+}
+
+// aria-modal 只描述语义，Tab 仍会跑到背后的页签；这里把焦点循环限制在面板内
+function trapScaleInfoFocus(event) {
+  if (event.key !== 'Tab') return
+  const el = scaleInfoEl.value
+  if (!el) return
+  const focusables = [...el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter((node) => !node.disabled && node.offsetParent !== null)
+  if (!focusables.length) {
+    event.preventDefault()
+    el.focus({ preventScroll: true })
+    return
+  }
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  const active = document.activeElement
+  if (event.shiftKey) {
+    if (active === first || active === el || !el.contains(active)) {
+      event.preventDefault()
+      last.focus({ preventScroll: true })
+    }
+  } else if (active === last || !el.contains(active)) {
+    event.preventDefault()
+    first.focus({ preventScroll: true })
+  }
 }
 
 const displayFeatures = computed(() => {
@@ -501,6 +532,7 @@ function tabLeave(el, done) {
 }
 
 function onResize() {
+  if (railEl.value) railNatural.value = railEl.value.getBoundingClientRect().top + window.scrollY
   placeIndicator(tab.value, false)
 }
 
@@ -526,6 +558,9 @@ onMounted(async () => {
   }
   await nextTick()
   if (railEl.value) railNatural.value = railEl.value.getBoundingClientRect().top + window.scrollY
+  document.fonts?.ready.then(() => {
+    if (railEl.value) railNatural.value = railEl.value.getBoundingClientRect().top + window.scrollY
+  })
   placeIndicator(tab.value, false)
   window.addEventListener('resize', onResize)
   window.addEventListener('keydown', onScaleInfoKeydown)
@@ -812,7 +847,7 @@ function again() {
 
         <div ref="railEl" class="sp-tab-rail border-b border-line/60">
           <div class="sp-shell flex h-full items-center">
-            <div class="sp-segment relative" role="tablist" aria-label="报告分页">
+            <div class="sp-segment relative max-w-full overflow-x-auto" role="tablist" aria-label="报告分页">
               <span
                 class="pointer-events-none absolute inset-y-1 left-0 rounded-full bg-white shadow-soft ring-1 ring-line/80"
                 :class="tabAnimating ? 'transition-[transform,width] duration-[320ms] ease-[cubic-bezier(0.3,0.9,0.25,1)]' : ''"
@@ -840,7 +875,7 @@ function again() {
         <Transition :css="false" mode="out-in" @enter="tabEnter" @leave="tabLeave">
         <div :key="tab" class="pt-5">
         <div v-if="tab === 'overview'" class="sp-grid items-start">
-          <aside class="space-y-5 lg:sticky lg:top-24 lg:col-span-4 lg:col-start-9 lg:row-start-1">
+          <aside class="space-y-5 lg:sticky lg:top-24 lg:col-span-4 lg:col-start-9 lg:row-start-1 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:overscroll-contain lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden">
         <div
           v-if="hasScore"
           class="relative overflow-hidden rounded-card bg-ink p-6 text-white shadow-lift sm:p-7"
@@ -900,9 +935,9 @@ function again() {
                 </span>
                 <button
                   v-if="pillKind === 'cet'"
-                  class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-coral-500/15 px-1.5 text-[10px] font-medium text-coral-300 ring-1 ring-coral-500/30"
+                  class="relative inline-flex h-[18px] shrink-0 items-center rounded-full bg-coral-500/15 px-1.5 text-[10px] font-medium text-coral-300 ring-1 ring-coral-500/30 after:absolute after:-inset-2 after:content-['']"
                   aria-label="四六级为参考换算，点开换算说明"
-                  @click.stop="openScaleInfo"
+                  @click.stop="openScaleInfo($event)"
                 >
                   参考
                 </button>
@@ -920,7 +955,7 @@ function again() {
                   :aria-checked="activeScale === s.id"
                   :aria-disabled="!hasScales"
                   :tabindex="activeScale === s.id ? 0 : -1"
-                  class="h-7 rounded-full px-2.5 text-[11px] font-medium transition duration-[180ms] ease-out"
+                  class="h-9 rounded-full px-3 text-[11px] font-medium transition duration-[180ms] ease-out sm:h-7 sm:px-2.5"
                   :class="[
                     activeScale === s.id
                       ? 'bg-white/15 text-white ring-1 ring-white/25'
@@ -935,7 +970,7 @@ function again() {
               </div>
               <button
                 class="ml-auto inline-flex items-center gap-1 text-[11px] text-white/45 transition hover:text-white/70"
-                @click="openScaleInfo"
+                @click="openScaleInfo($event)"
               >
                 换算说明
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -999,15 +1034,20 @@ function again() {
         </div>
 
         <button
-          v-if="report.sentence_fixes.length"
-          class="sp-card flex w-full items-center justify-between gap-3 p-5 text-left transition duration-200 hover:ring-brand-200"
+          v-if="(report.sentence_fixes || []).length"
+          class="sp-card group flex w-full items-center justify-between gap-3 p-5 text-left transition duration-200 hover:ring-brand-200"
           @click="setTab('fixes')"
         >
           <div class="flex min-w-0 flex-wrap items-baseline gap-x-2">
-            <span class="font-semibold text-ink">{{ report.sentence_fixes.length }} 句可以改</span>
-            <span v-if="topFixes.length" class="text-xs text-ink-mute">已通过 {{ passedCount }}/{{ topFixes.length }}</span>
+            <span class="font-semibold text-ink">{{ (report.sentence_fixes || []).length }} 句可以改</span>
+            <span v-if="topFixes.length" class="text-xs text-ink-mute">已通过 {{ passedCount }}/{{ (report.sentence_fixes || []).length }}</span>
           </div>
-          <span class="shrink-0 text-sm font-medium text-brand-700">去看</span>
+          <span class="flex shrink-0 items-center gap-2">
+            <span class="text-sm font-medium text-brand-700">去看</span>
+            <span class="sp-arrow" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+            </span>
+          </span>
         </button>
 
         <div class="flex flex-col gap-2.5">
@@ -1023,7 +1063,7 @@ function again() {
         <div v-else-if="tab === 'fixes'" class="mx-auto w-full max-w-3xl space-y-5">
         <div v-if="topFixes.length" class="sp-card flex flex-wrap items-center justify-between gap-3 p-5">
           <div class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="sp-chip-brand">已通过 {{ passedCount }}/{{ topFixes.length }}</span>
+            <span class="sp-chip-brand">已通过 {{ passedCount }}/{{ (report.sentence_fixes || []).length }}</span>
             <router-link to="/pronunciation" class="font-medium text-brand-700 underline-offset-2 hover:underline">
               练 ship / sheep
             </router-link>
@@ -1032,14 +1072,14 @@ function again() {
 
         <div class="sp-card p-6">
           <EmptyState
-            v-if="!report.sentence_fixes.length"
+            v-if="!(report.sentence_fixes || []).length"
             compact
             icon="done"
             title="没有需要改的句子"
             text="这次说的话里没有挑出要改写的句子。换个难一点的场景，或多说几句再看看。"
           />
           <div
-            v-for="(f, i) in report.sentence_fixes"
+            v-for="(f, i) in (report.sentence_fixes || [])"
             :key="i"
             :style="{ '--i': Math.min(i, 10) }"
             class="sp-reveal mt-3 rounded-2xl bg-paper p-4 text-sm ring-1 ring-line/70 transition duration-200 hover:ring-brand-200"
@@ -1167,7 +1207,9 @@ function again() {
           role="dialog"
           aria-modal="true"
           aria-label="换算说明"
+          tabindex="-1"
           class="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-card bg-white p-6 shadow-lift ring-1 ring-line/80 sm:rounded-card"
+          @keydown="trapScaleInfoFocus"
         >
           <div class="flex items-start justify-between gap-3">
             <div class="sp-section-title">换算说明</div>
