@@ -321,6 +321,15 @@
     @apply inline-block h-[3px] w-6 rounded-full bg-sand-200;
   }
 
+  /* 笔记阅读态：正文命中词与悬停小窗 */
+  .sp-term {
+    @apply cursor-pointer border-b border-dotted border-brand-400 text-ink transition-colors duration-150 hover:text-brand-700;
+  }
+
+  .sp-tip {
+    @apply rounded-xl bg-white p-3 text-left shadow-lift ring-1 ring-line/80;
+  }
+
   /* 动态提示卡：输入区上沿的浮层，不参与文档流（出现时不重排聊天） */
   .sp-hint-card {
     @apply absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-2xl bg-white/95 shadow-dock ring-1 ring-line/80 backdrop-blur sm:left-5 sm:right-auto sm:w-[380px];
