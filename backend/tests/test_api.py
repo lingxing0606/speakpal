@@ -1624,6 +1624,203 @@ class SpellingCardHintTests(ApiTestCase):
         self.assertEqual(cards[0]["related"].get("reason"), "少了一个 r")
 
 
+class NoteLinkBase(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        _, self.headers = self.register()
+
+    def _card(self, term, kind="word", meaning="", example=""):
+        r = self.client.post(
+            "/api/study/items",
+            json={
+                "kind": kind,
+                "term": term,
+                "meaning_zh": meaning,
+                "example": example,
+                "source": "review",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def _note(self, body, title=""):
+        r = self.client.post(
+            "/api/notes",
+            json={"title": title, "body": body},
+            headers=self.headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def _links(self, note_id):
+        r = self.client.get(f"/api/notes/{note_id}/links", headers=self.headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+
+class NoteMatcherTests(unittest.TestCase):
+    def _items(self, *terms):
+        from types import SimpleNamespace
+
+        return [SimpleNamespace(id=i + 1, term=term) for i, term in enumerate(terms)]
+
+    def test_word_boundary_and_case(self):
+        from app.services.note_links import match_note_links
+
+        links = match_note_links(
+            "category cat CAT concatenate", self._items("cat", "category")
+        )
+        terms = [link["term"] for link in links]
+        self.assertIn("cat", terms)
+        self.assertIn("category", terms)
+        cat_links = [link for link in links if link["term"] == "cat"]
+        self.assertEqual(len(cat_links), 2, "大小写不敏感，且 category 里不命中 cat")
+        self.assertTrue(all(link["start"] >= 9 for link in cat_links))
+
+    def test_longest_match_wins(self):
+        from app.services.note_links import match_note_links
+
+        links = match_note_links("I like ice cream.", self._items("ice", "ice cream"))
+        self.assertEqual([link["term"] for link in links], ["ice cream"])
+
+    def test_stopwords_are_skipped(self):
+        from app.services.note_links import match_note_links
+
+        links = match_note_links("the cat", self._items("the", "cat"))
+        self.assertEqual([link["term"] for link in links], ["cat"])
+
+    def test_chinese_terms_match_without_word_boundary(self):
+        from app.services.note_links import match_note_links
+
+        links = match_note_links("复习一般过去时", self._items("一般过去时"))
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]["term"], "一般过去时")
+
+    def test_max_fifty_links(self):
+        from app.services.note_links import match_note_links
+
+        terms = [f"w{i:02d}" for i in range(60)]
+        links = match_note_links(" ".join(terms), self._items(*terms))
+        self.assertEqual(len(links), 50)
+        self.assertEqual([link["start"] for link in links], sorted(link["start"] for link in links))
+
+
+class StudyItemSearchTests(NoteLinkBase):
+    def test_search_kind_limit_and_isolation(self):
+        self._card("abandon", meaning="放弃；抛弃")
+        self._card("ice cream", kind="phrase", meaning="冰淇淋")
+        found = self.client.get("/api/study/items?q=band", headers=self.headers).json()
+        self.assertEqual([item["term"] for item in found], ["abandon"])
+        self.assertTrue(found[0]["phonetic"])
+
+        phrases = self.client.get("/api/study/items?kind=phrase", headers=self.headers).json()
+        self.assertEqual([item["term"] for item in phrases], ["ice cream"])
+        self.assertEqual(len(self.client.get("/api/study/items?limit=1", headers=self.headers).json()), 1)
+        self.assertEqual(
+            self.client.get("/api/study/items?kind=bad", headers=self.headers).status_code,
+            400,
+        )
+
+        _, other = self.register()
+        self.client.post(
+            "/api/study/items",
+            json={"kind": "word", "term": "zebra", "source": "review"},
+            headers=other,
+        )
+        mine = self.client.get("/api/study/items", headers=self.headers).json()
+        self.assertNotIn("zebra", [item["term"] for item in mine])
+
+
+class NoteLinkApiTests(NoteLinkBase):
+    def test_save_links_boundaries_stopwords_longest_and_patch(self):
+        self._card("cat", meaning="猫")
+        self._card("category", meaning="类别")
+        self._card("the", meaning="这个")
+        self._card("ice", meaning="冰")
+        self._card("ice cream", kind="phrase", meaning="冰淇淋")
+        note = self._note("The cat is not a category. I like ice cream.")
+        links = self._links(note["id"])
+        terms = {link["term"] for link in links}
+        self.assertEqual(terms, {"cat", "category", "ice cream"})
+        self.assertEqual(len(links), 3)
+        self.assertEqual([link["start"] for link in links], sorted(link["start"] for link in links))
+
+        patched = self.client.patch(
+            f"/api/notes/{note['id']}",
+            json={"title": "", "body": "Only category."},
+            headers=self.headers,
+        )
+        self.assertEqual(patched.status_code, 200, patched.text)
+        self.assertEqual([link["term"] for link in self._links(note["id"])], ["category"])
+
+        # 同一正文再保存一次，链接不重复
+        self.client.patch(
+            f"/api/notes/{note['id']}",
+            json={"title": "", "body": "Only category."},
+            headers=self.headers,
+        )
+        self.assertEqual([link["term"] for link in self._links(note["id"])], ["category"])
+
+    def test_empty_body_has_no_links(self):
+        note = self._note("", title="只有标题")
+        self.assertEqual(self._links(note["id"]), [])
+
+    def test_old_note_is_lazily_matched(self):
+        cat = self._card("cat")
+        me = self.client.get("/api/auth/me", headers=self.headers).json()
+        from app.db import SessionLocal
+        from app.models import Note
+
+        db = SessionLocal()
+        try:
+            old = Note(user_id=me["id"], title="old", body="I saw a cat.")
+            db.add(old)
+            db.commit()
+            db.refresh(old)
+            note_id = old.id
+        finally:
+            db.close()
+        links = self._links(note_id)
+        self.assertEqual([link["term"] for link in links], ["cat"])
+        self.assertEqual(links[0]["item_id"], cat["id"])
+
+    def test_mute_and_unmute(self):
+        cat = self._card("cat")
+        note = self._note("A cat.")
+        links = self._links(note["id"])
+        self.assertEqual([link["term"] for link in links], ["cat"])
+
+        mute = self.client.post(
+            f"/api/notes/{note['id']}/mutes",
+            json={"item_id": cat["id"]},
+            headers=self.headers,
+        )
+        self.assertEqual(mute.status_code, 200, mute.text)
+        self.assertEqual(self._links(note["id"]), [])
+
+        unmute = self.client.delete(
+            f"/api/notes/{note['id']}/mutes/{cat['id']}", headers=self.headers
+        )
+        self.assertEqual(unmute.status_code, 200, unmute.text)
+        self.assertEqual([link["term"] for link in self._links(note["id"])], ["cat"])
+
+    def test_link_payload_has_phonetic_reps_and_last_reviewed(self):
+        abandon = self._card("abandon", meaning="放弃；抛弃")
+        note = self._note("I abandon it.")
+        review = self.client.post(
+            f"/api/study/items/{abandon['id']}/review",
+            json={"grade": "good"},
+            headers=self.headers,
+        )
+        self.assertEqual(review.status_code, 200, review.text)
+        link = self._links(note["id"])[0]
+        self.assertTrue(link["phonetic"])
+        self.assertGreaterEqual(link["reps"], 1)
+        self.assertIsNotNone(link["last_reviewed_at"])
+        self.assertTrue(link["due_at"])
+
+
 class BandTests(unittest.TestCase):
     def test_band_score_roundtrip_monotonic(self):
         names = [n for n in dir(bands) if not n.startswith("_")]
