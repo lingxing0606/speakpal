@@ -1068,6 +1068,112 @@ class StudyCardCopyTests(ApiTestCase):
         self.assertEqual(r.json()["last_result"], "good", r.text)
 
 
+class ReviewEventTests(ApiTestCase):
+    """复习提交要留 review_events（学习模块重构方案 §4.1）。"""
+
+    def _add_word(self, headers):
+        r = self.client.post(
+            "/api/study/vocab/add",
+            json={"scope": "gaokao", "count": 1},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["items"][0]
+
+    def test_review_writes_event_with_intervals(self):
+        from app.db import SessionLocal
+        from app.models import ReviewEvent
+
+        _, headers = self.register()
+        item = self._add_word(headers)
+        r = self.client.post(
+            f"/api/study/items/{item['id']}/review",
+            json={"grade": "good"},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+
+        db = SessionLocal()
+        try:
+            events = db.query(ReviewEvent).filter(ReviewEvent.item_id == item["id"]).all()
+            self.assertEqual(len(events), 1)
+            event = events[0]
+            self.assertEqual(event.result, "good")
+            self.assertEqual(event.interval_before, 0.0)
+            self.assertAlmostEqual(event.interval_after, float(body["interval_days"]))
+            self.assertIsNotNone(event.created_at)
+        finally:
+            db.close()
+
+        summary = self.client.get("/api/study/summary?tz_offset=-480", headers=headers)
+        self.assertEqual(summary.status_code, 200, summary.text)
+        self.assertEqual(summary.json()["reviewed_today"], 1)
+
+    def test_reviewed_today_is_per_user(self):
+        _, headers = self.register()
+        _, other = self.register()
+        item = self._add_word(headers)
+        r = self.client.post(
+            f"/api/study/items/{item['id']}/review",
+            json={"grade": "hard"},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        mine = self.client.get("/api/study/summary", headers=headers).json()
+        theirs = self.client.get("/api/study/summary", headers=other).json()
+        self.assertEqual(mine["reviewed_today"], 1)
+        self.assertEqual(theirs["reviewed_today"], 0)
+
+    def test_reviewed_today_uses_local_day(self):
+        from datetime import datetime
+
+        from app.services.study import count_reviewed_today
+
+        now = datetime(2026, 11, 13, 16, 0)  # UTC
+        before = datetime(2026, 11, 13, 15, 0)
+        after = datetime(2026, 11, 13, 16, 30)
+        # 北京时间（-480）：现在已是 11-14，只有 after 落在本地今天
+        self.assertEqual(count_reviewed_today([before, after], now, -480), 1)
+        # UTC：两条都还是 11-13
+        self.assertEqual(count_reviewed_today([before, after], now, 0), 2)
+
+    def test_invalid_result_does_not_write_event(self):
+        from app.db import SessionLocal
+        from app.models import ReviewEvent
+
+        _, headers = self.register()
+        item = self._add_word(headers)
+        r = self.client.post(
+            f"/api/study/items/{item['id']}/review",
+            json={"grade": "great"},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 400)
+        db = SessionLocal()
+        try:
+            count = db.query(ReviewEvent).filter(ReviewEvent.item_id == item["id"]).count()
+            self.assertEqual(count, 0)
+        finally:
+            db.close()
+
+    def test_delete_data_clears_review_events(self):
+        _, headers = self.register()
+        item = self._add_word(headers)
+        self.client.post(
+            f"/api/study/items/{item['id']}/review",
+            json={"grade": "again"},
+            headers=headers,
+        )
+        r = self.client.request(
+            "DELETE", "/api/me/data", json={"scope": "records"}, headers=headers
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["deleted_review_events"], 1)
+        summary = self.client.get("/api/study/summary", headers=headers).json()
+        self.assertEqual(summary["reviewed_today"], 0)
+
+
 class SpellingCardHintTests(ApiTestCase):
     """拼写卡题干不能泄露答案（rc24 补）。
 

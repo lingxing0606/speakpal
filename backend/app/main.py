@@ -157,6 +157,31 @@ def _ensure_schema():
             conn.execute(
                 text("CREATE INDEX IF NOT EXISTS ix_hint_cache_created ON hint_cache (created_at)")
             )
+    if "review_events" not in tables:
+        # 复习日志：统计「今天复习了几张」与笔记「今天复习过」，按本地日切分
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE review_events ("
+                    "id INTEGER NOT NULL PRIMARY KEY, "
+                    "user_id INTEGER NOT NULL, "
+                    "item_id INTEGER NOT NULL, "
+                    "result VARCHAR(8) NOT NULL, "
+                    "interval_before REAL, "
+                    "interval_after REAL, "
+                    "created_at DATETIME NOT NULL, "
+                    "FOREIGN KEY(user_id) REFERENCES users (id), "
+                    "FOREIGN KEY(item_id) REFERENCES study_items (id))"
+                )
+            )
+    if "review_events" in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_review_events_user_time "
+                    "ON review_events (user_id, created_at)"
+                )
+            )
 
 
 _ensure_schema()

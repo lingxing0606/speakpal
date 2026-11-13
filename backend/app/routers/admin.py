@@ -11,7 +11,16 @@ from sqlalchemy.orm import selectinload
 
 from ..config import database_url_locked_by_env, settings
 from ..db import get_db
-from ..models import DrillAttempt, Note, PracticeSession, Report, StudyItem, Turn, User
+from ..models import (
+    DrillAttempt,
+    Note,
+    PracticeSession,
+    Report,
+    ReviewEvent,
+    StudyItem,
+    Turn,
+    User,
+)
 from ..schemas import AdminUserUpdateIn
 from ..security import check_password_rule, hash_password
 from ..services.scenes import get_scene
@@ -230,12 +239,14 @@ def delete_all_data(
             "deleted_reports": deleted["reports"],
             "deleted_drill_attempts": deleted["drill_attempts"],
             "deleted_study_items": deleted["study_items"],
+            "deleted_review_events": deleted["review_events"],
             "deleted_notes": deleted["notes"],
             "scope": "records",
             "user_id": body.user_id,
         }
 
     deleted_notes = db.query(Note).delete(synchronize_session=False)
+    deleted_review = db.query(ReviewEvent).delete(synchronize_session=False)
     deleted_study = db.query(StudyItem).delete(synchronize_session=False)
     deleted_drills = db.query(DrillAttempt).delete(synchronize_session=False)
     deleted_reports = db.query(Report).delete(synchronize_session=False)
@@ -252,6 +263,7 @@ def delete_all_data(
         "deleted_reports": int(deleted_reports or 0),
         "deleted_drill_attempts": int(deleted_drills or 0),
         "deleted_study_items": int(deleted_study or 0),
+        "deleted_review_events": int(deleted_review or 0),
         "deleted_notes": int(deleted_notes or 0),
         "scope": scope,
     }
@@ -309,6 +321,7 @@ def delete_user(
         "deleted_reports": deleted["reports"],
         "deleted_drill_attempts": deleted["drill_attempts"],
         "deleted_study_items": deleted["study_items"],
+        "deleted_review_events": deleted["review_events"],
         "deleted_notes": deleted["notes"],
         "user_id": user_id,
     }

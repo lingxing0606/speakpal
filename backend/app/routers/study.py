@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
-from ..models import Note, PracticeSession, StudyItem, User
+from ..models import Note, PracticeSession, ReviewEvent, StudyItem, User
 from ..schemas import (
     GrammarCardOut,
     GrammarGroupOut,
@@ -32,6 +32,7 @@ from ..services import library, wordbank
 from ..services.srs import schedule
 from ..services.study import (
     KINDS,
+    count_reviewed_today,
     is_due,
     item_out,
     judge_spelling,
@@ -81,20 +82,33 @@ def due_items(
 
 
 @router.get("/study/summary")
-def study_summary(user: User = Depends(get_current_user), db: OrmSession = Depends(get_db)):
-    """首页与四个 tab 的聚合接口：字段名按设计文档（*_count）。
+def study_summary(
+    # 与 JS 的 new Date().getTimezoneOffset() 同口径：北京时间传 -480
+    tz_offset: int = Query(default=0, ge=-840, le=840),
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """首页与学习页的聚合接口：字段名按设计文档（*_count）。
 
     `due_count` 与 `/study/due` 同源同量；分类型的 due_*_count 给 tab 上的数字用。
+    `reviewed_today` 按用户本地日统计今天的复习提交数（review_events）。
     """
     now = utcnow()
     rows = db.query(StudyItem).filter(StudyItem.user_id == user.id).all()
     notes_count = db.query(Note).filter(Note.user_id == user.id).count()
+    review_times = [
+        row[0]
+        for row in db.query(ReviewEvent.created_at)
+        .filter(ReviewEvent.user_id == user.id)
+        .all()
+    ]
     due = [row for row in rows if is_due(row, now)]
     due_by_key: dict[str, int] = {}
     for row in due:
         due_by_key[_today_key(row)] = due_by_key.get(_today_key(row), 0) + 1
     return {
         "due_count": len(due),
+        "reviewed_today": count_reviewed_today(review_times, now, tz_offset),
         "notes_count": int(notes_count or 0),
         "total": len(rows),
         "word_count": sum(1 for row in rows if row.kind == "word"),
@@ -211,6 +225,7 @@ def review_item(
         result, _distance = judge_spelling(answer, row.term)
     else:
         result = (body.grade or body.result or "").strip().lower()
+    interval_before = float(row.interval_days or 0)
     try:
         ease, interval, reps, lapses, due_at = schedule(
             row.ease, row.interval_days or 0, row.reps or 0, row.lapses or 0, result
@@ -222,6 +237,16 @@ def review_item(
     row.reps = reps
     row.lapses = lapses
     row.due_at = due_at
+    # 每次提交都留一条日志：复习统计与笔记「今天复习过」都靠它
+    db.add(
+        ReviewEvent(
+            user_id=user.id,
+            item_id=row.id,
+            result=str(result or "").strip().lower(),
+            interval_before=interval_before,
+            interval_after=float(interval),
+        )
+    )
     db.commit()
     db.refresh(row)
     out = item_out(row)

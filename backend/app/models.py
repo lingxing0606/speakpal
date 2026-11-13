@@ -137,6 +137,24 @@ class StudyItem(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class ReviewEvent(Base):
+    """每次复习提交的日志（学习模块重构方案 §4.1）。
+
+    只记结果与间隔变化，不存用户原文；「今天复习了几张」「笔记里这条是不是
+    今天复习过」都从这张表按本地日统计。
+    """
+
+    __tablename__ = "review_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    item_id = Column(Integer, ForeignKey("study_items.id"), nullable=False, index=True)
+    result = Column(String(8), nullable=False)  # again | hard | good
+    interval_before = Column(Float, nullable=True)
+    interval_after = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
 class Note(Base):
     __tablename__ = "notes"
 

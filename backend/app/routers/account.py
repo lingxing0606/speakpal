@@ -228,6 +228,7 @@ def delete_my_account(
         "deleted_reports": deleted["reports"],
         "deleted_drill_attempts": deleted["drill_attempts"],
         "deleted_study_items": deleted["study_items"],
+        "deleted_review_events": deleted["review_events"],
         "deleted_notes": deleted["notes"],
         "scope": "account",
     }
@@ -257,6 +258,7 @@ def delete_my_data(
         "deleted_reports": deleted["reports"],
         "deleted_drill_attempts": deleted["drill_attempts"],
         "deleted_study_items": deleted["study_items"],
+        "deleted_review_events": deleted["review_events"],
         "deleted_notes": deleted["notes"],
         "scope": "records",
     }

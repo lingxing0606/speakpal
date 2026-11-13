@@ -16,6 +16,7 @@ from ..models import StudyItem
 from ..schemas import StudyItemOut
 from ..timeutil import utc_iso
 from ..timeutil import utcnow
+from .dashboard import local_day
 
 KINDS = ("word", "phrase", "spelling", "grammar")
 AUTO_KINDS = {"spelling": "spelling", "stiffness": "phrase"}
@@ -77,6 +78,22 @@ def is_due(row: StudyItem, now: datetime | None = None) -> bool:
     now = now or utcnow()
     due = row.due_at or now
     return due.date() <= now.date()
+
+
+def count_reviewed_today(
+    created_times, now: datetime, tz_offset_min: int = 0
+) -> int:
+    """按用户本地日数今天复习了几条（学习模块重构方案 §4.1）。
+
+    created_times 是 review_events.created_at（naive UTC）；
+    tz_offset_min 用 JS getTimezoneOffset() 的口径（北京时间 = -480）。
+    """
+    today = local_day(now, tz_offset_min)
+    return sum(
+        1
+        for created in created_times
+        if created is not None and local_day(created, tz_offset_min) == today
+    )
 
 
 def _edit_distance(a: str, b: str) -> int:
