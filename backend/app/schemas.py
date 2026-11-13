@@ -142,6 +142,19 @@ class StudyItemOut(BaseModel):
     created_at: str
 
 
+class StudyItemSearchOut(BaseModel):
+    """笔记侧栏 / 匹配用的轻量学习卡；phonetic 由词库现查。"""
+
+    id: int
+    term: str
+    meaning_zh: str = ""
+    phonetic: str = ""
+    kind: str
+    reps: int = 0
+    due_at: str
+    created_at: str
+
+
 class ReportOut(BaseModel):
     report_id: int
     # 降级报告（模型不可用）不计分：total_score / band / cefr 均为 None
@@ -368,6 +381,26 @@ class NoteOut(BaseModel):
     session_id: int | None = None
     created_at: str
     updated_at: str
+
+
+class NoteLinkOut(BaseModel):
+    """笔记正文里命中的学习卡 + 位置；悬停所需字段一次给全。"""
+
+    item_id: int
+    term: str
+    kind: str
+    meaning_zh: str = ""
+    phonetic: str = ""
+    example: str = ""
+    reps: int = 0
+    due_at: str = ""
+    last_reviewed_at: str | None = None
+    start: int
+    end: int
+
+
+class NoteMuteIn(BaseModel):
+    item_id: int
 
 
 class PreferencesOut(BaseModel):

@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session as OrmSession
 from ..models import (
     DrillAttempt,
     Note,
+    NoteLink,
+    NoteLinkMute,
     PracticeSession,
     Report,
     ReviewEvent,
@@ -31,6 +33,8 @@ def delete_user_data(db: OrmSession, user_id: int) -> dict:
         "drill_attempts": 0,
         "study_items": 0,
         "review_events": 0,
+        "note_links": 0,
+        "note_link_mutes": 0,
         "notes": 0,
     }
     if session_ids:
@@ -60,6 +64,20 @@ def delete_user_data(db: OrmSession, user_id: int) -> dict:
         .filter(ReviewEvent.user_id == user_id)
         .delete(synchronize_session=False)
     )
+    note_ids = [
+        row[0] for row in db.query(Note.id).filter(Note.user_id == user_id)
+    ]
+    if note_ids:
+        deleted["note_links"] = (
+            db.query(NoteLink)
+            .filter(NoteLink.note_id.in_(note_ids))
+            .delete(synchronize_session=False)
+        )
+        deleted["note_link_mutes"] = (
+            db.query(NoteLinkMute)
+            .filter(NoteLinkMute.note_id.in_(note_ids))
+            .delete(synchronize_session=False)
+        )
     deleted["study_items"] = (
         db.query(StudyItem)
         .filter(StudyItem.user_id == user_id)

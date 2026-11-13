@@ -4,10 +4,19 @@ from __future__ import annotations
 
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session as OrmSession
 
 from ..db import get_db
-from ..models import Note, PracticeSession, ReviewEvent, StudyItem, User
+from ..models import (
+    Note,
+    NoteLink,
+    NoteLinkMute,
+    PracticeSession,
+    ReviewEvent,
+    StudyItem,
+    User,
+)
 from ..schemas import (
     GrammarCardOut,
     GrammarGroupOut,
@@ -15,11 +24,14 @@ from ..schemas import (
     LibraryAddIn,
     LibraryAddOut,
     NoteIn,
+    NoteLinkOut,
+    NoteMuteIn,
     NoteOut,
     SpokenCardOut,
     SpokenOut,
     StudyItemIn,
     StudyItemOut,
+    StudyItemSearchOut,
     StudyReviewIn,
     TodayGroupOut,
     TodayOut,
@@ -30,6 +42,7 @@ from ..schemas import (
 from ..security import get_current_user
 from ..services import library, wordbank
 from ..services.llm_config import LLMConfig, get_llm_config
+from ..services.note_links import note_links_out, phonetic_for, refresh_note_links
 from ..services.srs import schedule
 from ..services.study import (
     KINDS,
@@ -57,6 +70,47 @@ def _item_or_404(db: OrmSession, user_id: int, item_id: int) -> StudyItem:
     if not row or row.user_id != user_id:
         raise HTTPException(status_code=404, detail="学习卡不存在")
     return row
+
+
+@router.get("/study/items", response_model=list[StudyItemSearchOut])
+def list_items(
+    q: str | None = None,
+    kind: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """当前用户的学习卡（笔记侧栏 / 匹配用）；关键词同时搜词形与中文释义。"""
+    query = db.query(StudyItem).filter(StudyItem.user_id == user.id)
+    keyword = (q or "").strip()
+    if keyword:
+        like = f"%{keyword}%"
+        query = query.filter(
+            or_(StudyItem.term.ilike(like), StudyItem.meaning_zh.ilike(like))
+        )
+    wanted = (kind or "").strip().lower()
+    if wanted:
+        if wanted not in KINDS:
+            raise HTTPException(status_code=400, detail="kind 只能是 word / phrase / spelling / grammar")
+        query = query.filter(StudyItem.kind == wanted)
+    rows = (
+        query.order_by(StudyItem.created_at.desc(), StudyItem.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        StudyItemSearchOut(
+            id=row.id,
+            term=row.term or "",
+            meaning_zh=row.meaning_zh or "",
+            phonetic=phonetic_for(row.term or ""),
+            kind=row.kind,
+            reps=int(row.reps or 0),
+            due_at=utc_iso(row.due_at),
+            created_at=utc_iso(row.created_at),
+        )
+        for row in rows
+    ]
 
 
 @router.get("/study/due", response_model=list[StudyItemOut])
@@ -264,6 +318,11 @@ def delete_item(
     db: OrmSession = Depends(get_db),
 ):
     row = _item_or_404(db, user.id, item_id)
+    # 笔记里的关联也指向这张卡，先清掉，避免留下悬空 item_id
+    db.query(NoteLink).filter(NoteLink.item_id == item_id).delete(synchronize_session=False)
+    db.query(NoteLinkMute).filter(NoteLinkMute.item_id == item_id).delete(
+        synchronize_session=False
+    )
     db.delete(row)
     db.commit()
     return {"deleted": 1, "item_id": item_id}
@@ -726,6 +785,8 @@ def create_note(
     _check_session_owner(db, user.id, body.session_id)
     row = Note(user_id=user.id, title=title, body=text, session_id=body.session_id)
     db.add(row)
+    db.flush()
+    refresh_note_links(db, row)
     db.commit()
     db.refresh(row)
     return _note_out(row)
@@ -755,6 +816,7 @@ def update_note(
     row.title = title
     row.body = text
     row.updated_at = utcnow()
+    refresh_note_links(db, row)
     db.commit()
     db.refresh(row)
     return _note_out(row)
@@ -767,6 +829,54 @@ def delete_note(
     db: OrmSession = Depends(get_db),
 ):
     row = _note_or_404(db, user.id, note_id)
+    db.query(NoteLink).filter(NoteLink.note_id == note_id).delete(synchronize_session=False)
+    db.query(NoteLinkMute).filter(NoteLinkMute.note_id == note_id).delete(
+        synchronize_session=False
+    )
     db.delete(row)
     db.commit()
     return {"deleted": 1, "note_id": note_id}
+
+
+@router.get("/notes/{note_id}/links", response_model=list[NoteLinkOut])
+def get_note_links(
+    note_id: int,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """笔记命中的学习卡；旧笔记没有派生过链接时首次读取会补算。"""
+    row = _note_or_404(db, user.id, note_id)
+    return note_links_out(db, row)
+
+
+@router.post("/notes/{note_id}/mutes")
+def mute_note_link(
+    note_id: int,
+    body: NoteMuteIn,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    row = _note_or_404(db, user.id, note_id)
+    _item_or_404(db, user.id, body.item_id)
+    if db.get(NoteLinkMute, (note_id, body.item_id)) is None:
+        db.add(NoteLinkMute(note_id=note_id, item_id=body.item_id))
+    refresh_note_links(db, row)
+    db.commit()
+    return {"muted": 1, "item_id": body.item_id}
+
+
+@router.delete("/notes/{note_id}/mutes/{item_id}")
+def unmute_note_link(
+    note_id: int,
+    item_id: int,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    row = _note_or_404(db, user.id, note_id)
+    _item_or_404(db, user.id, item_id)
+    mute = db.get(NoteLinkMute, (note_id, item_id))
+    if mute is not None:
+        db.delete(mute)
+    refresh_note_links(db, row)
+    db.commit()
+    return {"muted": 0, "item_id": item_id}

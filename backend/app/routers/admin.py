@@ -14,6 +14,8 @@ from ..db import get_db
 from ..models import (
     DrillAttempt,
     Note,
+    NoteLink,
+    NoteLinkMute,
     PracticeSession,
     Report,
     ReviewEvent,
@@ -245,6 +247,8 @@ def delete_all_data(
             "user_id": body.user_id,
         }
 
+    db.query(NoteLink).delete(synchronize_session=False)
+    db.query(NoteLinkMute).delete(synchronize_session=False)
     deleted_notes = db.query(Note).delete(synchronize_session=False)
     deleted_review = db.query(ReviewEvent).delete(synchronize_session=False)
     deleted_study = db.query(StudyItem).delete(synchronize_session=False)

@@ -165,3 +165,30 @@ class Note(Base):
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow)
+
+
+class NoteLink(Base):
+    """笔记正文里命中的学习卡（方案 A：纯文本自动识别）。
+
+    start/end 是正文里的字符位置；同一个词出现多次会有多行。
+    """
+
+    __tablename__ = "note_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
+    item_id = Column(Integer, ForeignKey("study_items.id"), nullable=False, index=True)
+    term = Column(String(128), nullable=False)
+    start = Column(Integer, nullable=False)
+    end = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class NoteLinkMute(Base):
+    """用户取消的误关联：同一 (note, item) 只留一行。"""
+
+    __tablename__ = "note_link_mutes"
+
+    note_id = Column(Integer, ForeignKey("notes.id"), primary_key=True)
+    item_id = Column(Integer, ForeignKey("study_items.id"), primary_key=True)
+    created_at = Column(DateTime, default=utcnow)

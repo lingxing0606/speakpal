@@ -209,6 +209,49 @@ def _ensure_schema():
                     "ON word_assist_cache (created_at)"
                 )
             )
+    if "note_links" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE note_links ("
+                    "id INTEGER NOT NULL PRIMARY KEY, "
+                    "note_id INTEGER NOT NULL, "
+                    "item_id INTEGER NOT NULL, "
+                    "term VARCHAR(128) NOT NULL, "
+                    "start INTEGER NOT NULL, "
+                    "end INTEGER NOT NULL, "
+                    "created_at DATETIME NOT NULL, "
+                    "FOREIGN KEY(note_id) REFERENCES notes (id), "
+                    "FOREIGN KEY(item_id) REFERENCES study_items (id))"
+                )
+            )
+    if "note_links" in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_note_links_note_id ON note_links (note_id)")
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_note_links_item_id ON note_links (item_id)")
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_note_links_note_start "
+                    "ON note_links (note_id, start)"
+                )
+            )
+    if "note_link_mutes" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE note_link_mutes ("
+                    "note_id INTEGER NOT NULL, "
+                    "item_id INTEGER NOT NULL, "
+                    "created_at DATETIME NOT NULL, "
+                    "PRIMARY KEY (note_id, item_id), "
+                    "FOREIGN KEY(note_id) REFERENCES notes (id), "
+                    "FOREIGN KEY(item_id) REFERENCES study_items (id))"
+                )
+            )
 
 
 _ensure_schema()
