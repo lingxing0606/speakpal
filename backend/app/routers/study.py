@@ -29,6 +29,7 @@ from ..schemas import (
 )
 from ..security import get_current_user
 from ..services import library, wordbank
+from ..services.llm_config import LLMConfig, get_llm_config
 from ..services.srs import schedule
 from ..services.study import (
     KINDS,
@@ -36,9 +37,11 @@ from ..services.study import (
     is_due,
     item_out,
     judge_spelling,
+    learned_word_terms,
     normalize_related,
     safe_spelling_hint,
 )
+from ..services.word_assist import is_word, normalize_term, word_card_fields
 from ..timeutil import utc_iso, utcnow
 
 router = APIRouter(prefix="/api", tags=["study"])
@@ -272,16 +275,6 @@ def delete_item(
 MAX_VOCAB_PULL = 200  # 一次最多取多少个词，防手滑传个 99999
 
 
-def _learned_word_terms(db: OrmSession, user_id: int) -> set[str]:
-    """已经进过学习清单的单词（小写），用来避开重复推荐。"""
-    rows = (
-        db.query(StudyItem.term)
-        .filter(StudyItem.user_id == user_id, StudyItem.kind == "word")
-        .all()
-    )
-    return {str(row[0]).strip().lower() for row in rows if row[0]}
-
-
 def _vocab_used_today(db: OrmSession, user_id: int) -> int:
     """今天用词库加了几张新词卡（只用于展示，不再限制）。"""
     today = utcnow().date()
@@ -317,7 +310,7 @@ def vocab_next(
         raise HTTPException(status_code=400, detail="单词范围不存在")
     scope_id = _scope_or_default(scope_id, user)
     limit = max(1, min(limit, MAX_VOCAB_PULL))
-    learned = _learned_word_terms(db, user.id)
+    learned = learned_word_terms(db, user.id)
     info = wordbank.totals(scope_id, learned)
     return VocabOut(
         scope=scope_id,
@@ -337,21 +330,22 @@ def vocab_add(
     body: VocabAddIn,
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
+    llm: LLMConfig = Depends(get_llm_config),
 ):
-    """把新词落成卡（kind=word, source=vocab），复用 §16 的 SRS，不另起调度。
+    """把新词落成卡（命中词库 source=vocab，词库外 source=custom）。
 
-    去重按 `(user_id, term, kind)`（词不分大小写）；每日新词上限 20，
-    超出的部分不计入 `added`，用 `limited` 报给前端，而不是静默丢弃。
+    去重按 `(user_id, term, kind)`（词不分大小写）；词库外的词不再静默跳过，
+    能生成 AI 词卡就用 AI，失败或没有 key 时先落一张可继续学习的卡。
     """
     scope_id = (body.scope or "").strip().lower() or None
     if scope_id and scope_id not in wordbank.scope_ids():
         raise HTTPException(status_code=400, detail="单词范围不存在")
     scope_id = _scope_or_default(scope_id, user)
 
-    learned = _learned_word_terms(db, user.id)
+    learned = learned_word_terms(db, user.id)
     requested: list[str] = []
     for raw in body.terms or []:
-        term = str(raw or "").strip()
+        term = normalize_term(raw)
         if term:
             requested.append(term)
     if not requested and body.count:
@@ -368,10 +362,27 @@ def vocab_add(
         if key in learned or key in seen:
             skipped += 1
             continue
-        seen.add(key)
-        found = wordbank.find(term, scope_id)
-        if not found:
+        if not is_word(term):
             skipped += 1
+            continue
+        seen.add(key)
+        found = wordbank.find(term)
+        if not found:
+            # 词库外的词：走与「自由扩充」相同的补卡路径，失败也不阻塞
+            fields = word_card_fields(term, "", db, llm)
+            row = StudyItem(
+                user_id=user.id,
+                kind="word",
+                term=fields["term"][:MAX_TERM],
+                context="",
+                meaning_zh=fields["meaning_zh"],
+                example=fields["example"],
+                related_json=__import__("json").dumps(fields["related"], ensure_ascii=False),
+                source="custom",
+                due_at=utcnow(),
+            )
+            db.add(row)
+            added_rows.append(row)
             continue
         entry, found_scope = found
         card = wordbank.word_out(entry, found_scope)

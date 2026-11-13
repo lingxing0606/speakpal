@@ -301,6 +301,48 @@ class StudyReviewIn(BaseModel):
     answer: str | None = None
 
 
+class WordAssistIn(BaseModel):
+    """AI 助记：term 必填，用户已给中文时优先保留用户的中文。"""
+
+    term: str = Field(min_length=1, max_length=64)
+    meaning_zh: str = Field(default="", max_length=200)
+
+
+class WordAssistOut(BaseModel):
+    term: str
+    meaning_zh: str = ""
+    pos: str = ""
+    # 无 key / 超时 / JSON 坏时为 null，不阻塞前端
+    assist: Dict[str, Any] | None = None
+    source: str = "meaning"  # llm | meaning
+    cached: bool = False
+
+
+class WordImportIn(BaseModel):
+    """自由扩充：粘贴一段文本；use_ai=False 时未命中词库的词只存用户给的中文。"""
+
+    text: str = Field(default="", max_length=10000)
+    use_ai: bool = True
+
+
+class WordImportOut(BaseModel):
+    added: int = 0
+    skipped: int = 0
+    items: List[StudyItemOut] = []
+
+
+class WordLearnIn(BaseModel):
+    """三步学词完成后落卡；三步标记由前端按实际流程回传。"""
+
+    term: str = Field(min_length=1, max_length=64)
+    meaning_zh: str = Field(default="", max_length=200)
+    example: str = Field(default="", max_length=300)
+    context: str = Field(default="", max_length=300)
+    recognized: bool = False
+    spelled: bool = False
+    used: bool = False
+
+
 class NoteIn(BaseModel):
     title: str | None = Field(default=None, max_length=128)
     body: str = ""

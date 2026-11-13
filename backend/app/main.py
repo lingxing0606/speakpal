@@ -21,6 +21,7 @@ from .routers import (
     study,
     system,
     tts,
+    words,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -182,6 +183,32 @@ def _ensure_schema():
                     "ON review_events (user_id, created_at)"
                 )
             )
+    if "word_assist_cache" not in tables:
+        # AI 助记缓存：只存 sha256(词) 与生成结果，不存用户输入（幂等补表）
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE word_assist_cache ("
+                    "key TEXT NOT NULL PRIMARY KEY, "
+                    "payload TEXT NOT NULL, "
+                    "created_at DATETIME NOT NULL, "
+                    "hits INTEGER DEFAULT 0)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_word_assist_cache_created "
+                    "ON word_assist_cache (created_at)"
+                )
+            )
+    if "word_assist_cache" in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_word_assist_cache_created "
+                    "ON word_assist_cache (created_at)"
+                )
+            )
 
 
 _ensure_schema()
@@ -213,6 +240,7 @@ app.include_router(exercises.router)
 app.include_router(hints.router)
 app.include_router(tts.router)
 app.include_router(study.router)
+app.include_router(words.router)
 
 
 _ADMIN_HTML = _STATIC_DIR / "admin.html"

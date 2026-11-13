@@ -80,6 +80,16 @@ def is_due(row: StudyItem, now: datetime | None = None) -> bool:
     return due.date() <= now.date()
 
 
+def learned_word_terms(db: OrmSession, user_id: int) -> set[str]:
+    """已经进过学习清单的单词（小写），用来避开重复推荐与重复导入。"""
+    rows = (
+        db.query(StudyItem.term)
+        .filter(StudyItem.user_id == user_id, StudyItem.kind == "word")
+        .all()
+    )
+    return {str(row[0]).strip().lower() for row in rows if row[0]}
+
+
 def count_reviewed_today(
     created_times, now: datetime, tz_offset_min: int = 0
 ) -> int:
