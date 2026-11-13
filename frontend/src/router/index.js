@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '../stores/auth'
+import { useSettingsStore } from '../stores/settings'
 import History from '../views/History.vue'
 import Home from '../views/Home.vue'
 import Login from '../views/Login.vue'
@@ -8,8 +9,10 @@ import Notes from '../views/Notes.vue'
 import Practice from '../views/Practice.vue'
 import Pronunciation from '../views/Pronunciation.vue'
 import Report from '../views/Report.vue'
+import Review from '../views/Review.vue'
 import Settings from '../views/Settings.vue'
-import Study from '../views/Study.vue'
+import StudyHome from '../views/StudyHome.vue'
+import StudyScope from '../views/StudyScope.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -20,7 +23,9 @@ const router = createRouter({
     { path: '/practice/:id', component: Practice },
     { path: '/report/:id', component: Report },
     { path: '/history', component: History },
-    { path: '/study', component: Study },
+    { path: '/review', component: Review },
+    { path: '/study', component: StudyHome },
+    { path: '/study/:scope', component: StudyScope },
     { path: '/notes', component: Notes },
     { path: '/pronunciation', component: Pronunciation },
     { path: '/settings', component: Settings },
@@ -36,6 +41,17 @@ router.beforeEach((to) => {
     return { path: '/login', query: to.path === '/' ? {} : { next: to.fullPath } }
   }
   if (to.path === '/login' && auth.token) return '/'
+
+  // 旧学习页链接：复习独立成页，其余 tab 落到上次范围（没有就四级）
+  if (to.path === '/study' && to.query.tab) {
+    const raw = Array.isArray(to.query.tab) ? to.query.tab[0] : to.query.tab
+    const tab = raw === 'phrase' ? 'spoken' : raw
+    if (tab === 'review') return { path: '/review' }
+    if (tab === 'new' || tab === 'grammar' || tab === 'spoken') {
+      const scope = useSettingsStore().wordScope || 'cet4'
+      return { path: `/study/${scope}`, query: { tab } }
+    }
+  }
 })
 
 export default router

@@ -7,12 +7,16 @@ const route = useRoute()
 const tabs = [
   { to: '/', label: '首页', icon: ['M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z'] },
   {
+    to: '/review',
+    label: '复习',
+    icon: ['M20 11a8 8 0 0 0-14.6-4.4L4 8', 'M4 4v4h4', 'M4 13a8 8 0 0 0 14.6 4.4L20 16', 'M20 20v-4h-4'],
+  },
+  {
     to: '/study',
     label: '学习',
     icon: ['M4 5.5h7a2 2 0 0 1 2 2V20a1.8 1.8 0 0 0-1.8-1.8H4z', 'M20 5.5h-5a2 2 0 0 0-2 2V20a1.8 1.8 0 0 1 1.8-1.8H20z'],
   },
   { to: '/notes', label: '笔记', icon: ['M6 3.5h9l4 4v13H6z', 'M15 3.5v4h4', 'M9 12h7M9 16h5'] },
-  { to: '/history', label: '历史', icon: ['M12 20.5a8.5 8.5 0 1 0-8.5-8.5', 'M3.5 7v5h5', 'M12 7.5V12l3 2'] },
   {
     to: '/settings',
     label: '设置',

@@ -26,6 +26,7 @@ const route = useRoute()
 
 const LINKS = [
   { to: '/', label: '首页' },
+  { to: '/review', label: '复习' },
   { to: '/study', label: '学习' },
   { to: '/notes', label: '笔记' },
   { to: '/history', label: '历史' },

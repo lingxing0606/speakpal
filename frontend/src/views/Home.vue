@@ -171,7 +171,7 @@ function logout() {
                 <div class="sp-num text-2xl font-semibold text-ink"><CountUp :value="dash?.current_streak || 0" /></div>
                 <div class="mt-0.5 text-[11px] text-ink-mute">连续天数</div>
               </router-link>
-              <router-link to="/study?tab=review" class="sp-stat group transition hover:ring-brand-200">
+              <router-link to="/review" class="sp-stat group transition hover:ring-brand-200">
                 <div class="sp-num text-2xl font-semibold text-ink">
                   <CountUp v-if="!summaryError" :value="dueCount" />
                   <span v-else class="text-base text-ink-mute">—</span>

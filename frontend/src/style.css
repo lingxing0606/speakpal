@@ -110,6 +110,11 @@
     animation-delay: calc(var(--i, 0) * 55ms);
   }
 
+  /* 学习范围页进入：从右侧 12px 进入 240ms（复习拆分后的一级页） */
+  .sp-page-in {
+    animation: sp-page-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
   /* 加载占位：微光扫过，代替「正在加载…」 */
   .sp-skeleton {
     @apply rounded-lg bg-sand-100;
@@ -338,6 +343,17 @@
   100% {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes sp-page-in {
+  0% {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 
