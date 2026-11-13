@@ -371,6 +371,20 @@ _HINT_JSON = _json.dumps(
 )
 
 
+# AI 助记：模型正常返回的合法 JSON
+_WORD_ASSIST_JSON = _json.dumps(
+    {
+        "meaning_zh": "意外发现珍奇事物的运气",
+        "pos": "n.",
+        "root": "源自 Serendip（斯里兰卡古称）",
+        "association": "像在旧书里翻到一张藏宝图",
+        "collocations": ["pure serendipity", "a moment of serendipity", "by serendipity"],
+        "scene_example": "Meeting her was pure serendipity.",
+    },
+    ensure_ascii=False,
+)
+
+
 class _HintClient(_FakeClient):
     """提示接口的模型替身：回合法 JSON，并记下被调用次数（验证缓存命中）。"""
 
@@ -380,6 +394,33 @@ class _HintClient(_FakeClient):
     def post(self, *a, **k):
         type(self).calls += 1
         return super().post(*a, **k)
+
+
+class _WordAssistClient(_FakeClient):
+    """AI 助记的模型替身：回合法 JSON，并记下被调用次数。"""
+
+    calls = 0
+    payload = {"choices": [{"message": {"content": _WORD_ASSIST_JSON}}]}
+
+    def post(self, *a, **k):
+        type(self).calls += 1
+        return super().post(*a, **k)
+
+
+class _TimeoutClient:
+    """模拟助记请求超时。"""
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def post(self, *a, **k):
+        raise httpx.ConnectTimeout("timeout")
 
 
 def _sse_lines(*pieces):
@@ -1172,6 +1213,222 @@ class ReviewEventTests(ApiTestCase):
         self.assertEqual(r.json()["deleted_review_events"], 1)
         summary = self.client.get("/api/study/summary", headers=headers).json()
         self.assertEqual(summary["reviewed_today"], 0)
+
+
+class _WordAssistBase(ApiTestCase):
+    """助记 / 导入 / 三步学习共用的账号与缓存清理。"""
+
+    def setUp(self):
+        super().setUp()
+        from sqlalchemy import text as sql_text
+
+        from app.db import SessionLocal
+
+        self._dns = mock.patch.object(outbound.socket, "getaddrinfo", _public_dns)
+        self._dns.start()
+        self.addCleanup(self._dns.stop)
+        db = SessionLocal()
+        try:
+            db.execute(sql_text("DELETE FROM word_assist_cache"))
+            db.commit()
+        finally:
+            db.close()
+        _WordAssistClient.calls = 0
+        _, self.auth = self.register()
+        self.headers = {**self.auth, **LLM_HEADERS}
+
+    def _assist(self, term, meaning_zh="", client=None, headers=None):
+        with mock.patch("app.services.word_assist.httpx.Client", client or _WordAssistClient):
+            return self.client.post(
+                "/api/study/words/assist",
+                json={"term": term, "meaning_zh": meaning_zh},
+                headers=headers or self.headers,
+            )
+
+    def _import(self, text, use_ai=True, client=None, headers=None):
+        with mock.patch("app.services.word_assist.httpx.Client", client or _WordAssistClient):
+            return self.client.post(
+                "/api/study/words/import",
+                json={"text": text, "use_ai": use_ai},
+                headers=headers or self.headers,
+            )
+
+    def _learn(self, term, meaning_zh="", example="", **flags):
+        body = {
+            "term": term,
+            "meaning_zh": meaning_zh,
+            "example": example,
+            "recognized": flags.get("recognized", True),
+            "spelled": flags.get("spelled", True),
+            "used": flags.get("used", True),
+        }
+        return self.client.post("/api/study/words/learn", json=body, headers=self.headers)
+
+
+class WordAssistTests(_WordAssistBase):
+    def test_assist_from_model_then_cache_hit(self):
+        first = self._assist("serendipity")
+        self.assertEqual(first.status_code, 200, first.text)
+        body = first.json()
+        self.assertEqual(body["source"], "llm")
+        self.assertFalse(body["cached"])
+        self.assertEqual(body["pos"], "n.")
+        self.assertEqual(len(body["assist"]["collocations"]), 3)
+        self.assertEqual(body["assist"]["scene_example"], "Meeting her was pure serendipity.")
+        self.assertEqual(_WordAssistClient.calls, 1)
+
+        second = self._assist("serendipity").json()
+        self.assertTrue(second["cached"])
+        self.assertEqual(second["assist"], body["assist"])
+        self.assertEqual(_WordAssistClient.calls, 1, "命中缓存后不再打上游")
+
+    def test_given_meaning_wins_over_model(self):
+        body = self._assist("serendipity", "我的释义").json()
+        self.assertEqual(body["source"], "llm")
+        self.assertEqual(body["meaning_zh"], "我的释义")
+
+    def test_missing_key_returns_meaning_only(self):
+        headers = dict(self.auth)
+        body = self._assist("zephyr", "西风", headers=headers).json()
+        self.assertIsNone(body["assist"])
+        self.assertEqual(body["meaning_zh"], "西风")
+        self.assertEqual(body["source"], "meaning")
+        self.assertEqual(_WordAssistClient.calls, 0)
+
+    def test_missing_key_does_not_reuse_cache(self):
+        self._assist("serendipity")
+        body = self._assist("serendipity", headers=dict(self.auth)).json()
+        self.assertIsNone(body["assist"])
+        self.assertEqual(body["source"], "meaning")
+
+    def test_bad_json_returns_null_assist(self):
+        body = self._assist(
+            "zephyr", "西风", client=_ScriptedClient.with_text("not json at all")
+        ).json()
+        self.assertIsNone(body["assist"])
+        self.assertEqual(body["meaning_zh"], "西风")
+
+    def test_timeout_returns_null_assist(self):
+        body = self._assist("zephyr", "西风", client=_TimeoutClient).json()
+        self.assertIsNone(body["assist"])
+        self.assertEqual(body["meaning_zh"], "西风")
+
+    def test_rejects_non_word(self):
+        r = self._assist("中文")
+        self.assertEqual(r.status_code, 400)
+
+
+class WordImportTests(_WordAssistBase):
+    def test_import_known_and_custom_words_without_key(self):
+        headers = dict(self.auth)
+        text = "serendipity 意外发现\nabandon, serendipity"
+        first = self._import(text, headers=headers)
+        self.assertEqual(first.status_code, 200, first.text)
+        body = first.json()
+        self.assertEqual(body["added"], 2)
+        self.assertEqual(body["skipped"], 0)
+        items = {item["term"]: item for item in body["items"]}
+        self.assertEqual(items["serendipity"]["meaning_zh"], "意外发现")
+        self.assertIn("放弃", items["abandon"]["meaning_zh"])
+        self.assertTrue(all(item["source"] == "custom" for item in body["items"]))
+        self.assertTrue(all(item["due"] for item in body["items"]))
+
+        second = self._import(text, headers=headers).json()
+        self.assertEqual(second["added"], 0)
+        self.assertEqual(second["skipped"], 2)
+        self.assertEqual(_WordAssistClient.calls, 0, "没有 key 不打上游")
+
+    def test_import_ai_fills_unknown_card(self):
+        body = self._import("serendipity").json()
+        self.assertEqual(body["added"], 1)
+        item = body["items"][0]
+        self.assertTrue(item["meaning_zh"].startswith("n. "))
+        self.assertEqual(item["example"], "Meeting her was pure serendipity.")
+        self.assertEqual(item["source"], "custom")
+        self.assertEqual(_WordAssistClient.calls, 1)
+
+    def test_import_ai_failure_still_adds_card(self):
+        bad = _ScriptedClient.with_text("not json")
+        body = self._import("zephyr 西风", client=bad).json()
+        self.assertEqual(body["added"], 1)
+        item = body["items"][0]
+        self.assertEqual(item["term"], "zephyr")
+        self.assertEqual(item["meaning_zh"], "西风")
+        self.assertEqual(item["example"], "")
+
+    def test_import_dedupes_case_insensitive(self):
+        body = self._import("Serendipity, serendipity, SERENDIPITY", headers=dict(self.auth)).json()
+        self.assertEqual(body["added"], 1)
+        self.assertEqual(len(body["items"]), 1)
+
+    def test_vocab_add_accepts_wordbank_external_term(self):
+        headers = dict(self.auth)
+        with mock.patch("app.services.word_assist.httpx.Client", _WordAssistClient):
+            r = self.client.post(
+                "/api/study/vocab/add",
+                json={"scope": "cet4", "terms": ["zephyr"]},
+                headers=headers,
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["added"], 1)
+        self.assertEqual(body["skipped"], 0)
+        self.assertEqual(body["items"][0]["term"], "zephyr")
+        self.assertEqual(body["items"][0]["source"], "custom")
+
+    def test_import_rejects_more_than_100(self):
+        text = ",".join(
+            f"word{chr(97 + i % 26)}{chr(97 + (i // 26) % 26)}" for i in range(101)
+        )
+        r = self._import(text, headers=dict(self.auth))
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("100", r.json()["detail"])
+
+    def test_import_rejects_empty_text(self):
+        r = self._import("  ,，\n ", headers=dict(self.auth))
+        self.assertEqual(r.status_code, 400)
+
+
+class WordLearnTests(_WordAssistBase):
+    def test_three_steps_add_word_to_review(self):
+        r = self._learn("serendipity", "意外发现", "Meeting her was pure serendipity.")
+        self.assertEqual(r.status_code, 200, r.text)
+        item = r.json()
+        self.assertEqual(item["source"], "custom")
+        self.assertTrue(item["due"])
+        today = self.client.get("/api/study/today", headers=self.headers).json()
+        terms = [card["term"] for group in today["groups"] for card in group["items"]]
+        self.assertIn("serendipity", terms)
+
+    def test_missing_step_rejected(self):
+        r = self._learn("serendipity", "意外发现", used=False)
+        self.assertEqual(r.status_code, 400)
+        due = self.client.get("/api/study/due", headers=self.headers).json()
+        self.assertNotIn("serendipity", [item["term"] for item in due])
+
+    def test_learning_imported_card_fills_meaning_without_duplicate(self):
+        imported = self._import("serendipity", headers=dict(self.auth)).json()["items"][0]
+        learned = self._learn("serendipity", "意外发现")
+        self.assertEqual(learned.status_code, 200, learned.text)
+        self.assertEqual(learned.json()["id"], imported["id"])
+        self.assertEqual(learned.json()["meaning_zh"], "意外发现")
+
+    def test_learning_is_per_user(self):
+        mine = self._learn("serendipity", "意外发现").json()
+        _, other = self.register()
+        r = self.client.post(
+            "/api/study/words/learn",
+            json={
+                "term": "serendipity",
+                "meaning_zh": "意外发现",
+                "recognized": True,
+                "spelled": True,
+                "used": True,
+            },
+            headers=other,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertNotEqual(r.json()["id"], mine["id"])
 
 
 class SpellingCardHintTests(ApiTestCase):
