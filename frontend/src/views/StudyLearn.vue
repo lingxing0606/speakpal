@@ -284,21 +284,36 @@ async function submitUse() {
   if (!useText.value.trim()) return
   useChecking.value = true
   useFeedback.value = null
-  await new Promise((resolve) => setTimeout(resolve, reducedMotion() ? 0 : 450))
   if (!settings.configured) {
     // 没有 key 时不做造句判分：直接通过，给中性提示，不阻塞
     useFeedback.value = { title: '这次没拿到反馈', body: '', passed: true, neutral: true }
-  } else {
-    const text = useText.value.trim()
-    const hasWord = text.toLowerCase().includes(String(word.value?.term || '').toLowerCase())
-    const words = text.split(/\s+/).filter(Boolean).length
-    if (hasWord && words >= 3) {
-      useFeedback.value = { title: '✓ 用对了', body: '句子完整，可以再说一个细节。', passed: true }
-    } else {
-      useFeedback.value = { title: '再改一下', body: '试着把这个词放进一个完整句子里。', passed: false }
-    }
+    useChecking.value = false
+    return
   }
-  useChecking.value = false
+  try {
+    const { data } = await api.post('/study/words/sentence-check', {
+      term: word.value.term,
+      sentence: useText.value.trim(),
+    })
+    if (data?.ok) {
+      if (data.suggestion) {
+        useFeedback.value = { title: '✓ 用对了', body: data.suggestion, passed: true }
+      } else {
+        // 模型没给建议（含超时 / 坏 JSON 的后端兜底）：中性通过
+        useFeedback.value = { title: '这次没拿到反馈', body: '', passed: true, neutral: true }
+      }
+    } else {
+      useFeedback.value = {
+        title: '再改一下',
+        body: data?.suggestion || '试着把这个词放进一个完整句子里。',
+        passed: false,
+      }
+    }
+  } catch {
+    useFeedback.value = { title: '这次没拿到反馈', body: '', passed: true, neutral: true }
+  } finally {
+    useChecking.value = false
+  }
 }
 
 function onUseInput() {

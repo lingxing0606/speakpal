@@ -24,9 +24,14 @@ let alive = true
 const confusables = computed(() => {
   const raw = assist.value?.confusable
   if (Array.isArray(raw) && raw.length) {
-    return raw.slice(0, 2).map((item) =>
-      typeof item === 'string' ? { word: item, zh: '' } : { word: item?.word || '', zh: item?.zh || '' }
-    )
+    return raw
+      .slice(0, 2)
+      .map((item) =>
+        typeof item === 'string'
+          ? { word: item, zh: '' }
+          : { word: item?.term || item?.word || '', zh: item?.meaning_zh || item?.zh || '' }
+      )
+      .filter((item) => item.word)
   }
   const rel = props.related || {}
   return [...(rel.similar || []), ...(rel.synonyms || []), ...(rel.antonyms || [])]
@@ -100,11 +105,14 @@ onBeforeUnmount(() => {
         </ul>
       </div>
 
-      <div v-if="confusables.length" class="mt-2 flex flex-wrap items-center gap-1.5">
+      <div class="mt-2 flex flex-wrap items-center gap-1.5">
         <span class="text-[11px] text-ink-mute">易混</span>
-        <span v-for="c in confusables" :key="c.word" class="sp-chip-line !py-0.5 !text-[11px]">
-          {{ c.word }}<template v-if="c.zh"> · {{ c.zh }}</template>
-        </span>
+        <template v-if="confusables.length">
+          <span v-for="c in confusables" :key="c.word" class="sp-chip-line !py-0.5 !text-[11px]">
+            {{ c.word }}<template v-if="c.zh"> · {{ c.zh }}</template>
+          </span>
+        </template>
+        <span v-else class="text-[11px] text-ink-mute">暂无</span>
       </div>
 
       <p v-if="assist.scene_example" class="sp-num mt-2 text-[13px] italic leading-6 text-ink">{{ assist.scene_example }}</p>
