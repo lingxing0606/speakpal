@@ -193,7 +193,7 @@ def draw_page_chrome(canvas, doc):
         canvas.setFont("MSYH", 8)
         canvas.setFillColor(C_MUTED)
         canvas.drawString(
-            18 * mm, page_h - 12 * mm, "SpeakPal · 可验证的 AI 英语口语诊断陪练 — 技术文档 (v2.1)"
+            18 * mm, page_h - 12 * mm, "SpeakPal · 可验证的 AI 英语口语诊断陪练 — 技术文档 (v2.2)"
         )
         canvas.drawRightString(page_w - 18 * mm, page_h - 12 * mm, "传智杯 AI-Web 网页开发挑战赛")
         canvas.setStrokeColor(C_BORDER)
