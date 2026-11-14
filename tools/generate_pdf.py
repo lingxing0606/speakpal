@@ -233,7 +233,7 @@ def build_story(styles):
 
     meta_rows = [
         ["产品名称", "SpeakPal · 可验证的 AI 英语口语诊断陪练", "代码版本", "后端 FastAPI 0.2.0 / 前端 speakpal-frontend@0.2.0"],
-        ["文档版本", "v2.2（对齐当前仓库全量实现）", "更新日期", "2026-11-13"],
+        ["文档版本", "v2.2（对齐当前仓库全量实现）", "更新日期", "2026-11-14"],
         ["核心技术栈", "Vue 3 + Vite + Tailwind CSS / FastAPI + SQLAlchemy 2 + SQLite", "验证工具链", "Python 纯标准库 evaluation/ + tools/check_content.py"],
         ["适用读者", "竞赛评委、前后端开发者、测试与运维人员", "覆盖范围", "架构设计、数据模型、API 规格、融合评分、SM-2 闭环、信效度验证与部署"],
     ]
@@ -831,7 +831,7 @@ def build_story(styles):
     td_rows = [
         ["TD-A", "finish 无「最少轮次」校验", "—", "已修复：无 user turn 时返回 400（sessions.py:321-324）"],
         ["TD-B", "role / status 仍无枚举约束（difficulty 已白名单校验）", "脏数据仍可绕过前端写入这两列", "给 status / role 加 CheckConstraint 或 Enum"],
-        ["TD-C", "无 CI 配置与 lint 配置", "backend/tests 已有 167 条 unittest 全绿（test_api.py / test_scales.py，2026-11-13）", "接 CI 跑 unittest；agreement.py 已知值测试仍缺"],
+        ["TD-C", "无 CI 配置与 lint 配置", "backend/tests 已有 168 条 unittest 全绿（2026-11-14）", "接 CI 跑 unittest；agreement.py 已知值测试仍缺"],
         ["TD-D", "音频阈值硬编码（RMS 0.02、停顿 0.15s）", "不同麦克风 / 噪声环境下语速与停顿失真", "暴露为配置项，或做环境噪声自校准"],
         ["TD-E", "历史列表无分页；管理台 N+1 查询", "—", "已修复：sessions.py:470-484 支持 limit/offset；admin.py:84-94 已改 GROUP BY"],
         ["TD-F", "语音识别依赖 Chrome 且走云端", "网络受限时转写失败，Firefox / Safari 不可用", "已有「手动输入」兜底；如需更稳可接后端 ASR"],

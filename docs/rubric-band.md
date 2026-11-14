@@ -363,7 +363,7 @@ D:\python\python.exe -m evaluation.validate --csv evaluation/demo_data.csv `
 **合成数据上的实测**（`demo_data.csv`，n=20，仅证明脚本通路，不是真实结论）：
 exact_rate 0.70、adjacent_rate 1.00、平均差 0.30 档、kappa 0.49（中等）。真实结论必须换成真人标注。
 
-**0–100 分取整**（总分与 `comparable_score`）：`evaluation/bands.py` 的 `_score_int()` 用 `floor(x + 0.5)`，半值向上——62.5 → 63、67.5 → 68，不用 Python 的银行家舍入（`int(round())` 会给 62/68 这种不一致结果）。维度分当前仍走 `rules.py:411` 的 `int(round())`，半值取偶，与总分口径未完全统一，最多差 1 分。
+**0–100 分取整**（总分、维度分与 `comparable_score` 统一）：`floor(x + 0.5)`，半值向上——62.5 → 63、67.5 → 68，不用 Python 的银行家舍入（半值取偶会给出 62 这种结果）。换算层在 `evaluation/bands.py::_score_int()`（`:140-146`），融合层在 `rules.py:412-416`，两处同一规则；维度分与总分口径一致。
 
 ### 4.3 样本量与结论
 
@@ -477,7 +477,7 @@ D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
 | `evaluation/features.py` | `find_fillers()` 位置判定；`lexical_diversity()` 短文本回退 TTR；`mtld` 不足 50 词输出 `None`；新增 `diversity_metric / diversity` 字段 | ✅ 已完成 |
 | `evaluation/bands.py` | `score_to_band / band_to_score / band_to_cefr / cefr_of_score / cefr_distance / report_bands`（纯标准库，全项目唯一换算入口） | ✅ 已完成 |
 | `evaluation/scales.py` | 多量表视图（雅思 / CEFR / 托福 / 多邻国 / 四六级；高考只给难度标签），逐维只映射雅思 + CEFR | ✅ 已完成（§4.4） |
-| `backend/tests/` | 167 条 unittest 全绿（2026-11-13），含 band 取整与多量表换算表 | ✅ 已完成 |
+| `backend/tests/` | 168 条 unittest 全绿（2026-11-14），含 band 取整、半值向上与多量表换算表 | ✅ 已完成 |
 | `evaluation/make_demo.py` | 档位改 CEFR 字母；重新生成 `demo_data.csv`（ICC 未变：0.9022 / 0.9486） | ✅ 已完成 |
 | `evaluation/validate.py` | `--system-band` 接线：一致率、档位距离、Cohen kappa（多数票 + 分人）；stdout 强制 UTF-8 | ✅ 已完成 |
 | `backend/app/services/scoring.py` | 模型直接输出 band；`original` 必须来自用户转写（否则丢弃）；降级报告不计分、不虚构句子 | ✅ 已完成 |
