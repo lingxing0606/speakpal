@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from evaluation.bands import (
@@ -408,7 +409,11 @@ def apply_to_report(
         )
         final_scores["written_expression"] = detail["written_expression"]["final_score"]
 
-    dims = {k: int(round(v)) for k, v in final_scores.items() if v is not None}
+    dims = {
+        k: int(math.floor(float(v) + 0.5))
+        for k, v in final_scores.items()
+        if v is not None
+    }
     if not dims:
         return data
     answer_mode = infer_answer_mode(dims)

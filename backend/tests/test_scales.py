@@ -15,6 +15,7 @@ sys.path.insert(0, str(_BACKEND))
 sys.path.insert(0, str(_BACKEND.parent))  # evaluation 包在仓库根目录
 
 from evaluation import bands, scales  # noqa: E402
+from app.services import rules  # noqa: E402
 
 
 class RoundingTests(unittest.TestCase):
@@ -45,6 +46,16 @@ class RoundingTests(unittest.TestCase):
         out = bands.report_bands({"grammar_vocab": 6.5, "task_completion": 6.0})
         self.assertEqual(out["dimensions"], {"grammar_vocab": 75, "task_completion": 70})
         self.assertTrue(all(isinstance(v, int) for v in out["dimensions"].values()))
+
+    def test_apply_to_report_dimensions_round_half_up(self):
+        # model band 5.25 / 5.75 → 62.5 / 67.5；旧的 int(round()) 会把 62.5 舍成 62
+        data = {"source": "llm", "bands": {"pronunciation": 5.25, "written_expression": 5.75}}
+        out = rules.apply_to_report(
+            data, {}, "job_interview", "", has_voice=True, has_typed=True
+        )
+        self.assertEqual(
+            out["dimensions"], {"pronunciation": 63, "written_expression": 68}
+        )
 
 
 class ScaleTableTests(unittest.TestCase):
