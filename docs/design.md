@@ -229,7 +229,7 @@ speakpal/
 | GET | /api/auth/me | 当前用户 | 是 |
 | GET | /api/scenes | 场景列表 | 是 |
 | POST | /api/sessions | 开始会话 | 是 |
-| POST | /api/sessions/{id}/turn | 用户作答一轮（body 可带 `input_mode: voice|typed`，见 §5） | 是 |
+| POST | /api/sessions/{id}/turn | 用户作答一轮（body 可带 `input_mode: voice\|typed`，见 §5） | 是 |
 | POST | /api/sessions/{id}/turn/stream | 同上，AI 回复按 SSE 逐段推送（见下方「流式对话」） | 是 |
 | POST | /api/sessions/{id}/finish | 结束并生成报告 | 是 |
 | GET | /api/sessions/{id} | 单个会话完整对话，用于刷新/回填；每轮带 `input_mode`（见 §5） | 是 |
@@ -251,7 +251,7 @@ speakpal/
 | GET | /api/study/due | 今天到期的学习卡（`date(due_at) <= today`，见 §16.5） | 是 |
 | GET | /api/study/today | **复习统一队列**：按 `word → spelling → grammar → spoken → phrase` 分组，组内按 `due_at` 升序（见 §18.4） | 是 |
 | GET | /api/study/summary | 首页聚合：`{due_count, notes_count, total, word_count, phrase_count, spelling_count}`（不是单独的业务操作，见 §16.5） | 是 |
-| GET | /api/study/vocab | 词库取词：`?scope=gaokao|cet4|cet6&limit=`，只返还没建卡的词（见 §18.3） | 是 |
+| GET | /api/study/vocab | 词库取词：`?scope=gaokao\|cet4\|cet6&limit=`，只返还没建卡的词（见 §18.3） | 是 |
 | POST | /api/study/vocab/add | 把选中的词落成学习卡（按 user+term+kind 去重，**无每日上限**） | 是 |
 | GET | /api/study/grammar | 语法卡：四组（时态/冠词/介词/从句）+ 未学列表（见 §18.4） | 是 |
 | POST | /api/study/grammar/add | 批量加入语法卡（`kind=grammar, source=grammar`） | 是 |
@@ -260,7 +260,7 @@ speakpal/
 | GET | /api/me/settings | 用户偏好：`{practice_difficulty, word_scope}`（见 §18.1） | 是 |
 | PATCH | /api/me/settings | 改偏好（局部更新，枚举外返 400） | 是 |
 | POST | /api/study/items | 新建学习卡（手动加入 / 报告页「加入学习清单」） | 是 |
-| POST | /api/study/items/{id}/review | 提交复习 `{grade: again|hard|good}` 或拼写卡 `{answer}`，推进 `due_at` | 是 |
+| POST | /api/study/items/{id}/review | 提交复习 `{grade: again\|hard\|good}` 或拼写卡 `{answer}`，推进 `due_at` | 是 |
 | DELETE | /api/study/items/{id} | 删学习卡（只能删自己的） | 是 |
 | GET | /api/notes | 笔记列表 | 是 |
 | POST | /api/notes | 新建笔记（标题可选，可挂会话） | 是 |
@@ -683,7 +683,7 @@ Difficulty: {difficulty}. Keep it friendly.
 | GET | `/api/study/due` | 今天到期的卡（`date(due_at) <= today`，按到期时间升序）；**默认返回全部、不分页**。`?limit=N` 只为调试保留：**显式传时列表条数可能少于 `summary.due_count`，界面不得用它分页** |
 | GET | `/api/study/summary` | **聚合接口**（不是第十个业务操作）：一次返回首页卡片要的数字 `{due_count, notes_count, total, word_count, phrase_count, spelling_count}`，省掉两次请求。`due_count` 的口径与 `/study/due` 完全一致（`date(due_at) <= today`），必须等于它的条数 |
 | POST | `/api/study/items` | 新建卡（手动加入 / 报告页「加入学习清单」） |
-| POST | `/api/study/items/{id}/review` | 提交一次复习：body `{grade?: "again"|"hard"|"good", answer?: "用户默写的文本"}`；传 `answer` 时由后端判档（拼写卡），否则按 `grade`（单词/句型卡自评） |
+| POST | `/api/study/items/{id}/review` | 提交一次复习：body `{grade?: "again"\|"hard"\|"good", answer?: "用户默写的文本"}`；传 `answer` 时由后端判档（拼写卡），否则按 `grade`（单词/句型卡自评） |
 | DELETE | `/api/study/items/{id}` | 删卡（只能删自己的） |
 | GET/POST | `/api/notes` | 笔记列表 / 新建 |
 | GET/PATCH/DELETE | `/api/notes/{id}` | 读取 / 修改 / 删除；**PATCH 必做**，只有增删查不叫笔记功能，改标题/正文都要校验 `user_id` |
@@ -706,7 +706,7 @@ Difficulty: {difficulty}. Keep it friendly.
 **文案**
 - 界面**不解释自身机制**：删掉「这段引导只出现一次」「（可选）」「点击后会自动保存」这类自述与操作旁白。用户要的是能干什么，不是它怎么运作。
 - 括号只用于**必要澄清**（单位、必填标记），不用来补一句说明；一句话只传达一个用户需要的信息。
-- 已知要清理的清单（行号为审计时的工作区状态）：
+- 已知要清理的清单（**历史记录**：行号是 2026-11 审计时的旧单视图状态，文件后来已拆分/删除，行号不再对应；留着只为追溯当时的文案决定，不要按它定位代码）：`Study.vue` 已拆为 `StudyHome.vue` / `StudyScope.vue` / `StudyLearn.vue`，`Welcome.vue` 已删除（门面页并入 `Login.vue`）；其余文件改名或行号漂移同理，动笔前重读当前文件。
   `Welcome.vue:88` 「开始使用（先注册或登录）」→「开始使用」；`:90` 整句「这段引导只出现一次…」删；
   `Login.vue:175` 昵称 placeholder「昵称（可选）」→「昵称」；
   `Practice.vue:90` 「再说 N 句就能出报告（已说 N 句）」去掉括号那半句；

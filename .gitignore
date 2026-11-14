@@ -24,3 +24,5 @@ frontend/public/probe-*.html
 backend/.tmp-test/
 # 本地数据库备份
 backend/backups/
+# 技术文档 PDF：只入库根目录的交付版；docs/ 下是同源副本（generate_pdf.py 本地生成）
+docs/技术文档.pdf

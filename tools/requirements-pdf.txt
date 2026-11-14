@@ -1,0 +1,3 @@
+# PDF 技术文档生成用的工具链依赖（不是后端运行时依赖，不进 backend/requirements.txt）
+# 安装：pip install -r tools/requirements-pdf.txt
+reportlab==5.1.0

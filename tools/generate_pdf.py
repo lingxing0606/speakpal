@@ -2,11 +2,13 @@
 """生成 SpeakPal 技术文档 PDF（ReportLab + 微软雅黑）。
 
 用法（仓库根目录，PowerShell 7）：
+    pip install -r tools/requirements-pdf.txt   # 首次：reportlab 是工具链依赖，不进后端 requirements.txt
     python tools/generate_pdf.py
 
 产物：
-    SpeakPal_技术文档.pdf      （根目录交付版）
-    docs/技术文档.pdf          （文档库同源副本）
+    SpeakPal_技术文档.pdf      （根目录交付版，入库）
+    docs/技术文档.pdf          （同源副本，本地生成、不入库）
+    output/handin/ 下的副本    （交付打包用，output/ 不入库）
 
 维护约定：本文档所有行为、字段、权重、端点数与默认值均应与源码逐项对齐；
          口径冲突时以 docs/design.md 与代码为准。改代码后请同步改这里。

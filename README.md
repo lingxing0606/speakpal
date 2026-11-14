@@ -126,10 +126,11 @@
 ├── tools/                          # 工程辅助工具
 │   ├── check_content.py            # 离线词库/语法/口语 JSON 质量校验脚本
 │   ├── generate_pdf.py             # PDF 技术文档生成脚本（ReportLab + 微软雅黑）
+│   ├── requirements-pdf.txt        # 该脚本的工具链依赖（reportlab，锁版本；不进后端运行时）
 │   ├── node/                       # 便携版 Node.js（脚本自动探测，无需全局安装）
 │   └── screenshot/                 # Playwright 自动化截图脚本
 └── docs/                           # 详细设计与专项说明文档库
-    ├── 技术文档.md / 技术文档.pdf    # Markdown / PDF 版完整技术文档
+    ├── 技术文档.md                 # 完整技术文档（Markdown；PDF 副本由脚本生成、不入库）
     ├── design.md                   # 产品设计与接口契约基线文档（口径来源）
     ├── rubric-band.md              # 评分量表、规则分锚点与 IELTS/CEFR 换算规范
     ├── validation.md               # 评估与验证方法论说明
@@ -243,8 +244,8 @@ python tools/check_content.py
 python tools/generate_pdf.py
 ```
 
-> 输出 `SpeakPal_技术文档.pdf`（根目录）与 `docs/技术文档.pdf` 两份同名产物。
-> 依赖 `reportlab`，它属于工具链依赖而非后端运行时依赖，需单独安装：`pip install reportlab`。
+> 输出 `SpeakPal_技术文档.pdf`（根目录交付版，入库）与 `docs/技术文档.pdf`（同源副本，本地生成、不入库）。
+> 依赖 `reportlab`，属工具链依赖而非后端运行时依赖，单独安装：`pip install -r tools/requirements-pdf.txt`（已锁 `reportlab==5.1.0`）。
 
 ---
 
