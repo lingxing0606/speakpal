@@ -54,6 +54,7 @@
 - **网络与流式通信**：Axios（统一 JWT 注入、`X-Auth-Reason` 401 分流拦截、`X-LLM-Key` 透传）+ 原生 `fetch` + `ReadableStream`（SSE 流式解析）
 - **浏览器原生能力**：Web Speech API（`SpeechRecognition` / `speechSynthesis`）、Web Audio API（`AudioContext` + `AnalyserNode` 时域 RMS 包络检测）、MediaRecorder + IndexedDB（本地录音持久化回放）
 - **工程化**：路由懒加载（`Login` / `Home` 静态，其余页面按页拆 chunk）+ `manualChunks` 抽离 vendor；TypeScript 渐进迁移（`vue-tsc --noEmit` 已接入构建，`npm run typecheck` / `npm run lint`）；生产构建入口 JS gzip 从 **145.49 kB 降到 17.83 kB**（vendor 60.96 kB 单独分包，首页 JS 合计 78.79 kB）
+- **AI 交互体验**：发送瞬间插入三点思考气泡（首个 delta 同一行盒原地换字，高度不跳）→ 流式可「停止」并保留已收文字 → 断连给「已中断 + 重试」（替换原气泡、不新增用户气泡）→ `onErrorCaptured` 兜底页 + 旧 chunk 失效自动重载一次；徽标统一由 `AiStatusBadge` 渲染（`已替换 / 已中断 / 降级 / 已停止 / 已标记 / 云端转写 / 浏览器识别`，`ok` 不占位）
 
 ### 3.2 后端（`backend/`）
 

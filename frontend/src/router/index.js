@@ -26,6 +26,34 @@ const router = createRouter({
   ],
 })
 
+// 部署更新后旧 chunk 失效：自动重载一次；5 分钟内再失败才让页面提示「需要更新」
+const CHUNK_RELOAD_AT = 'sp_chunk_reload_at'
+const CHUNK_RELOAD_TO = 'sp_chunk_reload_to'
+const CHUNK_RELOAD_WINDOW = 5 * 60 * 1000
+const CHUNK_ERROR_RE = /Failed to fetch dynamically imported module|Loading chunk .* failed|Importing a module script failed/i
+
+router.onError((error) => {
+  if (!CHUNK_ERROR_RE.test(String(error?.message || ''))) return
+  const now = Date.now()
+  let last = 0
+  try {
+    last = Number(sessionStorage.getItem(CHUNK_RELOAD_AT) || 0)
+  } catch {
+    // 隐私模式读不到 sessionStorage 就当第一次
+  }
+  if (last && now - last < CHUNK_RELOAD_WINDOW) {
+    window.dispatchEvent(new CustomEvent('sp:fatal', { detail: { reason: 'stale' } }))
+    return
+  }
+  try {
+    sessionStorage.setItem(CHUNK_RELOAD_AT, String(now))
+    sessionStorage.setItem(CHUNK_RELOAD_TO, `${window.location.pathname}${window.location.search}`)
+  } catch {
+    // 存不下也照样重载：reload 本身会停在原地址
+  }
+  window.location.reload()
+})
+
 router.beforeEach((to) => {
   const auth = useAuthStore()
   // 登录页是唯一公开页：没登录时去任何地址都先登录，登录成功后回到原来那一页

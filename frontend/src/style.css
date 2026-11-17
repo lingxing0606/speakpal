@@ -302,6 +302,34 @@
     animation: sp-badge-in 160ms ease-out both;
   }
 
+  /* 思考态：三点 6px、间距 4px，1.2s 波（三点错 160ms）；行盒固定 28px 与单行回复等高 */
+  .sp-thinking-dots {
+    @apply inline-flex items-center gap-1;
+  }
+
+  .sp-thinking-dot {
+    @apply h-1.5 w-1.5 rounded-full bg-brand-300;
+    animation: sp-thinking 1.2s ease-in-out infinite;
+  }
+
+  .sp-thinking-dot:nth-child(2) {
+    animation-delay: 160ms;
+  }
+
+  .sp-thinking-dot:nth-child(3) {
+    animation-delay: 320ms;
+  }
+
+  /* 停止胶囊：浮在输入区上沿右对齐，不改 dock 高度 */
+  .sp-stop-pill {
+    @apply inline-flex h-9 items-center gap-1.5 rounded-full bg-ink/90 px-3 text-[11px] font-medium text-white shadow-lift hover:bg-ink active:scale-[0.97] sm:h-8;
+  }
+
+  /* 徽标 + 重试一行：输出侧在左、重试在右；窄屏放不下就换行 */
+  .sp-badge-row {
+    @apply mt-1 flex max-w-full flex-wrap items-center gap-2;
+  }
+
   /* 录音音量圈：--level 0–1 由真实音量驱动 */
   .sp-mic-level {
     @apply pointer-events-none absolute inset-0 rounded-full bg-coral-300/40 transition-transform duration-100 ease-out;
@@ -528,6 +556,51 @@
   }
 }
 
+/* 思考三点：上浮 3px + 明暗呼吸 */
+@keyframes sp-thinking {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* 停止胶囊：从输入区上沿长出来 */
+@keyframes sp-stop-in {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sp-stop-enter-active {
+  animation: sp-stop-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.sp-stop-leave-active {
+  animation: sp-stop-out 160ms ease-out both;
+}
+
+/* 停用：向下 4px 淡出 */
+@keyframes sp-stop-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 /* 减少动态：提示卡只淡入、不位移（覆盖全局 0.001ms 的压缩） */
 @media (prefers-reduced-motion: reduce) {
   .sp-hint-card-enter,
@@ -551,5 +624,21 @@
   .sp-ai-badge {
     animation: sp-badge-in 120ms linear both;
     animation-duration: 120ms !important;
+  }
+
+  /* 减少动态：三点静止、不呼吸；停止胶囊直接显隐 */
+  .sp-thinking-dot {
+    animation: none !important;
+    opacity: 0.8;
+  }
+
+  .sp-stop-pill {
+    animation: none !important;
+    transition: none;
+  }
+
+  .sp-stop-enter-active,
+  .sp-stop-leave-active {
+    animation: none;
   }
 }

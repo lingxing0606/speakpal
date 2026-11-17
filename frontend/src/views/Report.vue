@@ -7,10 +7,13 @@ import AiTransparency from '../components/AiTransparency.vue'
 import AppHeader from '../components/AppHeader.vue'
 import CoachPanel from '../components/CoachPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ReportDimensions from '../components/ReportDimensions.vue'
+import ReportFixes from '../components/ReportFixes.vue'
+import ReportFluency from '../components/ReportFluency.vue'
+import ReportScoreHeader from '../components/ReportScoreHeader.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
-import { loadRecordings, playRecording, stopRecording } from '../utils/recordings'
-import { createRecognizer, speakSmart, stopSpeaking } from '../utils/speech'
+import { loadRecordings, stopRecording } from '../utils/recordings'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,7 +22,6 @@ const settings = useSettingsStore()
 
 const report = ref(null)
 const error = ref('')
-const drillError = ref('')
 const missing = ref(false)
 const meta = ref(null)
 
@@ -40,14 +42,6 @@ const metaLine = computed(() => {
   const mode = MODE_LABELS[m.answer_mode] || MODE_LABELS[report.value?.answer_mode] || ''
   return [m.scene_name, mode, when(m.created_at || m.finished_at)].filter(Boolean).join(' · ')
 })
-
-const dimLabels = {
-  pronunciation: '发音清晰度',
-  fluency: '流利度',
-  grammar_vocab: '语法词汇',
-  task_completion: '任务完成度',
-  written_expression: '文字表达',
-}
 
 const featureLabels = {
   word_count: '词数',
@@ -115,311 +109,6 @@ const hasScore = computed(() => report.value?.total_score !== null && report.val
 const reportPlan = computed(() => report.value?.plan || {})
 const reportGoals = computed(() => reportPlan.value.goals || [])
 const reportAchieved = computed(() => reportPlan.value.achieved || [])
-
-// ---- 评分量表切换（hero 卡内；总分换考试读法，维度始终只给雅思 + CEFR）----
-const SCALE_OPTIONS = [
-  { id: 'ielts', label: '雅思' },
-  { id: 'cefr', label: 'CEFR' },
-  { id: 'toefl', label: '托福' },
-  { id: 'duolingo', label: '多邻国' },
-  { id: 'cet', label: '四六级' },
-]
-const scaleEls = []
-const ghostLayer = ref(null)
-const pillBoxEl = ref(null)
-const pillHidden = ref(false)
-const scaleInfoOpen = ref(false)
-const scaleInfoEl = ref(null)
-const scaleInfoTrigger = ref(null)
-const ghostEls = []
-let switchToken = 0
-
-const scaleItems = computed(() => report.value?.scales?.items || null)
-const hasScales = computed(() => !!scaleItems.value)
-const activeScale = computed(() => settings.reportScale)
-const scaleVersion = computed(() => report.value?.scales?.version || '2026-11')
-// scales 缺失（老后端）时回退到 band / cefr
-const legacyScales = computed(
-  () => !hasScales.value && report.value?.band !== null && report.value?.band !== undefined
-)
-
-// 四六级通过线从 band 4.0（B1）起算，与后端换算表里的 425 分线一致
-const cetPassed = computed(() => typeof report.value?.band === 'number' && report.value.band >= 4.0)
-const cetRangeText = computed(() => {
-  const cet = scaleItems.value?.cet
-  if (!cet) return '—'
-  return `CET-4 ${cet.cet4 || '—'} · CET-6 ${cet.cet6 || '—'}`
-})
-const cetPassPills = computed(() => [
-  { id: 'cet4', label: `CET-4 ${cetPassed.value ? '已通过' : '未通过'}`, passed: cetPassed.value },
-  { id: 'cet6', label: `CET-6 ${cetPassed.value ? '已通过' : '未通过'}`, passed: cetPassed.value },
-])
-
-// 药丸四种读法 + 两种兜底：雅思单点（衬线）/ 字母 / 区间 / 四六级（两档或两枚通过水平）
-const pillKind = computed(() => {
-  if (legacyScales.value) return 'legacy'
-  if (!hasScales.value) return 'below'
-  const one = activeScale.value
-  if (one === 'cet') return settings.cetPassOnly ? 'cet-pass' : 'cet'
-  return one
-})
-const pillValue = computed(() => {
-  const items = scaleItems.value
-  if (!items) return ''
-  if (activeScale.value === 'cet') return cetRangeText.value
-  return items[activeScale.value]?.display || ''
-})
-// ghost 用的一行文本（与药丸内容一致，四六级通过水平合并成一行）
-const pillFlatText = computed(() => {
-  if (pillKind.value === 'below') return '低于 A2 · 暂不评级'
-  if (pillKind.value === 'cet-pass') return cetPassPills.value.map((p) => p.label).join(' · ')
-  if (pillKind.value === 'legacy') {
-    if (activeScale.value === 'ielts') return `雅思 ${report.value?.band}`
-    if (activeScale.value === 'cefr') return `CEFR ${report.value?.cefr}`
-    return '—'
-  }
-  const name = SCALE_OPTIONS.find((s) => s.id === activeScale.value)?.label || ''
-  return `${name} ${pillValue.value}`.trim()
-})
-const scaleRows = computed(() => {
-  const items = scaleItems.value
-  if (!items) return []
-  return [
-    { id: 'ielts', label: '雅思', value: items.ielts?.display || '—', reference: false },
-    { id: 'cefr', label: 'CEFR', value: items.cefr?.display || '—', reference: false },
-    { id: 'toefl', label: '托福', value: items.toefl?.display || '—', reference: false },
-    { id: 'duolingo', label: '多邻国', value: items.duolingo?.display || '—', reference: false },
-    { id: 'cet', label: '四六级', value: cetRangeText.value, reference: true },
-  ]
-})
-
-function dimBand(name) {
-  const fromScales = report.value?.scales?.dimensions?.[name]?.ielts
-  if (typeof fromScales === 'number') return fromScales.toFixed(1)
-  const b = report.value?.bands?.[name]
-  if (b === null || b === undefined) return ''
-  return typeof b === 'number' ? b.toFixed(1) : b
-}
-
-function dimCefr(name) {
-  return report.value?.scales?.dimensions?.[name]?.cefr || ''
-}
-
-function clearGhosts() {
-  ghostEls.splice(0).forEach((el) => el.remove())
-}
-
-function pillTextStyle() {
-  const el = pillBoxEl.value?.querySelector('[data-pill-text]')
-  if (!el) return null
-  const cs = getComputedStyle(el)
-  return {
-    fontFamily: cs.fontFamily,
-    fontSize: cs.fontSize,
-    fontWeight: cs.fontWeight,
-    color: cs.color,
-    lineHeight: cs.lineHeight,
-  }
-}
-
-// 角标/飞行副本：固定层里按视口坐标摆，字体与药丸一致
-function makeGhost(text, style) {
-  const layer = ghostLayer.value
-  if (!layer || !style) return null
-  const el = document.createElement('span')
-  el.textContent = text
-  el.style.cssText =
-    'position:absolute;pointer-events:none;white-space:nowrap;' +
-    `font-family:${style.fontFamily};font-size:${style.fontSize};font-weight:${style.fontWeight};` +
-    `color:${style.color};line-height:${style.lineHeight};`
-  layer.appendChild(el)
-  ghostEls.push(el)
-  return el
-}
-
-function placeGhost(el, centerX, centerY) {
-  const rect = el.getBoundingClientRect()
-  el.style.left = `${centerX - rect.width / 2}px`
-  el.style.top = `${centerY - rect.height / 2}px`
-}
-
-async function persistScale(id) {
-  try {
-    await api.patch('/me/settings', { report_scale: id })
-  } catch {
-    // 静默：本次展示已生效，下次进来回到服务端值
-  }
-}
-
-async function pickScale(id, event) {
-  if (id === activeScale.value || !hasScales.value) return
-  const token = ++switchToken
-  clearGhosts()
-  const from = SCALE_OPTIONS.findIndex((s) => s.id === activeScale.value)
-  const to = SCALE_OPTIONS.findIndex((s) => s.id === id)
-  const dir = to > from ? 1 : -1
-  const chip = event?.currentTarget || scaleEls[to]
-  const chipRect = chip?.getBoundingClientRect()
-  const oldText = pillFlatText.value
-  const oldStyle = pillTextStyle()
-  const oldTextEl = pillBoxEl.value?.querySelector('[data-pill-text]')
-  const oldRect = oldTextEl?.getBoundingClientRect()
-
-  // 立即换数据：药丸宽度一次性到位，不做宽度动画
-  settings.setReportScale(id)
-  persistScale(id)
-  pillHidden.value = true
-
-  if (reducedMotion()) {
-    // 无 ghost、无位移，只做 120ms 透明度交叉
-    await nextTick()
-    pillHidden.value = false
-    pillBoxEl.value?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: 'ease-out' })
-    return
-  }
-
-  // 1) 旧值退场：120ms，按新 chip 的相对方向轻推 ∓6px
-  if (oldRect && oldStyle) {
-    const exit = makeGhost(oldText, oldStyle)
-    if (exit) {
-      placeGhost(exit, oldRect.left + oldRect.width / 2, oldRect.top + oldRect.height / 2)
-      exit
-        .animate(
-          [
-            { opacity: 1, transform: 'translateX(0px)' },
-            { opacity: 0, transform: `translateX(${-dir * 6}px)` },
-          ],
-          { duration: 120, easing: 'ease-out', fill: 'forwards' }
-        )
-        .finished.then(() => exit.remove(), () => exit.remove())
-    }
-  }
-
-  // 2) 新值 ghost：从被点 chip 中心飞进药丸中心（200ms，延迟 40ms）
-  await nextTick()
-  await new Promise((resolve) => setTimeout(resolve, 40))
-  if (token !== switchToken) return
-  const box = pillBoxEl.value
-  const style = pillTextStyle() || oldStyle
-  const target = (box?.querySelector('[data-pill-text]') || box)?.getBoundingClientRect()
-  if (!box || !chipRect || !target || !style) {
-    pillHidden.value = false
-    return
-  }
-  const ghost = makeGhost(pillFlatText.value, style)
-  if (!ghost) {
-    pillHidden.value = false
-    return
-  }
-  const startX = chipRect.left + chipRect.width / 2
-  const startY = chipRect.top + chipRect.height / 2
-  placeGhost(ghost, startX, startY)
-  const dx = target.left + target.width / 2 - startX
-  const dy = target.top + target.height / 2 - startY
-  ghost
-    .animate(
-      [
-        { transform: 'translate(0px, 0px) scale(0.86)' },
-        { transform: `translate(${dx}px, ${dy}px) scale(1)` },
-      ],
-      { duration: 200, easing: 'cubic-bezier(0.3,0.9,0.25,1)' }
-    )
-    .finished.then(
-      () => {
-        ghost.remove()
-        if (token !== switchToken) return
-        // 3) 到达后真药丸 100ms 淡入
-        pillHidden.value = false
-        nextTick(() => box.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 100, easing: 'ease-out' }))
-      },
-      () => ghost.remove()
-    )
-}
-
-function onScaleKeydown(event, i) {
-  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
-  event.preventDefault()
-  const delta = event.key === 'ArrowRight' ? 1 : -1
-  const next = (i + delta + SCALE_OPTIONS.length) % SCALE_OPTIONS.length
-  pickScale(SCALE_OPTIONS[next].id)
-  nextTick(() => scaleEls[next]?.focus())
-}
-
-// 换算说明：桌面居中卡 / 窄屏底部 sheet
-async function openScaleInfo(event) {
-  scaleInfoTrigger.value = event?.currentTarget || document.activeElement
-  scaleInfoOpen.value = true
-  await nextTick()
-  const el = scaleInfoEl.value
-  el?.focus({ preventScroll: true })
-  if (!el || reducedMotion()) return
-  const narrow = window.matchMedia('(max-width: 639px)').matches
-  el.animate(
-    narrow
-      ? [
-          { transform: 'translateY(24px)', opacity: 0 },
-          { transform: 'translateY(0)', opacity: 1 },
-        ]
-      : [
-          { transform: 'scale(0.98)', opacity: 0 },
-          { transform: 'scale(1)', opacity: 1 },
-        ],
-    { duration: narrow ? 260 : 200, easing: 'cubic-bezier(0.2,0.7,0.2,1)' }
-  )
-}
-
-async function closeScaleInfo() {
-  const el = scaleInfoEl.value
-  if (el && !reducedMotion()) {
-    const narrow = window.matchMedia('(max-width: 639px)').matches
-    const anim = el.animate(
-      narrow
-        ? [
-            { transform: 'translateY(0)', opacity: 1 },
-            { transform: 'translateY(24px)', opacity: 0 },
-          ]
-        : [
-            { transform: 'scale(1)', opacity: 1 },
-            { transform: 'scale(0.98)', opacity: 0 },
-          ],
-      { duration: 180, easing: 'ease-out', fill: 'forwards' }
-    )
-    await anim.finished.catch(() => {})
-  }
-  scaleInfoOpen.value = false
-  await nextTick()
-  scaleInfoTrigger.value?.focus({ preventScroll: true })
-}
-
-function onScaleInfoKeydown(event) {
-  if (event.key === 'Escape' && scaleInfoOpen.value) closeScaleInfo()
-}
-
-// aria-modal 只描述语义，Tab 仍会跑到背后的页签；这里把焦点循环限制在面板内
-function trapScaleInfoFocus(event) {
-  if (event.key !== 'Tab') return
-  const el = scaleInfoEl.value
-  if (!el) return
-  const focusables = [...el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-    .filter((node) => !node.disabled && node.offsetParent !== null)
-  if (!focusables.length) {
-    event.preventDefault()
-    el.focus({ preventScroll: true })
-    return
-  }
-  const first = focusables[0]
-  const last = focusables[focusables.length - 1]
-  const active = document.activeElement
-  if (event.shiftKey) {
-    if (active === first || active === el || !el.contains(active)) {
-      event.preventDefault()
-      last.focus({ preventScroll: true })
-    }
-  } else if (active === last || !el.contains(active)) {
-    event.preventDefault()
-    first.focus({ preventScroll: true })
-  }
-}
 
 const displayFeatures = computed(() => {
   const src = report.value?.features || {}
@@ -505,7 +194,7 @@ function onTabKeydown(event, i) {
 }
 
 // 教练建议「看这句」：切到逐句纠错，并把目标句滚到视口中间、闪一次
-const fixEls = []
+const fixesRef = ref(null)
 const highlightFix = ref(-1)
 
 function openFix(index) {
@@ -513,9 +202,7 @@ function openFix(index) {
   if (!Number.isInteger(target) || target < 0) return
   setTab('fixes')
   const scroll = () => {
-    const el = fixEls[target]
-    if (!el) return false
-    el.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' })
+    if (!fixesRef.value?.scrollTo(target)) return false
     highlightFix.value = target
     setTimeout(() => {
       if (highlightFix.value === target) highlightFix.value = -1
@@ -592,7 +279,6 @@ onMounted(async () => {
   })
   placeIndicator(tab.value, false)
   window.addEventListener('resize', onResize)
-  window.addEventListener('keydown', onScaleInfoKeydown)
   try {
     const { data } = await api.get(`/sessions/${route.params.id}`)
     meta.value = data
@@ -606,14 +292,11 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
-  window.removeEventListener('keydown', onScaleInfoKeydown)
-  clearGhosts()
   stopRecording()
 })
 
 // 本地录音（只在录这次练习的浏览器里有）：{ 第几句用户发言: Blob }
 const recordings = ref({})
-const playingFix = ref(-1)
 
 function normText(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9']+/g, ' ').trim()
@@ -631,19 +314,6 @@ const fixRecordings = computed(() => {
     return idx >= 0 ? recordings.value[idx + 1] || null : null
   })
 })
-
-async function toggleFixPlayback(i) {
-  if (playingFix.value === i) {
-    stopRecording()
-    playingFix.value = -1
-    return
-  }
-  stopSpeaking()
-  playingFix.value = i
-  await playRecording(fixRecordings.value[i], () => {
-    if (playingFix.value === i) playingFix.value = -1
-  })
-}
 
 // 下一练：按推荐难度直接开一场，不用回首页重新选
 async function nextPractice() {
@@ -678,96 +348,6 @@ async function nextPractice() {
 
 // ---- 跟读重说：把报告的「改写句」做成练-错-立刻改的闭环 ----
 const drills = ref({ items: [], pass_threshold: 0.85 })
-const drillOpen = ref(null)
-const drillListening = ref(false)
-const drillText = ref('')
-const drillResult = ref(null)
-const drillBusy = ref(false)
-let drillRecognizer = null
-
-// ---- 加入学习清单：语法/啰嗦两类后端不会自动建卡，要用户自己挑 ----
-const ERROR_LABELS = {
-  spelling: '拼写',
-  grammar: '语法',
-  stiffness: '表达僵硬',
-  wordiness: '啰嗦',
-}
-const addedMap = ref({})
-const addBusy = ref(null)
-const addError = ref({})
-
-// RAG 依据卡（阶段 2）：展开卡片原文 / 加入复习
-const ruleOpen = ref({})
-const ruleAdded = ref({})
-const ruleBusy = ref(null)
-const ruleError = ref({})
-
-function toggleRule(i) {
-  ruleOpen.value = { ...ruleOpen.value, [i]: !ruleOpen.value[i] }
-}
-
-function ruleKindLabel(kind) {
-  if (kind === 'spoken') return '口语卡'
-  if (kind === 'grammar') return '语法卡'
-  return '依据卡'
-}
-
-async function addRuleToStudy(fix, i) {
-  if (!fix.rule || ruleAdded.value[i] || ruleBusy.value === i) return
-  ruleBusy.value = i
-  ruleError.value = { ...ruleError.value, [i]: '' }
-  try {
-    await api.post('/study/items', {
-      kind: 'phrase',
-      term: fix.rule.title,
-      context: fix.rule.text,
-      meaning_zh: fix.rule.kind === 'spoken' ? '口语卡依据' : '语法卡依据',
-      example: '',
-      related: {},
-      source_session_id: Number(route.params.id) || null,
-    })
-    ruleAdded.value = { ...ruleAdded.value, [i]: true }
-  } catch (e) {
-    ruleError.value = {
-      ...ruleError.value,
-      [i]: '加入失败：' + (e?.response?.data?.detail || e.message),
-    }
-  } finally {
-    ruleBusy.value = null
-  }
-}
-
-function errorLabel(type) {
-  return ERROR_LABELS[type] || '表达'
-}
-
-async function addToStudy(fix, i) {
-  if (addedMap.value[i] || addBusy.value === i) return
-  addBusy.value = i
-  addError.value = { ...addError.value, [i]: '' }
-  try {
-    const kind = fix.error_type === 'spelling' ? 'spelling' : 'phrase'
-    const reason = fix.reason || ''
-    // 拼写卡的题干不能出现纠错原因（原因常直接写出正确拼写），原因放到 related.reason，
-    // 等判完之后在卡片反馈里显示
-    const related = { ...(fix.related || {}) }
-    if (kind === 'spelling' && reason) related.reason = reason
-    await api.post('/study/items', {
-      kind,
-      term: fix.word || fix.better || fix.original,
-      context: fix.original,
-      meaning_zh: kind === 'spelling' ? '' : reason,
-      example: fix.better || '',
-      related,
-      source_session_id: Number(route.params.id) || null,
-    })
-    addedMap.value = { ...addedMap.value, [i]: true }
-  } catch (e) {
-    addError.value = { ...addError.value, [i]: '加入失败：' + (e?.response?.data?.detail || e.message) }
-  } finally {
-    addBusy.value = null
-  }
-}
 
 async function loadDrills() {
   try {
@@ -781,87 +361,6 @@ async function loadDrills() {
 
 const topFixes = computed(() => (drills.value.items || []).slice(0, 3).filter((it) => it.target))
 const passedCount = computed(() => topFixes.value.filter((it) => it.passed).length)
-const drillByIndex = computed(() =>
-  Object.fromEntries((drills.value.items || []).map((it) => [it.index, it]))
-)
-
-function stopDrillListen() {
-  if (drillRecognizer) {
-    drillRecognizer.abort?.()
-    drillRecognizer = null
-  }
-  drillListening.value = false
-}
-
-function openDrill(item) {
-  stopDrillListen()
-  drillError.value = ''
-  drillOpen.value = item.index
-  drillText.value = ''
-  drillResult.value = null
-}
-
-function closeDrill() {
-  stopDrillListen()
-  drillError.value = ''
-  drillOpen.value = null
-  drillResult.value = null
-  drillText.value = ''
-}
-
-function toggleDrillListen(item) {
-  if (drillListening.value) {
-    stopDrillListen()
-    return
-  }
-  drillText.value = ''
-  drillResult.value = null
-  drillError.value = ''
-  drillRecognizer = createRecognizer(
-    (text) => {
-      drillText.value = text
-    },
-    () => {
-      drillListening.value = false
-      if (drillText.value.trim()) submitDrill(item)
-    },
-    (event) => {
-      drillListening.value = false
-      const map = {
-        'not-allowed': '麦克风权限被拒绝了。请在地址栏左侧允许，或先听一遍原句。',
-        'no-speech': '没听到声音，再点一次麦克风试试。',
-        'audio-capture': '没找到麦克风，检查一下设备。',
-      }
-      const msg = map[event?.error]
-      if (msg) drillError.value = msg
-    }
-  )
-  if (!drillRecognizer) {
-    drillError.value = '当前浏览器不支持语音识别，请换 Chrome 再跟读。'
-    return
-  }
-  drillListening.value = true
-  drillRecognizer.start()
-}
-
-async function submitDrill(item) {
-  const text = drillText.value.trim()
-  if (!text || drillBusy.value) return
-  drillBusy.value = true
-  try {
-    const { data } = await api.post(`/sessions/${route.params.id}/drills/${item.index}/attempt`, {
-      transcript: text,
-    })
-    drillResult.value = data
-    item.attempts = data.attempts
-    item.best_similarity = data.best_similarity
-    item.passed = data.passed
-  } catch (e) {
-    drillError.value = '评定失败：' + (e?.response?.data?.detail || e.message)
-  } finally {
-    drillBusy.value = false
-  }
-}
 
 function again() {
   session.clear()
@@ -946,134 +445,8 @@ function again() {
         <div :key="tab" class="pt-5">
         <div v-if="tab === 'overview'" class="sp-grid items-start">
           <aside class="space-y-5 lg:sticky lg:top-24 lg:col-span-4 lg:col-start-9 lg:row-start-1 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:overscroll-contain lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden">
-        <div
-          v-if="hasScore"
-          class="relative overflow-hidden rounded-card bg-ink p-6 text-white shadow-lift sm:p-7"
-        >
-          <div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-brand-500/40 blur-2xl"></div>
-          <div class="pointer-events-none absolute -bottom-16 -left-10 h-40 w-40 rounded-full bg-coral-500/25 blur-2xl"></div>
-          <div class="relative">
-            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60">综合得分</div>
-            <div class="mt-2 flex items-end gap-2">
-              <span class="sp-num text-[64px] font-semibold leading-none">{{ report.total_score }}</span>
-              <span class="mb-2 text-sm text-white/50">/ 100</span>
-            </div>
-            <!-- 等级药丸：随量表换读法（雅思衬线单点 / 字母 / 区间 / 四六级两档或两枚通过水平） -->
-            <div ref="pillBoxEl" class="mt-4 flex flex-wrap items-center gap-1.5">
-              <span v-if="pillKind === 'below'" class="text-[11px] text-white/50">低于 A2 · 暂不评级</span>
-              <template v-else-if="pillKind === 'cet-pass'">
-                <span
-                  v-for="cet in cetPassPills"
-                  :key="cet.id"
-                  class="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-white/10 px-2.5 py-1.5 text-[12px] font-medium text-white ring-1 ring-white/15"
-                >
-                  <span
-                    class="h-[5px] w-[5px] shrink-0 rounded-full"
-                    :class="cet.passed ? 'bg-brand-200' : 'bg-white/30'"
-                  ></span>
-                  {{ cet.label }}
-                </span>
-              </template>
-              <span
-                v-else
-                :style="pillHidden ? { opacity: 0 } : undefined"
-                class="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-1.5 text-[13px] font-medium text-white ring-1 ring-white/15"
-              >
-                <span data-pill-text class="inline-flex min-w-0 items-center gap-1.5">
-                  <template v-if="pillKind === 'ielts'">
-                    <span class="text-[13px]">雅思</span>
-                    <span class="sp-num text-[15px] font-semibold">{{ scaleItems?.ielts?.display }}</span>
-                  </template>
-                  <template v-else-if="pillKind === 'cefr'">
-                    <span class="text-[13px]">CEFR</span>
-                    <span class="font-semibold">{{ scaleItems?.cefr?.display }}</span>
-                  </template>
-                  <template v-else-if="pillKind === 'toefl'">
-                    <span class="text-[13px]">托福</span>
-                    <span class="font-semibold">{{ scaleItems?.toefl?.display }}</span>
-                  </template>
-                  <template v-else-if="pillKind === 'duolingo'">
-                    <span class="text-[13px]">多邻国</span>
-                    <span class="font-semibold">{{ scaleItems?.duolingo?.display }}</span>
-                  </template>
-                  <template v-else-if="pillKind === 'cet'">
-                    <span class="truncate font-semibold">{{ cetRangeText }}</span>
-                  </template>
-                  <template v-else>
-                    <span class="truncate font-semibold">{{ pillFlatText }}</span>
-                  </template>
-                </span>
-                <button
-                  v-if="pillKind === 'cet'"
-                  class="relative inline-flex h-[18px] shrink-0 items-center rounded-full bg-coral-500/15 px-1.5 text-[10px] font-medium text-coral-300 ring-1 ring-coral-500/30 after:absolute after:-inset-2 after:content-['']"
-                  aria-label="四六级为参考换算，点开换算说明"
-                  @click.stop="openScaleInfo($event)"
-                >
-                  参考
-                </button>
-              </span>
-            </div>
-
-            <!-- 切换器 + 换算说明入口 -->
-            <div class="mt-4 flex flex-wrap items-center gap-1.5 border-t border-white/10 pt-4">
-              <div class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="评分量表">
-                <button
-                  v-for="(s, si) in SCALE_OPTIONS"
-                  :key="s.id"
-                  :ref="(el) => (scaleEls[si] = el)"
-                  role="radio"
-                  :aria-checked="activeScale === s.id"
-                  :aria-disabled="!hasScales"
-                  :tabindex="activeScale === s.id ? 0 : -1"
-                  class="h-9 rounded-full px-3 text-[11px] font-medium transition duration-[180ms] ease-out sm:h-7 sm:px-2.5"
-                  :class="[
-                    activeScale === s.id
-                      ? 'bg-white/15 text-white ring-1 ring-white/25'
-                      : 'text-white/50 hover:bg-white/5 hover:text-white/80',
-                    hasScales ? '' : 'pointer-events-none opacity-40',
-                  ]"
-                  @click="pickScale(s.id, $event)"
-                  @keydown="onScaleKeydown($event, si)"
-                >
-                  {{ s.label }}
-                </button>
-              </div>
-              <button
-                class="ml-auto inline-flex items-center gap-1 text-[11px] text-white/45 transition hover:text-white/70"
-                @click="openScaleInfo($event)"
-              >
-                换算说明
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 11v5M12 8.2v.2" stroke-linecap="round" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div
-          v-if="Object.keys(report.dimensions || {}).length"
-          class="sp-card p-6"
-        >
-          <div class="flex items-baseline justify-between">
-            <div class="font-semibold text-ink">{{ Object.keys(report.dimensions).length }} 个维度</div>
-            <span class="text-[11px] text-ink-mute">雅思 · CEFR</span>
-          </div>
-          <div v-for="(v, k) in report.dimensions" :key="k" class="mb-4 mt-4 last:mb-0">
-            <div class="flex items-baseline justify-between text-sm">
-              <span class="text-ink-soft">{{ dimLabels[k] || k }}</span>
-              <span class="flex items-baseline gap-2">
-                <span class="sp-num text-base font-semibold text-ink">{{ v }}</span>
-                <span v-if="dimBand(k)" class="text-xs font-normal text-ink-mute">
-                  雅思 {{ dimBand(k) }}<template v-if="dimCefr(k)"> · {{ dimCefr(k) }}</template>
-                </span>
-              </span>
-            </div>
-            <div class="sp-bar mt-2">
-              <div class="sp-bar-fill" :style="{ width: v + '%' }"></div>
-            </div>
-          </div>
-        </div>
+        <ReportScoreHeader v-if="hasScore" :report="report" />
+        <ReportDimensions v-if="Object.keys(report.dimensions || {}).length" :report="report" />
 
         <div v-if="report.comment" class="sp-card-soft p-5">
           <div class="sp-eyebrow">点评</div>
@@ -1134,222 +507,23 @@ function again() {
         </div>
 
         <div v-else-if="tab === 'fixes'" class="mx-auto w-full max-w-3xl space-y-5">
-        <div v-if="topFixes.length" class="sp-card flex flex-wrap items-center justify-between gap-3 p-5">
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="sp-chip-brand">已通过 {{ passedCount }}/{{ (report.sentence_fixes || []).length }}</span>
-            <router-link to="/pronunciation" class="font-medium text-brand-700 underline-offset-2 hover:underline">
-              练 ship / sheep
-            </router-link>
-          </div>
-        </div>
-
-        <div class="sp-card p-6">
-          <EmptyState
-            v-if="!(report.sentence_fixes || []).length"
-            compact
-            icon="done"
-            title="没有需要改的句子"
-            text="这次说的话里没有挑出要改写的句子。换个难一点的场景，或多说几句再看看。"
-          />
-          <div
-            v-for="(f, i) in (report.sentence_fixes || [])"
-            :key="i"
-            :ref="(el) => (fixEls[i] = el)"
-            :style="{ '--i': Math.min(i, 10) }"
-            class="sp-reveal mt-3 rounded-2xl bg-paper p-4 text-sm ring-1 ring-line/70 transition duration-200 hover:ring-brand-200"
-            :class="highlightFix === i ? '!ring-2 !ring-brand-200' : ''"
-          >
-            <div class="flex items-start gap-2">
-              <span class="mt-0.5 text-[11px] font-medium text-ink-mute">原句</span>
-              <div :class="f.better ? 'text-rose-500 line-through decoration-rose-300' : 'text-ink-soft'" class="leading-6">
-                {{ f.original }}
-              </div>
-            </div>
-            <div v-if="f.better" class="mt-1.5 flex items-start gap-2">
-              <span class="mt-0.5 text-[11px] font-medium text-brand-700">改写</span>
-              <div class="leading-6 text-brand-700">{{ f.better }}</div>
-            </div>
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="sp-chip-line">{{ errorLabel(f.error_type) }}</span>
-              <span v-if="f.natural" class="text-xs leading-5 text-ink-soft">更自然：{{ f.natural }}</span>
-            </div>
-            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line/70 pt-2">
-              <div class="min-w-0 text-xs leading-5 text-ink-soft">{{ f.reason }}</div>
-              <div class="flex shrink-0 items-center gap-2">
-                <button
-                  v-if="fixRecordings[i]"
-                  class="sp-btn-ghost !px-3 !py-1 text-xs"
-                  :aria-label="playingFix === i ? '停止回放' : '听我当时怎么说的'"
-                  @click="toggleFixPlayback(i)"
-                >
-                  {{ playingFix === i ? '停止' : '听我的录音' }}
-                </button>
-                <button
-                  v-if="drillByIndex[i]"
-                  class="sp-btn-secondary !px-3 !py-1 text-xs"
-                  @click="openDrill(drillByIndex[i])"
-                >
-                  {{ drillByIndex[i].passed ? '已通过 · 再练' : '重说这句' }}
-                </button>
-                <button
-                  class="sp-btn-ghost !px-3 !py-1 text-xs"
-                  :disabled="addedMap[i] || addBusy === i"
-                  @click="addToStudy(f, i)"
-                >
-                  {{ addedMap[i] ? '已加入清单' : '加入学习清单' }}
-                </button>
-              </div>
-            </div>
-
-            <div v-if="f.rule_ref" class="mt-2 rounded-xl bg-white p-3 ring-1 ring-line/70">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <button
-                  class="min-w-0 text-left text-[12px] font-medium text-brand-700 underline-offset-2 hover:underline"
-                  :aria-expanded="!!ruleOpen[i]"
-                  @click="toggleRule(i)"
-                >
-                  依据：{{ ruleKindLabel(f.rule?.kind) }} · {{ f.rule?.title || f.rule_ref }}
-                </button>
-                <button
-                  class="sp-btn-ghost shrink-0 !px-2 !py-1 text-[11px]"
-                  :disabled="!f.rule || ruleAdded[i] || ruleBusy === i"
-                  @click="addRuleToStudy(f, i)"
-                >
-                  {{ ruleAdded[i] ? '已加入复习' : ruleBusy === i ? '加入中…' : '加入复习' }}
-                </button>
-              </div>
-              <p v-if="ruleOpen[i]" class="mt-2 text-[12px] leading-5 text-ink-soft">
-                {{ f.rule?.text || '这张卡没有可展示的原文。' }}
-              </p>
-              <p v-if="ruleError[i]" class="mt-1 text-[11px] leading-5 text-danger">{{ ruleError[i] }}</p>
-            </div>
-            <p v-if="addError[i]" class="mt-1 text-[11px] leading-5 text-danger">{{ addError[i] }}</p>
-
-            <div
-              v-if="drillByIndex[i] && drillOpen === i"
-              class="mt-2 rounded-xl bg-white p-3 ring-1 ring-brand-100"
-            >
-              <p class="text-[11px] leading-5 text-ink-mute">
-                目标句：<span class="font-medium text-brand-700">{{ drillByIndex[i].target }}</span>
-              </p>
-              <div class="mt-2 flex flex-wrap items-center gap-2">
-                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="speakSmart(drillByIndex[i].target, { rate: 0.9 })">
-                  先听一遍
-                </button>
-                <button
-                  class="sp-btn-primary !px-3 !py-1.5 text-xs"
-                  :disabled="drillBusy"
-                  @click="toggleDrillListen(drillByIndex[i])"
-                >
-                  {{ drillListening ? '正在听…点一下停' : '点一下说' }}
-                </button>
-                <button class="sp-btn-ghost !px-2 !py-1 text-xs" @click="closeDrill">收起</button>
-              </div>
-              <p v-if="drillText" class="mt-2 text-xs leading-5 text-ink-soft">听到：{{ drillText }}</p>
-              <p v-if="drillError" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 ring-1 ring-amber-100">
-                {{ drillError }}
-              </p>
-              <div
-                v-if="drillResult"
-                class="mt-2 rounded-lg px-3 py-2 text-xs leading-5"
-                :class="drillResult.passed ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-amber-50 text-amber-800 ring-1 ring-amber-100'"
-              >
-                <div class="font-medium">
-                  {{ drillResult.passed ? '过了！' : '还不够接近' }} · 相似度
-                  {{ Math.round(drillResult.similarity * 100) }}% · 第 {{ drillResult.attempts }} 次
-                </div>
-                <div class="mt-0.5">{{ drillResult.feedback }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ReportFixes
+          ref="fixesRef"
+          :report="report"
+          :drills="drills"
+          :fix-recordings="fixRecordings"
+          :highlight-fix="highlightFix"
+        />
         </div>
 
         <div v-else class="mx-auto w-full max-w-3xl space-y-5">
-        <div v-if="Object.keys(displayFeatures).length" class="sp-card p-6">
-          <div class="font-semibold text-ink">{{ typedOnly ? '文字表达指标' : '流利度与表达指标' }}</div>
-          <div class="mt-3.5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-            <div v-for="(v, k) in displayFeatures" :key="k" class="rounded-xl bg-canvas px-3.5 py-3 ring-1 ring-line/60">
-              <div class="text-[11px] text-ink-mute">{{ featureLabels[k] }}</div>
-              <div class="sp-num mt-1 text-[15px] font-semibold text-ink">{{ v }}</div>
-            </div>
-          </div>
-        </div>
-        <EmptyState
-          v-else
-          compact
-          icon="chart"
-          title="这次没有可测指标"
-          text="录音或打字多聊几轮，词数、语速这些数字就会出现。"
-        />
+        <ReportFluency :items="displayFeatures" :labels="featureLabels" :typed-only="typedOnly" />
         </div>
         </div>
         </Transition>
       </div>
     </main>
 
-    <!-- 换算说明：桌面居中卡 / 窄屏底部 sheet -->
-    <Transition
-      enter-active-class="transition-opacity duration-[160ms] ease-out"
-      leave-active-class="transition-opacity duration-[180ms] ease-out"
-      enter-from-class="opacity-0"
-      leave-to-class="opacity-0"
-    >
-      <div
-        v-if="scaleInfoOpen"
-        class="fixed inset-0 z-40 flex items-end justify-center bg-ink/40 backdrop-blur-sm sm:items-center sm:px-4"
-        @click.self="closeScaleInfo"
-      >
-        <div
-          ref="scaleInfoEl"
-          role="dialog"
-          aria-modal="true"
-          aria-label="换算说明"
-          tabindex="-1"
-          class="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-t-card bg-white p-6 shadow-lift ring-1 ring-line/80 sm:rounded-card"
-          @keydown="trapScaleInfoFocus"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="sp-section-title">换算说明</div>
-            <button class="sp-btn-ghost !p-1.5 text-lg leading-none" aria-label="关闭换算说明" @click="closeScaleInfo">×</button>
-          </div>
-          <table class="mt-4 w-full text-sm">
-            <thead>
-              <tr class="text-[11px] text-ink-mute">
-                <th class="pb-2 text-left font-medium">量表</th>
-                <th class="pb-2 text-right font-medium">本次</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in scaleRows"
-                :key="row.id"
-                class="rounded-xl"
-                :class="row.id === activeScale ? 'bg-brand-50 ring-1 ring-brand-100' : ''"
-              >
-                <td class="px-2.5 py-2 text-ink-soft">{{ row.label }}</td>
-                <td class="px-2.5 py-2 text-right">
-                  <span class="sp-num text-ink">{{ row.value }}</span>
-                  <span
-                    v-if="row.reference"
-                    class="ml-1 inline-flex h-[18px] items-center rounded-full bg-coral-50 px-1.5 text-[10px] font-medium text-coral-700 ring-1 ring-coral-100"
-                  >参考</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="mt-4 space-y-1 text-[11px] leading-5 text-ink-mute">
-            <p>雅思↔CEFR：IELTS 官方对照</p>
-            <p>托福、多邻国：ETS、DET 官方 CEFR 对照</p>
-            <p>四六级：无官方换算，按 425 通过线做水平段</p>
-          </div>
-          <p class="mt-3 text-right text-[11px] text-ink-mute">换算表版本 {{ scaleVersion }}</p>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- 量表切换的飞行副本落点层：固定覆盖视口，脱离 hero 的层级 -->
-    <div ref="ghostLayer" class="pointer-events-none fixed inset-0 z-50" aria-hidden="true"></div>
   </div>
 </template>
 

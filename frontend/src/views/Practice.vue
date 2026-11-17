@@ -3,32 +3,24 @@ import { computed, markRaw, nextTick, onMounted, onUnmounted, ref, watch } from 
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
-import { streamFinish, streamTurn } from '../api/stream'
-import AiStatusBadge from '../components/AiStatusBadge.vue'
+import { streamFinish } from '../api/stream'
 import AppHeader from '../components/AppHeader.vue'
-import BrandLogo from '../components/BrandLogo.vue'
+import ChatBubble from '../components/ChatBubble.vue'
 import EmptyState from '../components/EmptyState.vue'
 import FinishProgress from '../components/FinishProgress.vue'
+import GoalProgress from '../components/GoalProgress.vue'
 import HintCard from '../components/HintCard.vue'
+import { useRecorder } from '../composables/useRecorder'
+import { useTurnStream } from '../composables/useTurnStream'
 import { useSessionStore } from '../stores/session'
-import { useSettingsStore } from '../stores/settings'
-import { startAudioCapture } from '../utils/audio'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
 import { loadRecordings, playRecording, saveRecording, stopRecording } from '../utils/recordings'
-import { createRecognizer, speakSmart, stopSpeaking } from '../utils/speech'
-import { blobToWav } from '../utils/wav'
+import { speakSmart, stopSpeaking } from '../utils/speech'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
-const settings = useSettingsStore()
 
-const listening = ref(false)
-const interim = ref('')
-const sending = ref(false)
-// 流式回复已经开始出字：此时收起「正在输入」的三个点
-const streaming = ref(false)
-let streamAbort = null
 const finishing = ref(false)
 const confirmingFinish = ref(false)
 // 出报告的流式进度：阶段、教练工具调用、开始时间与失败信息
@@ -40,9 +32,8 @@ const finishFallback = ref(false)
 const canFinish = ref(false)
 const error = ref('')
 const chatEl = ref(null)
-// 目标条：吸顶区、飞行副本容器
-const stripEl = ref(null)
-const flightLayer = ref(null)
+// 目标条与控制组件（GoalProgress / 录音 / 流式各管一段，这里只留引用）
+const goalRef = ref(null)
 const micBtn = ref(null)
 const manualBtn = ref(null)
 const manualOpen = ref(false)
@@ -104,7 +95,6 @@ let pendingAudio = null
 let pendingBlob = null
 // 这一句的转写来源：cloud（服务端 ASR）/ browser（浏览器识别）；打字 / 改过文字为 null
 let pendingAsrSource = null
-const transcribing = ref(false)
 
 // 回放自己说过的话：同一时间只放一句
 const playingIndex = ref(-1)
@@ -121,6 +111,23 @@ async function togglePlayback(t, i) {
     if (playingIndex.value === i) playingIndex.value = -1
   })
   if (!ok) error.value = '这段录音放不出来，可能是浏览器不支持这种格式。'
+}
+
+// 朗读某条 AI 回复（气泡里的喇叭按钮）
+function onSpeakTurn(t) {
+  speakSmart(t.content, { rate: speechRate.value })
+}
+
+// 重试：沿用原句，替换这条气泡；记 h0 保持高度，内容先淡出 120ms 再回到三点
+async function retryTurn(t) {
+  if (sending.value) return
+  const el = document.querySelector(`[data-turn="${session.turns.indexOf(t)}"]`)
+  const bubble = el?.querySelector('[data-role="ai"]')
+  t.minHeight = bubble?.offsetHeight || 0
+  t.fading = true
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  t.fading = false
+  await retryStream(t)
 }
 
 // 按「第几句用户发言」把本地录音挂回对话（刷新 / 从历史回来时）
@@ -303,34 +310,8 @@ watch([manualOpen, manualText], ([open, text]) => {
   scheduleHint()
 })
 
-let recognizer = null
-let capturer = null
-let timer = null
-const elapsed = ref(0)
-// 录音按钮外圈跟着真实音量缩放（0–1）
-const micLevel = ref(0)
-let levelRaf = 0
-
-function trackLevel() {
-  cancelAnimationFrame(levelRaf)
-  const tick = () => {
-    const rms = capturer?.level?.() || 0
-    // 说话时 RMS 常在 0.02–0.2，映射到 0–1 并做一点平滑
-    const target = Math.min(1, Math.max(0, (rms - 0.015) * 6))
-    micLevel.value = micLevel.value * 0.6 + target * 0.4
-    levelRaf = requestAnimationFrame(tick)
-  }
-  levelRaf = requestAnimationFrame(tick)
-}
-
-function stopLevel() {
-  cancelAnimationFrame(levelRaf)
-  micLevel.value = 0
-}
-
 const DIFFICULTY_LABELS = { easy: '简单', medium: '中等', hard: '困难' }
 const difficultyLabel = computed(() => DIFFICULTY_LABELS[session.difficulty] || session.difficulty || '—')
-const elapsedText = computed(() => `${Math.floor(elapsed.value / 60)}:${String(elapsed.value % 60).padStart(2, '0')}`)
 const hasUserTurn = computed(() => session.turns.some((t) => t.role === 'user'))
 const userTurnCount = computed(() => session.turns.filter((t) => t.role === 'user').length)
 // Agent 本场计划：目标来自场景任务清单，达成由服务端每轮按关键词规则算
@@ -351,165 +332,98 @@ const progressHint = computed(() => {
   return '可以点「结束并出报告」看评分'
 })
 
-// ---- 目标条：吸顶描边、首次展开、达成飞行（规格 1.3）----
-const stripScrolled = ref(false)
-// chip 的展示态：比服务端数据晚 340ms 翻转，等飞行副本快落地再变形
-const shapeAchieved = ref([])
-const poppingGoals = ref([])
-const countPulsing = ref(false)
-const stripInlineHeight = ref(null)
-const stripContentShown = ref(true)
-const allGoalsDone = computed(() => planGoals.value.length > 0 && planAchieved.value.length >= planGoals.value.length)
-const stripBorder = computed(() => {
-  if (allGoalsDone.value) return 'border-brand-100'
-  return stripScrolled.value ? 'border-line/70' : 'border-transparent'
-})
-
-// 副本与脉冲的定时器，离开页面时统一清
-const goalTimers = []
-
 function reducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-function stripTargetHeight() {
-  return window.matchMedia('(min-width: 640px)').matches ? 56 : 48
-}
+// 录音 + 转写：服务端 ASR 优先，失败回落浏览器识别；结果只落输入条，按 Enter 才发出去
+const { listening, interim, transcribing, elapsedText, micLevel, toggleListening } = useRecorder({
+  onResult({ text, audio, blob, asrSource }) {
+    pendingAudio = audio
+    pendingBlob = blob
+    pendingAsrSource = asrSource
+    // 识别结果先落到输入条：说错、识别错都能改，按 Enter 才真的发出去
+    recognizedText.value = text
+    manualText.value = text
+    manualOpen.value = true
+    nextTick(() => manualInput.value?.focus())
+  },
+  onEmpty() {
+    // 点了麦克风但没出声：必须给反馈，否则用户以为坏了
+    error.value = '这次没听到声音，再点一次麦克风试试，或者改用「手动输入」。'
+    nextTick(() => micBtn.value?.focus())
+  },
+  onError(message) {
+    pendingAudio = null
+    pendingBlob = null
+    pendingAsrSource = null
+    error.value = message
+  },
+  onStart() {
+    error.value = ''
+  },
+})
 
-function onPageScroll() {
-  stripScrolled.value = window.scrollY > 8
-}
-
-// 目标条首次出现：先在同一个 tick 里压到 0 高，下一帧再长到固定高
-function beginStripEnter() {
-  if (reducedMotion()) return
-  stripContentShown.value = false
-  stripInlineHeight.value = '0px'
-}
-
-function finishStripEnter() {
-  if (reducedMotion()) {
-    stripContentShown.value = true
-    return
-  }
-  requestAnimationFrame(() => {
-    stripInlineHeight.value = `${stripTargetHeight()}px`
-    stripContentShown.value = true
-  })
-  goalTimers.push(
-    setTimeout(() => {
-      stripInlineHeight.value = null
-    }, 260)
-  )
-}
-
-function measureChip(index) {
-  const el = stripEl.value?.querySelector(`[data-goal="${index}"]`)
-  return el ? el.getBoundingClientRect() : null
-}
-
-// 飞行起点：刚到达的 AI 气泡顶部中点；气泡在视口外时退到对话区可视底边上方 24px
-function flightSource() {
-  const nodes = document.querySelectorAll('[data-role="ai"]')
-  const bubble = nodes.length ? nodes[nodes.length - 1].getBoundingClientRect() : null
-  if (bubble && bubble.bottom > 0 && bubble.top < window.innerHeight) {
-    return { left: bubble.left + bubble.width / 2, top: bubble.top }
-  }
-  const chat = chatEl.value?.getBoundingClientRect()
-  const bottom = chat ? Math.min(chat.bottom, window.innerHeight) : window.innerHeight
-  const left = chat ? chat.left + chat.width / 2 : window.innerWidth / 2
-  return { left, top: bottom - 24 }
-}
-
-// 与目标 chip 同尺寸的副本：直线插值 + 中途右弧，420ms 落到 chip 上再淡出
-function spawnFlight(goal, from, to) {
-  const layer = flightLayer.value
-  if (!layer || !to) return
-  const width = to.width || 88
-  const height = to.height || 24
-  const el = document.createElement('span')
-  el.textContent = goal
-  el.className =
-    'pointer-events-none absolute inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-brand-50 px-2.5 text-[11px] font-medium text-brand-700 ring-1 ring-brand-100'
-  el.style.position = 'absolute'
-  el.style.left = `${from.left - width / 2}px`
-  el.style.top = `${from.top}px`
-  el.style.width = `${width}px`
-  el.style.height = `${height}px`
-  el.style.justifyContent = 'center'
-  layer.appendChild(el)
-  const dx = to.left - (from.left - width / 2)
-  const dy = to.top - from.top
-  const arc = width * 0.08
-  const flight = el.animate(
-    [
-      { transform: 'translate(0px, 0px) scale(0.96)', opacity: 0.92 },
-      { transform: `translate(${dx * 0.5 + arc}px, ${dy * 0.5}px) scale(1.04)`, offset: 0.5, opacity: 1 },
-      { transform: `translate(${dx}px, ${dy}px) scale(1)`, opacity: 1 },
-    ],
-    { duration: 420, easing: 'cubic-bezier(0.3,0.9,0.25,1)', fill: 'forwards' }
-  )
-  flight.finished.then(
-    () => {
-      const fade = el.animate([{ opacity: 1 }, { opacity: 0 }], {
-        duration: 120,
-        easing: 'ease-out',
-        fill: 'forwards',
-      })
-      fade.finished.then(
-        () => el.remove(),
-        () => el.remove()
-      )
-    },
-    () => el.remove()
-  )
-}
-
-// 达成飞行：同屏最多 3 个副本，其余只做 chip 变形；间隔 70ms
-function animateAchieved(added) {
-  const goals = planGoals.value
-  if (reducedMotion()) {
-    shapeAchieved.value = [...new Set([...shapeAchieved.value, ...added])]
-    return
-  }
-  const from = flightSource()
-  added.forEach((goal, i) => {
-    const index = goals.indexOf(goal)
-    const landAt = 420 + i * 70
-    const flipAt = Math.max(0, landAt - 80)
-    if (i < 3) {
-      const to = measureChip(index)
-      if (to) goalTimers.push(setTimeout(() => spawnFlight(goal, from, to), i * 70))
+// 一轮作答的流式收发：乐观插入用户气泡、边收边写 AI 气泡、done 覆盖成服务端整句
+const {
+  sending,
+  streaming,
+  thinkingMs,
+  send: sendTurn,
+  retry: retryStream,
+  stop: stopStream,
+  abort: abortStream,
+} = useTurnStream({
+  session,
+  scrollBottom,
+  onSendStart() {
+    error.value = ''
+    hintVisible.value = false
+  },
+  onDegraded() {
+    // 模型这轮没回上来，后端给的是预设追问：明说，别让人以为 AI 在正常聊
+    error.value = '模型这一轮没有响应（超时、限流或服务异常），上面是预设的追问。可以继续说，或稍后再试。'
+  },
+  onKeyError({ status, kind }) {
+    if (status === 409 && kind === 'llm_not_configured') {
+      error.value = KEY_REQUIRED_MESSAGE
+      showKeyPanel('还没接入模型密钥。配好之后就能继续这段对话。')
+      return
     }
-    goalTimers.push(
-      setTimeout(() => {
-        shapeAchieved.value = [...new Set([...shapeAchieved.value, goal])]
-        poppingGoals.value = [...poppingGoals.value, goal]
-        goalTimers.push(
-          setTimeout(() => {
-            poppingGoals.value = poppingGoals.value.filter((g) => g !== goal)
-          }, 220)
-        )
-      }, flipAt)
-    )
-  })
-  goalTimers.push(
-    setTimeout(() => {
-      countPulsing.value = true
-      goalTimers.push(
-        setTimeout(() => {
-          countPulsing.value = false
-        }, 200)
-      )
-    }, 420)
-  )
-}
-
-// 带着 plan 进页面（首页开练 / 刷新回填）：目标条在第一帧就是 0 高，再由 onMounted 展开
-if (planGoals.value.length && !reducedMotion()) {
-  stripContentShown.value = false
-  stripInlineHeight.value = '0px'
-}
+    error.value = '你的密钥被模型服务拒绝了，去设置里换一个再试；这句话没有计入记录。'
+    showKeyPanel('你的密钥被模型服务拒绝了，换一个再继续。这句话没有计入记录。')
+  },
+  onFailure(message) {
+    error.value = '发送失败：' + message
+  },
+  onDone(data, { mineRef, blobPromise }) {
+    if (blobPromise) {
+      const sid = session.sessionId
+      blobPromise.then((blob) => {
+        if (!blob) return
+        saveRecording(sid, data.turn_index, blob)
+        mineRef.blob = markRaw(blob)
+      })
+    }
+    // 目标进度以服务端为准：老会话没有 plan，就不更新
+    const hadPlan = planGoals.value.length > 0
+    session.setPlan(data.plan)
+    if (!hadPlan && planGoals.value.length) {
+      // 老会话补上目标：条直接出现，不做飞行
+      goalRef.value?.syncAchieved(planAchieved.value)
+    } else if (planGoals.value.length) {
+      goalRef.value?.animateNew(planAchieved.value, chatEl.value)
+    }
+    if (data.should_finish) canFinish.value = true
+    // 新一轮：重置提示状态并静默预取，点开即得
+    hintRefreshLeft.value = 2
+    hintOffered.value = false
+    hints.value = []
+    prefetchHints()
+    speakSmart(data.ai_reply, { rate: speechRate.value })
+    scrollBottom()
+  },
+})
 
 // 进对话前先确认有密钥：不让人听完开场白、录完一句才被拒
 const blocked = ref(false)
@@ -519,16 +433,6 @@ const blockReason = ref('')
 function showKeyPanel(reason = '') {
   blockReason.value = reason
   blocked.value = true
-}
-
-// 语音识别错误码翻成用户能懂的话，不把 not-allowed 这种英文码甩到页面上
-const SPEECH_ERRORS = {
-  'not-allowed': '麦克风权限被拒绝了。请在地址栏左侧允许麦克风，或改用「手动输入」。',
-  'service-not-allowed': '这个浏览器不允许语音识别，请换 Chrome，或改用「手动输入」。',
-  'audio-capture': '没找到可用的麦克风，检查一下设备是否插好或被别的程序占用。',
-  network: '语音识别服务连不上网络，过一会儿再试，或改用「手动输入」。',
-  'no-speech': '这次没听到声音，再说一遍试试。',
-  aborted: '',
 }
 
 onMounted(async () => {
@@ -543,11 +447,9 @@ onMounted(async () => {
     blockReason.value = ''
     return
   }
-  window.addEventListener('scroll', onPageScroll, { passive: true })
-  onPageScroll()
   // 带着 plan 进页面（首页开练 / 刷新回填）：chip 直接就是已达成的样子
-  shapeAchieved.value = [...planAchieved.value]
-  if (planGoals.value.length) finishStripEnter()
+  goalRef.value?.syncAchieved(planAchieved.value)
+  if (planGoals.value.length) goalRef.value?.finishStripEnter()
   await loadSession(id)
 })
 
@@ -561,7 +463,7 @@ async function loadSession(id) {
         router.replace(`/report/${id}`)
         return
       }
-      if (data.plan?.goals?.length) beginStripEnter()
+      if (data.plan?.goals?.length) goalRef.value?.beginStripEnter()
       session.restore(
         id,
         { id: data.scene_id, name: data.scene_name },
@@ -574,8 +476,8 @@ async function loadSession(id) {
         })),
         data.plan
       )
-      shapeAchieved.value = [...planAchieved.value]
-      if (data.plan?.goals?.length) finishStripEnter()
+      goalRef.value?.syncAchieved(planAchieved.value)
+      if (data.plan?.goals?.length) goalRef.value?.finishStripEnter()
       attachRecordings(id)
       scrollBottom()
       // 回填时不重播开场白，否则刷新一次就念一遍
@@ -597,16 +499,10 @@ async function loadSession(id) {
 
 onUnmounted(() => {
   // 离开页面时断开还在收的回复（这一轮服务端不会记录）
-  streamAbort?.abort()
+  abortStream()
   stopRecording()
-  stopTimer()
   clearHintTimer()
-  window.removeEventListener('scroll', onPageScroll)
-  goalTimers.forEach((t) => clearTimeout(t))
-  goalTimers.length = 0
-  flightLayer.value?.replaceChildren()
   hintGhostLayer.value?.replaceChildren()
-  if (recognizer) recognizer.abort?.()
 })
 
 function scrollBottom() {
@@ -616,119 +512,6 @@ function scrollBottom() {
   })
 }
 
-function startTimer() {
-  stopTimer()
-  trackLevel()
-  elapsed.value = 0
-  timer = setInterval(() => {
-    elapsed.value += 1
-  }, 1000)
-}
-
-function stopTimer() {
-  stopLevel()
-  if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
-}
-
-/** 把这一句的录音送服务端转写；没配 key、格式不支持或上游失败都返回空串，回退浏览器结果 */
-async function transcribeCloud(blobPromise) {
-  try {
-    const blob = blobPromise ? await blobPromise : null
-    if (!blob) return ''
-    const wav = await blobToWav(blob)
-    const form = new FormData()
-    form.append('file', new File([wav], 'answer.wav', { type: 'audio/wav' }))
-    const { data } = await api.post('/asr', form, { timeout: 30000 })
-    return String(data?.text || '').trim()
-  } catch {
-    return ''
-  }
-}
-
-async function startListening() {
-  error.value = ''
-  recognizer = createRecognizer(
-    (text) => {
-      interim.value = text
-    },
-    async () => {
-      listening.value = false
-      stopTimer()
-      const browserText = interim.value.trim()
-      pendingAudio = capturer ? capturer.stop() : null
-      pendingBlob = capturer ? capturer.blob() : null
-      capturer = null
-      interim.value = ''
-      pendingAsrSource = null
-      let text = browserText
-      if (settings.configured && pendingBlob) {
-        transcribing.value = true
-        const cloud = await transcribeCloud(pendingBlob)
-        transcribing.value = false
-        if (cloud) {
-          text = cloud
-          pendingAsrSource = 'cloud'
-        }
-      }
-      if (!text) {
-        // 点了麦克风但没出声：必须给反馈，否则用户以为坏了
-        error.value = '这次没听到声音，再点一次麦克风试试，或者改用「手动输入」。'
-        nextTick(() => micBtn.value?.focus())
-        return
-      }
-      if (!pendingAsrSource && browserText) pendingAsrSource = 'browser'
-      // 识别结果先落到输入条：说错、识别错都能改，按 Enter 才真的发出去
-      recognizedText.value = text
-      manualText.value = text
-      manualOpen.value = true
-      nextTick(() => manualInput.value?.focus())
-    },
-    (event) => {
-      listening.value = false
-      stopTimer()
-      if (capturer) {
-        capturer.stop()
-        capturer = null
-      }
-      pendingAudio = null
-      pendingBlob = null
-      pendingAsrSource = null
-      interim.value = ''
-      const msg = SPEECH_ERRORS[event?.error]
-      if (msg) error.value = msg
-    }
-  )
-  if (!recognizer) {
-    error.value = '当前浏览器不支持语音识别，请用 Chrome，或点「手动输入」。'
-    return
-  }
-  try {
-    capturer = await startAudioCapture()
-  } catch {
-    capturer = null
-  }
-  interim.value = ''
-  listening.value = true
-  startTimer()
-  recognizer.start()
-}
-
-function stopListening() {
-  if (recognizer) recognizer.stop()
-  if (!recognizer) {
-    listening.value = false
-    stopTimer()
-  }
-}
-
-function toggleListening() {
-  if (listening.value) stopListening()
-  else startListening()
-}
-
 async function send(text, audio = null, mode = 'typed', blobPromise = null, asrSource = null) {
   if (!text || sending.value) return false
   const gate = await llmReady()
@@ -736,110 +519,7 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null, asrS
     error.value = KEY_REQUIRED_MESSAGE
     return false
   }
-  sending.value = true
-  error.value = ''
-  hintVisible.value = false
-  const mine = { role: 'user', content: text, mode, asrSource: mode === 'voice' ? asrSource : null }
-  session.turns.push(mine)
-  // 拿响应式代理（不是原对象），之后挂录音才会刷新界面
-  const mineRef = session.turns[session.turns.length - 1]
-  scrollBottom()
-  // AI 气泡收到第一段才插入；之后边收边追加
-  let aiRef = null
-  streamAbort = new AbortController()
-  try {
-    const data = await streamTurn(
-      session.sessionId,
-      { transcript: text, audio, input_mode: mode, asr_source: asrSource },
-      {
-        signal: streamAbort.signal,
-        onDelta(piece) {
-          if (!piece) return
-          if (!aiRef) {
-            session.turns.push({ role: 'ai', content: '', streaming: true })
-            aiRef = session.turns[session.turns.length - 1]
-            streaming.value = true
-          }
-          aiRef.content += piece
-          scrollBottom()
-        },
-      }
-    )
-    // 以 done 里的整句为准：中途断流时服务端会换成预设追问
-    const aiStatus = data.replaced
-      ? 'replaced'
-      : data.degraded
-        ? 'degraded'
-        : data.flagged
-          ? 'flagged'
-          : null
-    if (aiRef) {
-      aiRef.content = data.ai_reply
-      aiRef.streaming = false
-      aiRef.aiStatus = aiStatus
-    } else {
-      session.turns.push({ role: 'ai', content: data.ai_reply, aiStatus })
-    }
-    // 服务端最终采用的转写来源（用户改过文字时它不会带来源）
-    mineRef.asrSource = mode === 'voice' ? data.asr_source || null : null
-    if (blobPromise) {
-      const sid = session.sessionId
-      blobPromise.then((blob) => {
-        if (!blob) return
-        saveRecording(sid, data.turn_index, blob)
-        mineRef.blob = markRaw(blob)
-      })
-    }
-    // 模型这轮没回上来，后端给的是预设追问：明说，别让人以为 AI 在正常聊
-    if (data.degraded) {
-      error.value = '模型这一轮没有响应（超时、限流或服务异常），上面是预设的追问。可以继续说，或稍后再试。'
-    }
-    // 目标进度以服务端为准：老会话没有 plan，就不更新
-    const hadPlan = planGoals.value.length > 0
-    session.setPlan(data.plan)
-    if (!hadPlan && planGoals.value.length) {
-      // 老会话补上目标：条直接出现，不做飞行
-      shapeAchieved.value = [...planAchieved.value]
-    } else if (planGoals.value.length) {
-      const added = planAchieved.value.filter((g) => !shapeAchieved.value.includes(g))
-      if (added.length) animateAchieved(added)
-    }
-    if (data.should_finish) canFinish.value = true
-    // 新一轮：重置提示状态并静默预取，点开即得
-    hintRefreshLeft.value = 2
-    hintOffered.value = false
-    hints.value = []
-    prefetchHints()
-    speakSmart(data.ai_reply, { rate: speechRate.value })
-    scrollBottom()
-    return true
-  } catch (e) {
-    // 后端拒收（空转写 / 超长 / 密钥问题）或流断了：把刚乐观插入的这句和半截回复都撤回
-    if (aiRef) {
-      const j = session.turns.indexOf(aiRef)
-      if (j >= 0) session.turns.splice(j, 1)
-    }
-    const i = session.turns.indexOf(mine)
-    if (i >= 0) session.turns.splice(i, 1)
-    // 离开页面导致的中断不用提示
-    if (e?.name === 'AbortError') return false
-    const detail = e?.response?.data?.detail
-    const kind = e?.response?.data?.kind
-    if (e?.response?.status === 409 && (kind === 'llm_not_configured' || detail === 'llm_key_required')) {
-      error.value = KEY_REQUIRED_MESSAGE
-      showKeyPanel('还没接入模型密钥。配好之后就能继续这段对话。')
-    } else if (e?.response?.status === 502 && kind === 'key_invalid') {
-      error.value = '你的密钥被模型服务拒绝了，去设置里换一个再试；这句话没有计入记录。'
-      showKeyPanel('你的密钥被模型服务拒绝了，换一个再继续。这句话没有计入记录。')
-    } else {
-      error.value = '发送失败：' + (detail || e.message)
-    }
-    return false
-  } finally {
-    sending.value = false
-    streaming.value = false
-    streamAbort = null
-  }
+  return sendTurn(text, audio, mode, blobPromise, asrSource)
 }
 
 async function openManual() {
@@ -968,58 +648,7 @@ async function finish() {
       <router-link to="/settings" class="sp-btn-ghost hidden sm:inline-flex">设置</router-link>
     </AppHeader>
 
-    <div
-      v-if="planGoals.length"
-      ref="stripEl"
-      class="sp-goal-strip border-b"
-      :class="stripBorder"
-      :style="stripInlineHeight ? { height: stripInlineHeight } : undefined"
-    >
-      <div
-        class="sp-shell-narrow flex h-full items-center gap-3 transition-opacity duration-[120ms] ease-out"
-        :class="stripContentShown ? 'opacity-100 delay-[60ms]' : 'opacity-0'"
-      >
-        <div class="shrink-0" aria-live="polite">
-          <span class="sr-only">已达成 {{ planAchieved.length }} / 共 {{ planGoals.length }} 个目标</span>
-          <div class="flex items-baseline gap-1.5" aria-hidden="true">
-            <span class="hidden text-[11px] text-ink-mute sm:inline">本轮目标</span>
-            <span
-              class="sp-num text-[13px]"
-              :class="allGoalsDone ? 'text-brand-700' : 'text-ink'"
-              :style="countPulsing ? { animation: 'sp-goal-count 180ms ease-out' } : undefined"
-            >
-              {{ planAchieved.length }}/{{ planGoals.length }}
-            </span>
-          </div>
-        </div>
-        <div
-          class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_12px,black_calc(100%_-_12px),transparent)] [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden"
-        >
-          <span
-            v-for="(g, gi) in planGoals"
-            :key="g"
-            :data-goal="gi"
-            class="inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium transition-colors duration-[160ms] ease-out"
-            :class="[
-              shapeAchieved.includes(g) ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-white text-ink-mute ring-1 ring-line',
-              poppingGoals.includes(g) ? 'sp-chip-pop' : '',
-            ]"
-          >
-            <span class="relative flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true">
-              <span
-                class="absolute h-2.5 w-2.5 rounded-full ring-1 ring-line transition-opacity duration-[120ms] ease-out"
-                :class="shapeAchieved.includes(g) ? 'opacity-0' : 'opacity-100'"
-              ></span>
-              <span
-                class="absolute text-[12px] leading-none transition-opacity duration-[120ms] ease-out"
-                :class="shapeAchieved.includes(g) ? 'opacity-100' : 'opacity-0'"
-              >✓</span>
-            </span>
-            {{ g }}
-          </span>
-        </div>
-      </div>
-    </div>
+    <GoalProgress ref="goalRef" />
 
     <div v-if="blocked" class="sp-shell-narrow py-12">
       <div class="sp-card mx-auto max-w-lg p-7 ring-brand-100">
@@ -1039,89 +668,18 @@ async function finish() {
     </div>
 
     <main v-if="!blocked" ref="chatEl" class="sp-shell-narrow flex-1 space-y-4 pb-6 pt-4">
-      <div
+      <ChatBubble
         v-for="(t, i) in session.turns"
         :key="i"
-        :class="t.role === 'ai' ? 'flex items-end justify-start gap-2.5' : 'flex justify-end'"
-        class="animate-rise"
-      >
-        <span v-if="t.role === 'ai'" class="mb-0.5 hidden shrink-0 sm:inline-flex" aria-hidden="true"><BrandLogo :size="28" /></span>
-        <div class="flex min-w-0 max-w-[82%] flex-col" :class="t.role === 'ai' ? 'items-start' : 'items-end'">
-        <div
-          :data-role="t.role"
-          :class="
-            t.role === 'ai'
-              ? 'rounded-[1.25rem] rounded-bl-md bg-white text-ink ring-1 ring-line/80'
-              : 'rounded-[1.25rem] rounded-br-md bg-brand-600 text-white'
-          "
-          class="max-w-full px-4 py-3 text-[15px] leading-7 shadow-soft"
-        >
-          <span
-            v-if="t.role === 'user'"
-            class="mb-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white/90"
-          >
-            <svg v-if="t.mode === 'voice'" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
-              <rect x="9" y="2.8" width="6" height="11" rx="3" />
-              <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0" />
-              <path d="M12 17.8v3.4" />
-            </svg>
-            <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
-              <path d="M4 6h16M4 12h16M4 18h10" />
-            </svg>
-            {{ t.mode === 'voice' ? '录音' : '打字' }}
-          </span>
-          <AiStatusBadge
-            v-if="t.role === 'user' && t.asrSource"
-            class="mb-1 ml-1.5"
-            :status="t.asrSource"
-            surface="bubble"
-          />
-          <button
-            v-if="t.role === 'user' && t.blob"
-            class="mb-1 ml-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white/90 transition hover:bg-white/25"
-            :aria-label="playingIndex === i ? '停止回放' : '回放我的录音'"
-            @click="togglePlayback(t, i)"
-          >
-            <svg v-if="playingIndex === i" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <rect x="6" y="6" width="12" height="12" rx="1.5" />
-            </svg>
-            <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M8 5.5v13l10.5-6.5L8 5.5Z" />
-            </svg>
-            {{ playingIndex === i ? '停止' : '回放' }}
-          </button>
-          {{ t.content }}
-          <span
-            v-if="t.streaming"
-            class="ml-0.5 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-brand-300"
-            aria-hidden="true"
-          ></span>
-          <button
-            v-if="t.role === 'ai' && !t.streaming"
-            class="ml-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-brand-600 transition hover:bg-brand-50"
-            aria-label="朗读这句"
-            @click="speakSmart(t.content, { rate: speechRate })"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4a.8.8 0 0 1-.8-.8v-3.4a.8.8 0 0 1 .8-.8Z" />
-              <path d="M16 9.2a4 4 0 0 1 0 5.6" />
-            </svg>
-          </button>
-        </div>
-        <div v-if="t.role === 'ai' && t.aiStatus" class="mt-1">
-          <AiStatusBadge :status="t.aiStatus" surface="bubble" />
-        </div>
-        </div>
-      </div>
-
-      <div v-if="sending && !streaming" class="flex items-end justify-start gap-2.5">
-        <span class="mb-0.5 hidden shrink-0 sm:inline-flex" aria-hidden="true"><BrandLogo :size="28" /></span>
-        <div class="flex items-center gap-1 rounded-[1.25rem] rounded-bl-md bg-white px-4 py-3.5 ring-1 ring-line/80">
-          <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-300 [animation-delay:-0.2s]"></span>
-          <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-300 [animation-delay:-0.1s]"></span>
-          <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-brand-300"></span>
-        </div>
-      </div>
+        :turn="t"
+        :index="i"
+        :playing-index="playingIndex"
+        :speech-rate="speechRate"
+        :thinking-ms="thinkingMs"
+        @toggle-playback="togglePlayback"
+        @speak="onSpeakTurn"
+        @retry="retryTurn"
+      />
 
       <div v-if="interim" class="flex justify-end">
         <div class="max-w-[82%] rounded-[1.25rem] rounded-br-md border border-dashed border-brand-300 bg-brand-50 px-4 py-3 text-[15px] leading-7 text-brand-700">
@@ -1145,6 +703,18 @@ async function finish() {
     <footer v-if="!blocked" class="sticky bottom-0 z-10 bg-gradient-to-t from-canvas via-canvas/95 to-canvas/0 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
       <div class="sp-shell-narrow">
       <div class="relative space-y-3 rounded-card bg-white/95 p-4 shadow-dock ring-1 ring-line/80 backdrop-blur sm:p-5">
+        <!-- 停止生成：浮在输入区上沿右侧，不改 dock 高度；只在首个 delta 之后出现 -->
+        <Transition name="sp-stop">
+          <button
+            v-if="streaming"
+            class="sp-stop-pill absolute bottom-full right-0 z-20 mb-2"
+            aria-label="停止生成"
+            @click="stopStream"
+          >
+            <span class="h-1.5 w-1.5 rounded-[2px] bg-white" aria-hidden="true"></span>
+            停止
+          </button>
+        </Transition>
         <Transition
           enter-active-class="sp-hint-card-enter"
           leave-active-class="sp-hint-card-leave"
@@ -1301,8 +871,6 @@ async function finish() {
       </div>
     </footer>
 
-    <!-- chip 飞行副本的落点层：固定覆盖视口，脱离吸顶条的层级限制 -->
-    <div ref="flightLayer" class="pointer-events-none fixed inset-0 z-50" aria-hidden="true"></div>
     <!-- 提示填入时的英文 ghost 落点层 -->
     <div ref="hintGhostLayer" class="pointer-events-none fixed inset-0 z-50" aria-hidden="true"></div>
   </div>

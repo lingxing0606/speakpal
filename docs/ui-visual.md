@@ -134,7 +134,10 @@
 - 达成动效：新达成的 chip 从刚到达的 AI 气泡顶部中点飞到目标条对应 chip（420ms，同屏最多 3 个副本、间隔 70ms），落点 chip 在副本到达前 80ms 切两态并做 180ms 落地脉冲；计数 180ms 脉冲。目标条首次出现从 0 高展开 200ms。`prefers-reduced-motion` 下不生成副本、不脉冲、直接到位。
 - AI 气泡白底 `ring-line`，用户气泡 `brand-600` 白字；用户气泡顶部标「录音 / 打字」，回填时按 `input_mode` 还原。
 - **转写来源**：录音结束后先送服务端 ASR（浏览器 Web Speech 兜底），用户气泡在「录音」旁加第二枚标签 `AiStatusBadge`：`cloud`「云端转写」/ `browser`「浏览器识别」；改过文字或打字不标来源（回填按 `asr_source`）。
-- **AI 异常徽标**：气泡外下方 `mt-1`（4px）最多一枚 `AiStatusBadge`，优先级「已替换 > 降级 > 已标记」；正常回复不加。
+- **AI 异常徽标**：气泡外下方 `mt-1`（4px）一行 `sp-badge-row`，输出侧在左、`已标记` 在右，同一气泡最多两枚 `AiStatusBadge`；优先级「已替换 > 已中断 > 降级 > 已停止」，正常回复不加（`ok` 不渲染、不占位）。
+- **思考态**（`ThinkingDots.vue`）：发送瞬间就把 AI 气泡插进列表（不是气泡外的独立块），内容位画三点：6px `brand-300`、间距 4px、单点 1.2s（`translateY 0→-3→0` + `opacity .45→1→.45`），三点依次延迟 160ms；行盒固定 28px，首个 delta 在**同一行盒原地换字**（气泡 52px 高不变，实测前后 `offsetHeight` 差 0）。`>4s` 同一行追加「对方正在思考…」（11px `ink-mute`），`>10s` 追加「已 Ns」。`role="status" aria-label="对方正在思考"`，三点 `aria-hidden`；减少动态时三点静止不呼吸。
+- **停止生成**：首个 delta 之后，输入区上沿右侧浮出深色胶囊 `sp-stop-pill`（`absolute bottom-full right-0 mb-2 z-20`，`bg-ink/90`，6px 方块 + 11px「停止」，窄屏 36px 高），不改变 dock 高度；点击后保留已收文字、气泡下标「已停止」，输入区立即恢复，**不给重试**（主动停止不是故障）、朗读按钮隐藏。
+- **重试**（`ChatBubble` 徽标行右侧）：只在真失败（断网 / 断连）出现，`已中断`（rose）+「↻ 重试」；点击沿用原句替换原气泡（记 `h0` 做 `min-height`、内容淡出 120ms 再回三点），不新增用户气泡、不重发两句；成功后徽标与重试一起消失。密钥类错误（409 / 502 key_invalid）不给重试，走页内密钥面板。
 - 输入区：「手动输入」+ 56px 录音主按钮（下方有计时）+「结束并出报告」；录音可在气泡与逐句纠错旁**本地回放，只存浏览器**。
 - **场景句型**：输入区「场景句型」按钮展开面板，给 `GET /api/scenes/{id}/frames` 的三条固定句式，用提示不扣分；与动态提示卡并存、不合并。
 - **动态提示卡**（`HintCard.vue` + `sp-hint-card`）：输入区上沿的浮层，`absolute inset-x-0 bottom-full mb-2 z-20`，桌面 `sm:left-5 sm:w-[380px]` 左对齐 textarea，窄屏全宽，不参与文档流（出现不重排聊天）。头部 44px：标题「这样说更顺」12px + 来源徽标（`AI 生成` brand / `通用句型` 白底）+ 右下「换一批」（12px 图标，进行中转圈并显示「在想…」）+「× 收起」；条目整块按钮（EN 13px、ZH 11px、右上 tag 10px，条目间 `divide-line/60`），条目区 `max-h-[min(46vh,320px)]` 可滚、头部不滚；冷启动 2 行 `sp-skeleton`。
@@ -199,6 +202,8 @@
 | 加载 | `.sp-skeleton` 骨架 / 按钮内文案变化，禁止整页转圈 |
 | 空 | `EmptyState`：插画 + 一句现状 + 一个下一步 |
 | 错误 | 内联 `sp-alert-error`，就地出现在出错位置，不弹窗、不清空已输入内容 |
+| 渲染崩溃 | `App.vue` `onErrorCaptured` 兜底卡（`FatalErrorCard.vue`）：44px `sp-icon-tile` + 「页面出错了」+ 12px「刚输入的内容可能没保存」+「刷新页面 / 回首页」，不露堆栈、不给错误码；`sp-rise` 一次 500ms |
+| 旧 chunk 失效 | `router.onError` 命中动态 import 失败直接自动重载一次（5 分钟窗口，记 `sp_chunk_reload_at` / `_to`），不弹提示；窗口内再失败才把同一张兜底卡换成 `reason="stale"`：标题「页面需要更新」、「刷新一次就好。」、按钮「刷新一次」 |
 | 降级（mock） | 琥珀 `sp-alert-warn` + 「去设置」链接，活值只有 `not_configured` / `unavailable`；`invalid_key` 仅历史报告 |
 | 危险操作 | 页内二次确认，按钮文案写清后果；confirm 只认产品规定的字面值 |
 
