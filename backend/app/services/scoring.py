@@ -235,7 +235,7 @@ def _prompt(scene: dict, difficulty: str, history, references=None) -> str:
         '"error_type":"spelling|grammar|stiffness|wordiness","natural":"",'
         '"rule_ref":"",'
         '"word":"","related":{"synonyms":[],"antonyms":[],"similar":[]}}],'
-        '"comment":"","note":"分数由 AI 估算，仅供参考。"}\n'
+        '"comment":"","note":""}\n'
         "Which dimensions to return (IMPORTANT):\n"
         f"- This conversation has {modes['voice']} spoken (voice) turns and {modes['typed']} typed turns.\n"
         "- pronunciation and fluency: ONLY if there is at least one voice turn. Score them from the voice turns only.\n"
