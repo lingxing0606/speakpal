@@ -1,17 +1,12 @@
-<script>
-// 每个页面各自渲染页头，切页时页头会重新挂载；
-// 这里（模块作用域，不随组件销毁）记住上一次黑块的位置，新页头从那里滑到当前项。
-let lastIndicator = null
-</script>
-
-<script setup>
+<script setup lang="ts">
 // 全站统一页头：左侧返回 / 标志 / 页面名，桌面端右侧主导航，插槽放页面自己的操作。
 // 移动端主导航交给底部 TabBar（同一个 sm 断点切换，避免两套导航同时出现或同时消失）。
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref, type ComponentPublicInstance } from 'vue'
 import { useRoute } from 'vue-router'
 
 import BackLink from './BackLink.vue'
 import BrandLogo from './BrandLogo.vue'
+import { headerIndicator } from './appHeaderIndicator'
 
 defineProps({
   title: { type: String, default: '' },
@@ -33,21 +28,22 @@ const LINKS = [
   { to: '/settings', label: '设置' },
 ]
 
-function active(to) {
+function active(to: string) {
   return to === '/' ? route.path === '/' : route.path.startsWith(to)
 }
 
 // ---------------------------------------------------------------- 滑动黑块
-const navEl = ref(null)
-const linkEls = []
+const navEl = ref<HTMLElement | null>(null)
+const linkEls: (ComponentPublicInstance | null)[] = []
 const activeIndex = LINKS.findIndex((l) => active(l.to))
-const fromIndicator = activeIndex >= 0 && lastIndicator && lastIndicator.index !== activeIndex ? lastIndicator : null
+const fromIndicator =
+  activeIndex >= 0 && headerIndicator.last && headerIndicator.last.index !== activeIndex ? headerIndicator.last : null
 // 白字跟着黑块走：滑动开始前先停在上一页的那一项，免得白字落在浅底上
 const highlight = ref(fromIndicator ? fromIndicator.index : activeIndex)
 const ind = reactive({ x: 0, w: 0, show: false })
 const animate = ref(false)
 
-function measure(i) {
+function measure(i: number) {
   const comp = linkEls[i]
   const el = comp?.$el ?? comp
   if (!el || !el.offsetWidth) return null
@@ -56,10 +52,10 @@ function measure(i) {
 
 function save() {
   const m = measure(activeIndex)
-  if (m) lastIndicator = { index: activeIndex, ...m }
+  if (m) headerIndicator.last = { index: activeIndex, ...m }
 }
 
-function place(withAnim) {
+function place(withAnim: boolean) {
   const m = measure(activeIndex)
   if (!m) {
     ind.show = false
@@ -81,7 +77,7 @@ onMounted(async () => {
   await nextTick()
   if (activeIndex < 0) {
     // 报告页等不在主导航里的页面：下次进主导航页时黑块直接出现，不从奇怪的位置滑过来
-    lastIndicator = null
+    headerIndicator.last = null
     return
   }
   if (fromIndicator) {
@@ -131,7 +127,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize))
           <router-link
             v-for="(l, i) in LINKS"
             :key="l.to"
-            :ref="(el) => (linkEls[i] = el)"
+            :ref="(el) => (linkEls[i] = el as ComponentPublicInstance | null)"
             :to="l.to"
             class="relative z-10 rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors duration-300"
             :class="highlight === i && ind.show ? 'text-white' : 'text-ink-soft hover:bg-sand-50 hover:text-ink'"

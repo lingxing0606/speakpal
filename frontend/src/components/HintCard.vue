@@ -1,10 +1,12 @@
-<script setup>
+<script setup lang="ts">
 // 输入区上沿的动态提示卡：头部（标题 / 来源徽标 / 换一批 / 收起）+ 条目 + 骨架。
 // 只负责展示与本地小动效；取数、计数、填入都在 Practice.vue。
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type PropType } from 'vue'
+
+import type { HintItem } from '../types/api'
 
 const props = defineProps({
-  hints: { type: Array, default: () => [] },
+  hints: { type: Array as PropType<HintItem[]>, default: () => [] as HintItem[] },
   source: { type: String, default: 'frames' }, // llm | frames
   loading: { type: Boolean, default: false }, // 冷启动：条目区骨架
   busy: { type: Boolean, default: false }, // 已有条目的刷新中（换一批）
@@ -14,11 +16,11 @@ const props = defineProps({
 const emit = defineEmits(['pick', 'refresh', 'close'])
 
 // 展示用副本：换一批时先让旧行淡出 140ms，再原地换新（规格四 C）
-const display = ref([...(props.hints || [])])
+const display = ref<HintItem[]>([...(props.hints || [])])
 const phase = ref('idle') // idle | out | in
 const picked = ref(-1)
-let phaseTimer = null
-let pickTimer = null
+let phaseTimer: ReturnType<typeof setTimeout> | undefined
+let pickTimer: ReturnType<typeof setTimeout> | undefined
 
 watch(
   () => props.hints,
@@ -47,7 +49,7 @@ onBeforeUnmount(() => {
 const showSkeleton = computed(() => props.loading && !display.value.length)
 const dimmed = computed(() => props.busy || props.loading)
 
-function rowClass(hint, i) {
+function rowClass(hint: HintItem, i: number) {
   return [
     'flex w-full items-start gap-2 px-3 py-2.5 text-left transition duration-[140ms] ease-out',
     phase.value === 'out' ? 'pointer-events-none -translate-y-1.5 opacity-0' : 'sp-hint-row-in',
@@ -56,8 +58,8 @@ function rowClass(hint, i) {
   ]
 }
 
-function rowStyle(i) {
-  const style = { '--hi': i }
+function rowStyle(i: number) {
+  const style: Record<string, string | number> = { '--hi': i }
   if (phase.value === 'in') {
     style.animationDelay = '60ms'
     style.animationDuration = '180ms'
@@ -65,7 +67,7 @@ function rowStyle(i) {
   return style
 }
 
-function pick(hint, i, event) {
+function pick(hint: HintItem, i: number, event?: MouseEvent) {
   if (dimmed.value) return
   picked.value = i
   clearTimeout(pickTimer)

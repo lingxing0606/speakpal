@@ -1,24 +1,32 @@
-<script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, type PropType } from 'vue'
 
 import api from '../api/client'
+
+interface MnemonicAssist {
+  root?: string
+  association?: string
+  collocations?: string[]
+  confusable?: (string | { term?: string; word?: string; meaning_zh?: string; zh?: string })[]
+  scene_example?: string
+}
 
 const props = defineProps({
   term: { type: String, required: true },
   meaningZh: { type: String, default: '' },
   // 词库卡的近义/反义可作为「易混」兜底；后端返回 confusable 时优先用后端的
-  related: { type: Object, default: () => ({}) },
+  related: { type: Object as PropType<Record<string, unknown>>, default: () => ({}) },
   // 同批内已请求过的结果，避免重复打接口
-  initial: { type: Object, default: null },
+  initial: { type: Object as PropType<Record<string, unknown> | null>, default: null },
 })
 
 const emit = defineEmits(['done', 'fail'])
 
-const assist = ref(null)
+const assist = ref<MnemonicAssist | null>(null)
 const loading = ref(true)
 const failed = ref(false)
 const showSkeleton = ref(false)
-let skeletonTimer = null
+let skeletonTimer: ReturnType<typeof setTimeout> | undefined
 let alive = true
 
 const confusables = computed(() => {
@@ -33,7 +41,7 @@ const confusables = computed(() => {
       )
       .filter((item) => item.word)
   }
-  const rel = props.related || {}
+  const rel = (props.related || {}) as { similar?: unknown[]; synonyms?: unknown[]; antonyms?: unknown[] }
   return [...(rel.similar || []), ...(rel.synonyms || []), ...(rel.antonyms || [])]
     .slice(0, 2)
     .map((word) => ({ word: String(word || ''), zh: '' }))
@@ -70,7 +78,7 @@ async function load() {
 
 onMounted(() => {
   if (props.initial) {
-    assist.value = props.initial
+    assist.value = props.initial as MnemonicAssist
     loading.value = false
     emit('done', props.initial)
     return

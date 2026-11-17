@@ -1,10 +1,15 @@
-<script setup>
+<script setup lang="ts">
 import { onErrorCaptured, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import type { AxiosRequestConfig } from 'axios'
 
 import api, { endStartupProbe } from './api/client'
 import FatalErrorCard from './components/FatalErrorCard.vue'
 import { useAuthStore } from './stores/auth'
+
+interface AuthError {
+  response?: { status?: number; headers?: Record<string, string> }
+}
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -19,8 +24,8 @@ onErrorCaptured((error) => {
   return false
 })
 
-function onFatal(event) {
-  fatal.value = event?.detail?.reason === 'stale' ? 'stale' : 'crash'
+function onFatal(event: Event) {
+  fatal.value = (event as CustomEvent<{ reason?: string }>)?.detail?.reason === 'stale' ? 'stale' : 'crash'
 }
 
 // 换页后清掉兜底态：用户从兜底卡回首页时要能看到正常页面
@@ -39,11 +44,12 @@ onMounted(async () => {
   }
   try {
     // 探测带超时：后端没起来时不能把 startupProbePending 一直挂着，否则全站 401 都被静默吞掉
-    const { data } = await api.get('/auth/me', { skipAuthRedirect: true, timeout: 5000 })
+    const { data } = await api.get('/auth/me', { skipAuthRedirect: true, timeout: 5000 } as AxiosRequestConfig)
     auth.setAuth(auth.token, data)
   } catch (e) {
-    if (e?.response?.status === 401) {
-      const reason = e?.response?.headers?.['x-auth-reason'] || ''
+    const err = e as AuthError
+    if (err?.response?.status === 401) {
+      const reason = err?.response?.headers?.['x-auth-reason'] || ''
       const here = `${window.location.pathname}${window.location.search}`
       auth.logout({ clearKey: false })
       if (reason === 'password_changed' || reason === 'token_invalid' || reason === 'expired') {

@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // 统一空状态：插画（叠层圆 + 浮动点 + 图标）+ 一句话说明 + 行动按钮（默认插槽）。
 // icon：practice | cards | notes | chart | done | search | report | key
 defineProps({
@@ -8,7 +8,7 @@ defineProps({
   compact: { type: Boolean, default: false },
 })
 
-const PATHS = {
+const PATHS: Record<string, string[]> = {
   practice: ['M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3Z', 'M5.6 11.4a6.4 6.4 0 0 0 12.8 0', 'M12 17.8v3'],
   cards: ['M4 6.5h11a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 15 19.5H4A1.5 1.5 0 0 1 2.5 18V8A1.5 1.5 0 0 1 4 6.5Z', 'M7 4.5h12A1.5 1.5 0 0 1 20.5 6v10'],
   notes: ['M6 3.5h9l4 4v13H6z', 'M15 3.5v4h4', 'M9 12h7M9 16h5'],

@@ -1,5 +1,7 @@
-<script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch, type PropType } from 'vue'
+
+import type { AgentTraceStep } from '../types/api'
 
 const STAGES = [
   { key: 'scoring', label: '评分' },
@@ -7,7 +9,7 @@ const STAGES = [
   { key: 'coach', label: '查资料' },
   { key: 'cards', label: '生成学习卡' },
 ]
-const TOOL_LABELS = {
+const TOOL_LABELS: Record<string, string> = {
   lookup_word: '查词库',
   grammar_card: '查语法卡',
   recent_weakness: '查近期错因',
@@ -18,7 +20,7 @@ const props = defineProps({
   // 当前阶段：scoring / critic / coach / cards / done；空串表示还没收到任何事件
   stage: { type: String, default: '' },
   // 教练的工具调用 trace（只取最近一条展示）
-  tools: { type: Array, default: () => [] },
+  tools: { type: Array as PropType<AgentTraceStep[]>, default: () => [] as AgentTraceStep[] },
   startedAt: { type: Number, default: 0 },
   // 非空表示失败，块内显示错误与重试
   failed: { type: String, default: '' },
@@ -28,7 +30,7 @@ const props = defineProps({
 const emit = defineEmits(['retry'])
 
 const now = ref(Date.now())
-let timer = null
+let timer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
   timer = setInterval(() => {
     now.value = Date.now()
@@ -38,7 +40,7 @@ onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
 
-const seen = ref([])
+const seen = ref<string[]>([])
 watch(
   () => props.stage,
   (value) => {
@@ -72,7 +74,7 @@ const toolLine = computed(() => {
   return `${TOOL_LABELS[latest.tool] || latest.tool || '调用工具'} · ${latest.ms}ms`
 })
 
-function stateOf(index) {
+function stateOf(index: number) {
   if (index === 2 && coachSkipped.value) return 'skipped'
   if (done.value) return 'complete'
   const current = currentIndex.value
@@ -82,7 +84,7 @@ function stateOf(index) {
   return 'current'
 }
 
-function dotClass(index) {
+function dotClass(index: number) {
   const state = stateOf(index)
   if (state === 'complete') return 'bg-brand-600 text-white ring-brand-600'
   if (state === 'skipped') return 'bg-canvas text-ink-mute ring-line'
@@ -90,7 +92,7 @@ function dotClass(index) {
   return 'bg-canvas text-ink-mute ring-line'
 }
 
-function labelClass(index) {
+function labelClass(index: number) {
   const state = stateOf(index)
   if (state === 'complete') return 'text-ink-soft'
   if (state === 'current') return 'font-medium text-brand-700'

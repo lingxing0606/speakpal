@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // 数字从 0 数到目标值（约 0.8 秒，缓出）。系统开了「减少动态效果」就直接显示终值。
 import { onBeforeUnmount, ref, watch } from 'vue'
 
@@ -11,7 +11,7 @@ const props = defineProps({
 const shown = ref(0)
 let raf = 0
 
-function run(to) {
+function run(to: number) {
   cancelAnimationFrame(raf)
   const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   if (reduce || !Number.isFinite(to)) {
@@ -20,7 +20,7 @@ function run(to) {
   }
   const from = 0
   const start = performance.now()
-  const step = (now) => {
+  const step = (now: number) => {
     const t = Math.min(1, (now - start) / props.duration)
     const eased = 1 - Math.pow(1 - t, 3)
     shown.value = from + (to - from) * eased

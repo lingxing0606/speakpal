@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // 学习数据面板：连续打卡、近 12 周热力图、各维度均分雷达、近 7 天可比档位变化。
 // 口径见 docs/design.md §19；纯 SVG，不引图表库。
 import { computed, onMounted, ref } from 'vue'
@@ -7,7 +7,35 @@ import api from '../api/client'
 import CountUp from './CountUp.vue'
 import EmptyState from './EmptyState.vue'
 
-const data = ref(null)
+interface HeatmapDay {
+  date: string
+  count: number
+}
+
+interface DimensionAvg {
+  name: string
+  avg: number
+  samples: number
+}
+
+interface WeekSummary {
+  recent_band: number | null
+  delta: number | null
+  recent_count: number
+  previous_count: number
+}
+
+interface DashboardData {
+  practiced_today: boolean
+  current_streak: number
+  longest_streak: number
+  practice_days: number
+  heatmap: HeatmapDay[]
+  dimensions: DimensionAvg[]
+  week: WeekSummary
+}
+
+const data = ref<DashboardData | null>(null)
 const failed = ref(false)
 
 onMounted(async () => {
@@ -20,7 +48,7 @@ onMounted(async () => {
   }
 })
 
-const DIM_LABELS = {
+const DIM_LABELS: Record<string, string> = {
   pronunciation: '发音',
   fluency: '流利度',
   grammar_vocab: '语法词汇',
@@ -35,7 +63,7 @@ const LEFT = 18
 const TOP = 12
 const SHADES = ['#EFEAE1', '#BFE5DD', '#7FCBBD', '#3FAE9B', '#14806F']
 
-function shade(count) {
+function shade(count: number) {
   if (!count) return SHADES[0]
   if (count <= 1) return SHADES[1]
   if (count <= 3) return SHADES[2]
@@ -59,7 +87,7 @@ const heat = computed(() => {
   })
   const cols = Math.ceil(days.length / 7)
   // 月份标在该月第一次出现的那一列上方
-  const months = []
+  const months: { x: number; label: string }[] = []
   let last = ''
   for (let c = 0; c < cols; c += 1) {
     const d = days[c * 7]
@@ -87,12 +115,12 @@ const radar = computed(() => {
   const dims = data.value?.dimensions || []
   if (dims.length < 3) return null
   const n = dims.length
-  const angle = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / n
-  const pt = (i, v) => {
+  const angle = (i: number) => -Math.PI / 2 + (i * 2 * Math.PI) / n
+  const pt = (i: number, v: number) => {
     const r = (Math.max(0, Math.min(100, v)) / 100) * R
     return [CX + r * Math.cos(angle(i)), CY + r * Math.sin(angle(i))]
   }
-  const poly = (v) => dims.map((_, i) => pt(i, v).map((x) => x.toFixed(1)).join(',')).join(' ')
+  const poly = (v: number) => dims.map((_, i) => pt(i, v).map((x) => x.toFixed(1)).join(',')).join(' ')
   return {
     rings: [25, 50, 75, 100].map(poly),
     axes: dims.map((_, i) => pt(i, 100)),

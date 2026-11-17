@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // 场景线性图标：跟青玉绿配色走，不用彩色 emoji（emoji 在不同系统上还会换样子）
 defineProps({
   name: { type: String, default: '' },

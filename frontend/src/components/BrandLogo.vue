@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 
 // SpeakPal 品牌标：气泡（你在说）+ 三根递增高声波柱（口语 / 进步 / 评分）+ 星标（陪练回应）

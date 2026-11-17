@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // 移动端底部导航：桌面不显示（与 AppHeader 的主导航同一个 sm 断点切换）
 import { useRoute } from 'vue-router'
 
@@ -27,7 +27,7 @@ const tabs = [
   },
 ]
 
-function active(to) {
+function active(to: string) {
   return to === '/' ? route.path === '/' : route.path.startsWith(to)
 }
 </script>

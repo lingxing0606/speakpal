@@ -7,6 +7,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: { vendor: ['vue', 'vue-router', 'pinia', 'axios'] },
+        // 共享的 TS SFC 会把内部模块后缀（.vue_vue_type_script_setup_true_lang）带进 chunk 名，
+        // 只保留 .vue 之前的组件名，产物名与迁移前一致
+        chunkFileNames: (chunk) => `assets/${chunk.name.replace(/\.vue.*$/, '')}-[hash].js`,
       },
     },
   },
