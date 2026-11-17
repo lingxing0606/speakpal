@@ -81,6 +81,7 @@
 ├── backend/                        # FastAPI 后端工程
 │   ├── .env.example                # 环境变量配置模板
 │   ├── requirements.txt            # Python 依赖清单
+│   ├── mcp_server.py               # MCP server（stdio / streamable-http，只通过 HTTP 调后端 API）
 │   ├── speakpal.db                 # SQLite 数据库文件（运行期自动生成/迁移）
 │   └── app/
 │       ├── main.py                 # 应用入口、CORS、幂等表结构迁移、路由挂载
@@ -91,8 +92,9 @@
 │       ├── security.py             # PBKDF2 散列、JWT 签发校验、Admin 鉴权
 │       ├── timeutil.py             # UTC 时间戳与带 Z ISO8601 格式化工具
 │       ├── data/                   # 离线教研数据包（wordbanks ×3 / grammar ×4 / spoken.json）
-│       ├── routers/                # 12 个路由模块（auth / scenes / sessions / reports /
-│       │                           #   exercises / hints / study / words / account / system / tts / admin）
+│       ├── routers/                # 13 个路由模块（auth / scenes / sessions / reports /
+│       │                           #   exercises / hints / knowledge / study / words / account /
+│       │                           #   system / tts / admin）
 │       ├── services/               # 20 个领域服务（agent / llm / scoring / rules / srs / study /
 │       │                           #   dashboard / wordbank / library / pronunciation /
 │       │                           #   outbound / llm_config / storage …）
@@ -108,7 +110,8 @@
 │       ├── api/                    # Axios 实例封装（client.js）与 SSE 流式客户端（stream.js）
 │       ├── stores/                 # Pinia 状态仓库（auth / session / settings）
 │       ├── components/             # AppHeader / HintCard / StudyDashboard / TabBar / BrandLogo /
-│       │                           #   SceneIcon / CountUp / EmptyState / BackLink / MnemonicCard
+│       │                           #   SceneIcon / CountUp / EmptyState / BackLink / MnemonicCard /
+│       │                           #   CoachPanel / AgentTrace / FinishProgress / McpConnect
 │       ├── utils/                  # 语音转写（speech.js）、音频包络（audio.js）、
 │       │                           #   录音存储（recordings.js）、密钥门禁（llmGate.js）
 │       └── views/                  # 12 个页面视图（Login / Home / Practice / Report /
@@ -186,6 +189,37 @@
 ```
 
 > ⚠️ 两个服务均只监听 `127.0.0.1`，局域网其他设备无法访问。答辩若需投屏演示，需改为 `--host 0.0.0.0`，并注意这会把管理台暴露出去。
+
+### 5.4 在 Claude Desktop 中使用（MCP）
+
+SpeakPal 同时是一个标准 MCP server：把「今天该复习什么」「最近总犯什么错」、语法卡/词条检索、加生词本、记笔记这 8 个工具暴露给 Claude Desktop、Cursor 等支持 MCP 的客户端。服务只通过 HTTP 调后端 API，复用现有鉴权与用户隔离，不直连数据库；默认 stdio 传输，另支持 `--transport streamable-http`。
+
+1. 保持后端运行（`.\start-backend.ps1`），在「设置 → 连接 AI 助手（MCP）」点「显示令牌」，再点「复制配置」。
+2. Claude Desktop 打开「设置 → Developer → Edit Config」，把复制到的 `mcpServers` 合并进 `claude_desktop_config.json`（`command` / `args` 里的路径换成你的仓库绝对路径）：
+
+```json
+{
+  "mcpServers": {
+    "speakpal": {
+      "command": "C:\\path\\to\\speakpal\\backend\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\path\\to\\speakpal\\backend\\mcp_server.py"],
+      "env": {
+        "SPEAKPAL_API": "http://127.0.0.1:8000",
+        "SPEAKPAL_TOKEN": "<设置页复制的令牌>"
+      }
+    }
+  }
+}
+```
+
+3. 重启 Claude Desktop，直接问：「我今天该复习什么？」「我最近总犯什么错？」「帮我把 negotiate 加进生词本」「查一下 present perfect 相关的语法卡」。
+4. 两个写工具（`add_word_to_review`、`add_note`）在 tool annotations 里标了 `readOnlyHint=false`、`destructiveHint=false`，客户端调用前会先向你确认。
+
+令牌等同登录态（JWT，默认 7 天有效，修改密码后立即失效）。换人或令牌泄露时，在设置页改一次密码即可让旧令牌全部作废。
+
+> 截图位：设置页「连接 AI 助手（MCP）」小节 + Claude Desktop 里一问一答的截图。
+
+答辩演示也可不装 Claude Desktop：`backend\.venv\Scripts\python.exe backend\mcp_server.py --transport streamable-http --port 8010`，再用 MCP Inspector 连 `http://127.0.0.1:8010/mcp`。
 
 ---
 
@@ -329,7 +363,7 @@ backend\.venv\Scripts\python.exe -m evaluation.rag_eval
 
 ## 10. 接口规模
 
-后端按业务域划分为 12 个路由模块，共 **61 个 `/api` 操作**（60 个路由注册 + `GET /api/health`），落在 **54 条 `/api` 路径**上（2026-11-13 取自 `GET /openapi.json`），另有 3 个非 API 页面入口：`/` 与 `/admin`（管理控制台 HTML）、`/docs`（离线 Swagger UI）。
+后端按业务域划分为 13 个路由模块，共 **64 个 `/api` 操作**（63 个路由注册 + `GET /api/health`），落在 **57 条 `/api` 路径**上（2026-11-17 取自 `GET /openapi.json`），另有 3 个非 API 页面入口：`/` 与 `/admin`（管理控制台 HTML）、`/docs`（离线 Swagger UI）。
 
 | 模块 | 前缀 | 端点数 | 职责 |
 |---|---|---|---|
@@ -339,6 +373,7 @@ backend\.venv\Scripts\python.exe -m evaluation.rag_eval
 | `reports.py` | `/api` | 1 | 读取诊断报告 |
 | `exercises.py` | `/api` | 4 | 跟读重说队列与判分、最小对立对题组与判定 |
 | `hints.py` | `/api` | 1 | 句型提示 |
+| `knowledge.py` | `/api/knowledge` | 2 | MCP / 外部客户端的知识检索与查词 |
 | `study.py` | `/api` | 21 | SM-2 学习闭环（今日队列/复习/建卡/词库/语法/口语）与随堂笔记 CRUD |
 | `words.py` | `/api/study/words` | 4 | 单词助手、导入、已学列表、造句检查 |
 | `account.py` | `/api/me` | 7 | 个人资料、偏好设置、学习看板、难度建议、清数据与注销 |

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
+import McpConnect from '../components/McpConnect.vue'
 import TabBar from '../components/TabBar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
@@ -21,6 +22,7 @@ const SECTIONS = [
   { id: 'prefs', label: '练习偏好' },
   { id: 'key', label: '对话密钥' },
   { id: 'tts', label: '语音合成' },
+  { id: 'mcp', label: 'AI 助手' },
   { id: 'data', label: '清除记录' },
   { id: 'account', label: '注销账号' },
 ]
@@ -698,6 +700,8 @@ function logout() {
           </p>
         </div>
       </section>
+
+      <McpConnect />
 
 <section id="data" class="sp-card scroll-mt-24 p-6 ring-rose-100 sm:p-7">
         <h2 class="sp-section-title">清除练习记录</h2>

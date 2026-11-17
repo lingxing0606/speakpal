@@ -15,6 +15,7 @@ from .routers import (
     auth,
     exercises,
     hints,
+    knowledge,
     reports,
     scenes,
     sessions,
@@ -285,6 +286,7 @@ app.include_router(hints.router)
 app.include_router(tts.router)
 app.include_router(study.router)
 app.include_router(words.router)
+app.include_router(knowledge.router)
 
 
 _ADMIN_HTML = _STATIC_DIR / "admin.html"

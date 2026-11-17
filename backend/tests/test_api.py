@@ -2399,6 +2399,370 @@ class LlmUnifiedCallTests(unittest.TestCase):
         self.assertEqual(client.last_json["thinking"], {"type": "disabled"})
 
 
+class _McpResponse:
+    def __init__(self, status_code, data):
+        self.status_code = status_code
+        self.data = data
+
+    def json(self):
+        if isinstance(self.data, Exception):
+            raise self.data
+        return self.data
+
+
+class _McpClient:
+    """假 httpx.Client：按 (method, path) 回预设响应，记录每次调用。"""
+
+    routes: dict = {}
+    default = (200, {})
+    calls: list = []
+    client_args: dict = {}
+
+    def __init__(self, *args, **kwargs):
+        type(self).client_args = {
+            "base_url": kwargs.get("base_url"),
+            "headers": kwargs.get("headers") or {},
+            "timeout": kwargs.get("timeout"),
+        }
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def request(self, method, path, **kwargs):
+        type(self).calls.append({"method": method, "path": path, **kwargs})
+        status, data = type(self).routes.get((method, path), type(self).default)
+        return _McpResponse(status, data)
+
+
+class _McpBrokenClient(_McpClient):
+    def request(self, method, path, **kwargs):
+        raise httpx.ConnectError("boom")
+
+
+class McpServerToolTests(unittest.TestCase):
+    """阶段 3：MCP server 的 8 个工具与 2 个资源（HTTP 调后端，不直连库）。"""
+
+    def setUp(self):
+        import mcp_server
+
+        self.srv = mcp_server
+        _McpClient.routes = {
+            ("GET", "/api/study/today"): (200, {"groups": [{"key": "word", "count": 2}], "total": 2}),
+            ("GET", "/api/study/due"): (200, [{"id": 1, "term": "abandon", "kind": "word"}]),
+            (
+                "GET",
+                "/api/sessions",
+            ): (
+                200,
+                [
+                    {
+                        "id": 11,
+                        "scene_name": "咖啡点单",
+                        "status": "finished",
+                        "created_at": "2026-11-17T10:00:00Z",
+                        "report_id": 7,
+                    }
+                ],
+            ),
+            ("GET", "/api/sessions/11/report"): (
+                200,
+                {
+                    "total_score": 80,
+                    "band": 6.0,
+                    "cefr": "B2",
+                    "comment": "整体不错",
+                    "sentence_fixes": [
+                        {
+                            "original": "I visit my grandma yesterday.",
+                            "better": "I visited my grandma yesterday.",
+                            "reason": "一般过去时",
+                            "error_type": "grammar",
+                        }
+                    ],
+                },
+            ),
+            ("GET", "/api/me/dashboard"): (
+                200,
+                {
+                    "today": "2026-11-17",
+                    "current_streak": 3,
+                    "longest_streak": 9,
+                    "practiced_today": True,
+                    "scored_reports": 4,
+                    "dimensions": [{"name": "grammar_vocab", "avg": 6.2, "samples": 4}],
+                    "week": {"delta": 0.3},
+                    "heatmap": [{"date": "2026-11-17", "count": 2}],
+                },
+            ),
+            ("GET", "/api/knowledge/search"): (
+                200,
+                {"knowledge": [{"ref": "tenses-03", "kind": "grammar"}], "history": []},
+            ),
+            ("GET", "/api/knowledge/word"): (
+                200,
+                {"found": True, "term": "abandon", "meaning_zh": "放弃"},
+            ),
+            ("POST", "/api/study/words/learn"): (200, {"id": 5, "term": "abandon", "kind": "word"}),
+            ("POST", "/api/notes"): (200, {"id": 9, "title": "时态", "body": "过去时加 -ed"}),
+            ("GET", "/api/study/grammar"): (
+                200,
+                {
+                    "groups": [
+                        {
+                            "items": [
+                                {
+                                    "id": "tenses-01",
+                                    "point": "一般现在时第三人称单数",
+                                    "right": "He goes to school by bus.",
+                                }
+                            ]
+                        }
+                    ]
+                },
+            ),
+            ("GET", "/api/study/spoken"): (
+                200,
+                {
+                    "items": [
+                        {
+                            "id": "spoken-01",
+                            "formal": "I do not fully understand your point.",
+                            "natural": "I'm not sure I follow.",
+                        }
+                    ]
+                },
+            ),
+        }
+        _McpClient.default = (200, {})
+        _McpClient.calls = []
+        _McpClient.client_args = {}
+        patcher = mock.patch.object(mcp_server.httpx, "Client", _McpClient)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        token = mock.patch.object(mcp_server, "TOKEN", "jwt-test-token")
+        token.start()
+        self.addCleanup(token.stop)
+
+    def _read(self, tool, *args, **kwargs):
+        import json as _json
+
+        return _json.loads(tool(*args, **kwargs))
+
+    def test_today_plan_and_due_reviews(self):
+        today = self._read(self.srv.get_today_plan)
+        self.assertEqual(today["total"], 2)
+        self.assertEqual(today["groups"][0]["key"], "word")
+
+        due = self._read(self.srv.get_due_reviews, limit=5)
+        self.assertEqual(due[0]["term"], "abandon")
+        self.assertEqual(_McpClient.calls[-1]["params"], {"limit": 5})
+        self.assertEqual(_McpClient.client_args["headers"]["Authorization"], "Bearer jwt-test-token")
+        self.assertEqual(_McpClient.client_args["timeout"], 15.0)
+
+    def test_recent_reports_include_trimmed_fixes(self):
+        reports = self._read(self.srv.get_recent_reports, limit=1)
+        self.assertEqual(reports[0]["session_id"], 11)
+        self.assertEqual(reports[0]["band"], 6.0)
+        self.assertEqual(reports[0]["fixes"][0]["better"], "I visited my grandma yesterday.")
+        self.assertEqual(
+            _McpClient.calls[-1]["path"], "/api/sessions/11/report"
+        )  # 先列会话，再取报告
+
+    def test_weak_points_drop_heatmap(self):
+        data = self._read(self.srv.get_weak_points)
+        self.assertEqual(data["current_streak"], 3)
+        self.assertNotIn("heatmap", data)
+        self.assertEqual(_McpClient.calls[-1]["path"], "/api/me/dashboard")
+
+    def test_search_knowledge_and_lookup_word(self):
+        found = self._read(self.srv.search_knowledge, "present perfect", 2)
+        self.assertEqual(found["knowledge"][0]["ref"], "tenses-03")
+        self.assertEqual(_McpClient.calls[-1]["params"], {"q": "present perfect", "k": 2})
+
+        word = self._read(self.srv.lookup_word, "abandon")
+        self.assertTrue(word["found"])
+        self.assertEqual(_McpClient.calls[-1]["params"], {"term": "abandon"})
+
+    def test_write_tools_send_expected_body(self):
+        item = self._read(self.srv.add_word_to_review, "abandon")
+        self.assertEqual(item["id"], 5)
+        self.assertEqual(_McpClient.calls[-1]["path"], "/api/study/words/learn")
+        body = _McpClient.calls[-1]["json"]
+        self.assertEqual(body["term"], "abandon")
+        self.assertTrue(body["recognized"] and body["spelled"] and body["used"])
+
+        note = self._read(self.srv.add_note, "时态", "过去时加 -ed")
+        self.assertEqual(note["id"], 9)
+        self.assertEqual(_McpClient.calls[-1]["path"], "/api/notes")
+        self.assertEqual(_McpClient.calls[-1]["json"], {"title": "时态", "body": "过去时加 -ed"})
+
+    def test_all_tools_listed_with_annotations(self):
+        import asyncio
+
+        from mcp import Client
+
+        async def list_tools():
+            async with Client(self.srv.mcp) as client:
+                return (await client.list_tools()).tools
+
+        tools = asyncio.run(list_tools())
+        by_name = {tool.name: tool for tool in tools}
+        self.assertEqual(len(tools), 8)
+        self.assertEqual(
+            set(by_name),
+            {
+                "get_today_plan",
+                "get_due_reviews",
+                "get_recent_reports",
+                "get_weak_points",
+                "search_knowledge",
+                "lookup_word",
+                "add_word_to_review",
+                "add_note",
+            },
+        )
+        self.assertTrue(by_name["get_today_plan"].annotations.read_only_hint)
+        self.assertFalse(by_name["add_word_to_review"].annotations.read_only_hint)
+        self.assertFalse(by_name["add_word_to_review"].annotations.destructive_hint)
+        self.assertFalse(by_name["add_note"].annotations.read_only_hint)
+
+    def test_401_returns_friendly_message_for_every_tool(self):
+        _McpClient.routes = {}
+        _McpClient.default = (401, {"detail": "token_invalid"})
+        calls = [
+            (self.srv.get_today_plan, {}),
+            (self.srv.get_due_reviews, {}),
+            (self.srv.get_recent_reports, {}),
+            (self.srv.get_weak_points, {}),
+            (self.srv.search_knowledge, {"query": "x"}),
+            (self.srv.lookup_word, {"term": "abandon"}),
+            (self.srv.add_word_to_review, {"term": "abandon"}),
+            (self.srv.add_note, {"title": "t", "body": "b"}),
+        ]
+        for func, kwargs in calls:
+            data = self._read(func, **kwargs)
+            self.assertIn("令牌失效", data["error"], func.__name__)
+
+    def test_token_missing_stops_before_http(self):
+        with mock.patch.object(self.srv, "TOKEN", ""):
+            data = self._read(self.srv.get_today_plan)
+        self.assertIn("SPEAKPAL_TOKEN", data["error"])
+        self.assertEqual(_McpClient.calls, [])
+
+    def test_network_error_is_not_raised(self):
+        with mock.patch.object(self.srv.httpx, "Client", _McpBrokenClient):
+            data = self._read(self.srv.get_today_plan)
+        self.assertIn("连不上", data["error"])
+
+    def test_resources_return_card_text(self):
+        card = self._read(self.srv.grammar_card, "tenses-01")
+        self.assertEqual(card["point"], "一般现在时第三人称单数")
+
+        spoken = self._read(self.srv.spoken_card, "spoken-01")
+        self.assertEqual(spoken["natural"], "I'm not sure I follow.")
+
+        missing = self._read(self.srv.grammar_card, "tenses-99")
+        self.assertIn("没有语法卡", missing["error"])
+
+
+class KnowledgeApiTests(ApiTestCase):
+    """阶段 3：GET /api/knowledge/search 与 /api/knowledge/word。"""
+
+    def test_requires_login(self):
+        self.assertEqual(
+            self.client.get("/api/knowledge/search", params={"q": "present perfect"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.get("/api/knowledge/word", params={"term": "abandon"}).status_code,
+            401,
+        )
+
+    def test_search_returns_knowledge_and_own_history(self):
+        _, headers = self.register()
+        r = self.client.get(
+            "/api/knowledge/search",
+            params={"q": "I visit my grandma yesterday", "k": 2},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        data = r.json()
+        self.assertEqual(set(data), {"knowledge", "history"})
+        self.assertLessEqual(len(data["knowledge"]), 2)
+
+    def test_search_validates_query_and_k(self):
+        _, headers = self.register()
+        base = {"q": "present perfect"}
+        self.assertEqual(
+            self.client.get("/api/knowledge/search", params={**base, "q": ""}, headers=headers).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.get("/api/knowledge/search", params={**base, "q": "x" * 201}, headers=headers).status_code,
+            422,
+        )
+        self.assertEqual(
+            self.client.get("/api/knowledge/search", params={**base, "k": 11}, headers=headers).status_code,
+            422,
+        )
+        self.assertEqual(
+            self.client.get("/api/knowledge/search", params={**base, "k": 0}, headers=headers).status_code,
+            422,
+        )
+        self.assertEqual(
+            self.client.get("/api/knowledge/search", params={**base, "k": 10}, headers=headers).status_code,
+            200,
+        )
+
+    def test_search_history_stays_within_user(self):
+        from app.db import SessionLocal
+        from app.models import StudyItem
+
+        _, headers_a = self.register()
+        me_a = self.client.get("/api/auth/me", headers=headers_a).json()
+        _, headers_b = self.register()
+        db = SessionLocal()
+        try:
+            mine = StudyItem(user_id=me_a["id"], kind="word", term="alphaonly", meaning_zh="甲")
+            db.add(mine)
+            db.commit()
+            db.refresh(mine)
+            ref = f"item:{mine.id}"
+        finally:
+            db.close()
+
+        mine_hits = self.client.get(
+            "/api/knowledge/search", params={"q": "alphaonly"}, headers=headers_a
+        ).json()["history"]
+        other_hits = self.client.get(
+            "/api/knowledge/search", params={"q": "alphaonly"}, headers=headers_b
+        ).json()["history"]
+        self.assertIn(ref, [hit["ref"] for hit in mine_hits])
+        self.assertNotIn(ref, [hit["ref"] for hit in other_hits])
+
+    def test_word_lookup_found_and_missing(self):
+        _, headers = self.register()
+        hit = self.client.get("/api/knowledge/word", params={"term": "abandon"}, headers=headers)
+        self.assertEqual(hit.status_code, 200, hit.text)
+        self.assertTrue(hit.json()["found"])
+        self.assertEqual(hit.json()["term"], "abandon")
+
+        miss = self.client.get(
+            "/api/knowledge/word", params={"term": "zzzznotaword"}, headers=headers
+        )
+        self.assertEqual(miss.status_code, 200)
+        self.assertFalse(miss.json()["found"])
+        self.assertEqual(miss.json()["term"], "zzzznotaword")
+
+        self.assertEqual(
+            self.client.get("/api/knowledge/word", params={"term": ""}, headers=headers).status_code,
+            400,
+        )
+
+
 class BandTests(unittest.TestCase):
     def test_band_score_roundtrip_monotonic(self):
         names = [n for n in dir(bands) if not n.startswith("_")]
