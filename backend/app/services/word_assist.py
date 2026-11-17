@@ -14,12 +14,11 @@ import json
 import re
 from datetime import datetime
 
-import httpx
 from sqlalchemy import text
 
 from ..timeutil import utcnow
+from .llm import chat_json
 from .llm_config import LLMConfig, build_llm_config
-from .outbound import check_base_url
 
 ASSIST_TIMEOUT = 8.0
 ASSIST_TEMPERATURE = 0.4
@@ -138,18 +137,6 @@ def cache_put(db, key: str, payload: dict) -> None:
     db.commit()
 
 
-def _loads_json(raw: str):
-    text_value = raw or ""
-    start = text_value.find("{")
-    if start < 0:
-        return None
-    try:
-        data, _end = json.JSONDecoder().raw_decode(text_value[start:])
-    except (ValueError, TypeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def _meaning_only(term: str, meaning_zh: str = "") -> dict:
     return {
         "term": term,
@@ -207,25 +194,18 @@ def clean_payload(raw, given_meaning: str = ""):
 
 
 def _request_payload(llm: LLMConfig, term: str, meaning_zh: str) -> dict | None:
-    check_base_url(llm.base_url)
     user = f"<word>{term}</word>\nLearner-supplied meaning: {meaning_zh or '（无）'}"
-    with httpx.Client(timeout=ASSIST_TIMEOUT) as client:
-        resp = client.post(
-            f"{llm.base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {llm.api_key}"},
-            json={
-                "model": llm.model,
-                "messages": [
-                    {"role": "system", "content": _SYSTEM},
-                    {"role": "user", "content": user},
-                ],
-                "temperature": ASSIST_TEMPERATURE,
-                "max_tokens": ASSIST_MAX_TOKENS,
-            },
-        )
-        resp.raise_for_status()
-        raw = resp.json()["choices"][0]["message"]["content"]
-    return clean_payload(_loads_json(raw), meaning_zh)
+    data = chat_json(
+        llm,
+        [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        temperature=ASSIST_TEMPERATURE,
+        max_tokens=ASSIST_MAX_TOKENS,
+        timeout=ASSIST_TIMEOUT,
+    )
+    return clean_payload(data, meaning_zh)
 
 
 def assist_word(
@@ -278,6 +258,11 @@ def assist_word(
         return _meaning_only(term, meaning_zh)
 
 
+def _validate_sentence(data: dict):
+    if not isinstance(data.get("ok"), bool):
+        raise ValueError("`ok` must be a boolean")
+
+
 def check_sentence(term: str, sentence: str, llm: LLMConfig | None = None) -> dict:
     """造句反馈：无 key、超时、JSON 坏都返回 {ok: true, suggestion: null}，不阻塞。"""
     fallback = {"ok": True, "suggestion": None}
@@ -291,25 +276,18 @@ def check_sentence(term: str, sentence: str, llm: LLMConfig | None = None) -> di
         return fallback
 
     try:
-        check_base_url(llm.base_url)
         user = f"<word>{term}</word>\n<sentence>{sentence}</sentence>"
-        with httpx.Client(timeout=SENTENCE_TIMEOUT) as client:
-            resp = client.post(
-                f"{llm.base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {llm.api_key}"},
-                json={
-                    "model": llm.model,
-                    "messages": [
-                        {"role": "system", "content": _SENTENCE_SYSTEM},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": SENTENCE_MAX_TOKENS,
-                },
-            )
-            resp.raise_for_status()
-            raw = resp.json()["choices"][0]["message"]["content"]
-        data = _loads_json(raw)
+        data = chat_json(
+            llm,
+            [
+                {"role": "system", "content": _SENTENCE_SYSTEM},
+                {"role": "user", "content": user},
+            ],
+            validate=_validate_sentence,
+            temperature=0.2,
+            max_tokens=SENTENCE_MAX_TOKENS,
+            timeout=SENTENCE_TIMEOUT,
+        )
         if not isinstance(data, dict) or not isinstance(data.get("ok"), bool):
             return fallback
         suggestion = str(data.get("suggestion") or "").strip()[:200] or None

@@ -1,10 +1,10 @@
-import json
 import re
 
 import httpx
 
 from evaluation.bands import DIMENSIONS, report_bands, round_band
 
+from .llm import chat_json
 from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
 from .outbound import UnsafeBaseURL, check_base_url
 from .study import normalize_related
@@ -27,7 +27,6 @@ MOCK_UNAVAILABLE = "unavailable"
 MOCK_INVALID_KEY = "invalid_key"
 
 _LETTERS_RE = re.compile(r"[A-Za-z']+")
-_JSON_RE = re.compile(r"\{.*\}", re.S)
 
 
 def _norm(text: str) -> str:
@@ -107,15 +106,8 @@ def _parse_bands(raw):
     return out or None
 
 
-def parse_llm_report(text: str, history):
-    """解析模型输出为报告 dict；不可用返回 None（交给降级路径）。"""
-    match = _JSON_RE.search(text or "")
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except (ValueError, TypeError):
-        return None
+def parse_llm_report(data, history):
+    """把模型返回的 JSON 转成报告 dict；不可用返回 None（交给降级路径）。"""
     if not isinstance(data, dict):
         return None
 
@@ -234,19 +226,39 @@ def _prompt(scene: dict, difficulty: str, history) -> str:
     )
 
 
-def _request_report(llm: LLMConfig, scene: dict, difficulty: str, history) -> str:
-    with httpx.Client(timeout=60) as client:
-        resp = client.post(
-            f"{llm.base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {llm.api_key}"},
-            json={
-                "model": llm.model,
-                "messages": [{"role": "user", "content": _prompt(scene, difficulty, history)}],
-                "temperature": 0.2,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+def _validate_report(data: dict):
+    """报告 JSON 的最低结构要求：维度分是 0–100 的数字，fixes 每项字段齐全。"""
+    dims = data.get("bands") or data.get("dimensions") or data.get("scores")
+    if not isinstance(dims, dict) or not dims:
+        raise ValueError("`bands` must be a non-empty object")
+    for name, value in dims.items():
+        if isinstance(value, bool):
+            raise ValueError(f"`bands.{name}` must be a number between 0 and 100")
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"`bands.{name}` must be a number between 0 and 100")
+        if not 0 <= number <= 100:
+            raise ValueError(f"`bands.{name}` must be a number between 0 and 100")
+    fixes = data.get("sentence_fixes")
+    if not isinstance(fixes, list):
+        raise ValueError("`sentence_fixes` must be a list")
+    for item in fixes:
+        if not isinstance(item, dict):
+            raise ValueError("every item in `sentence_fixes` must be an object")
+        for key in ("original", "better", "reason"):
+            if not str(item.get(key) or "").strip():
+                raise ValueError(f"every fix needs a non-empty `{key}`")
+
+
+def _request_report(llm: LLMConfig, scene: dict, difficulty: str, history) -> dict | None:
+    return chat_json(
+        llm,
+        [{"role": "user", "content": _prompt(scene, difficulty, history)}],
+        validate=_validate_report,
+        temperature=0.2,
+        timeout=60.0,
+    )
 
 
 def generate_report(scene: dict, difficulty: str, history, llm: LLMConfig | None = None) -> dict:
@@ -265,7 +277,7 @@ def generate_report(scene: dict, difficulty: str, history, llm: LLMConfig | None
         return _fallback_report(history, MOCK_UNAVAILABLE, exc.message)
 
     try:
-        text = _request_report(llm, scene, difficulty, history)
+        raw = _request_report(llm, scene, difficulty, history)
     except httpx.HTTPStatusError as exc:
         code = exc.response.status_code
         if code in (401, 403):
@@ -280,7 +292,7 @@ def generate_report(scene: dict, difficulty: str, history, llm: LLMConfig | None
     except Exception as exc:  # noqa: BLE001 - 任何网络/协议错误都降级，不冒泡成 500
         return _fallback_report(history, MOCK_UNAVAILABLE, f"{type(exc).__name__}: {exc}")
 
-    data = parse_llm_report(text, history)
+    data = parse_llm_report(raw, history)
     if not data:
         return _fallback_report(history, MOCK_UNAVAILABLE, "模型返回无法解析")
     return data

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from ..config import settings
 from ..models import User
 from ..security import get_current_user
+from ..services.llm import thinking_disabled
 from ..services.llm_config import LLMConfig, get_llm_config
 from ..services.outbound import UnsafeBaseURL, check_base_url
 from ..services.storage import storage_info
@@ -62,6 +63,7 @@ def test_llm(
                     "messages": [{"role": "user", "content": "ping"}],
                     "max_tokens": 1,
                     "temperature": 0,
+                    **thinking_disabled(llm.base_url),
                 },
             )
     except httpx.TimeoutException:

@@ -595,7 +595,7 @@ function logout() {
             </label>
             <label class="block text-sm">
               <span class="mb-1.5 block text-xs font-medium text-ink-mute">模型</span>
-              <input v-model="modelInput" placeholder="deepseek-chat" class="sp-input" />
+              <input v-model="modelInput" placeholder="deepseek-flash" class="sp-input" />
             </label>
           </div>
 

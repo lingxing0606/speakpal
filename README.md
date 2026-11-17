@@ -58,7 +58,7 @@
 - **Web 框架**：FastAPI（自动 OpenAPI Schema + 本地化离线 Swagger UI `/docs`）
 - **数据持久化**：SQLite + SQLAlchemy 2.x ORM + 启动期幂等 Schema 自动演进（`_ensure_schema()`）
 - **安全与认证**：PBKDF2-HMAC-SHA256（120,000 次迭代 + 16 字节随机盐）+ PyJWT（HS256 + `token_version` 会话代次校验）+ 滑动窗口登录防暴破 + SSRF 私网 IP 校验
-- **大模型与语音接入**：`httpx` 调用任意 OpenAI 兼容 REST 接口（默认适配 DeepSeek `deepseek-chat`，支持流式 SSE 与 `/audio/speech` TTS 语音合成）
+- **大模型与语音接入**：`httpx` 调用任意 OpenAI 兼容 REST 接口（默认适配 DeepSeek `deepseek-flash`，支持流式 SSE 与 `/audio/speech` TTS 语音合成）
 
 ### 3.3 离线验证与工具链（`evaluation/` & `tools/`）
 
@@ -195,7 +195,7 @@ SpeakPal 采用**浏览器端自带密钥（Bring Your Own Key）**安全架构�
 
 1. **服务端零对话密钥存储**：后端 `.env` 不保存 `LLM_API_KEY`（即使写了也不会被读取），所有对话与评分请求均由前端通过请求头 `X-LLM-Key`、`X-LLM-Base-Url`、`X-LLM-Model` 动态传入，密钥仅保存在用户当前浏览器的 `localStorage` 中。
 2. **首次使用引导**：注册/登录进入系统后，点击右上角或底部导航进入 **「设置」（`/settings`）** 页面：
-   - **默认供应商**：DeepSeek（接口地址 `https://api.deepseek.com/v1`，模型 `deepseek-chat`），也可填入任意兼容 OpenAI `/v1/chat/completions` 协议的接口（如 OpenAI、通义千问、硅基流动、Moonshot 等）。
+   - **默认供应商**：DeepSeek（接口地址 `https://api.deepseek.com/v1`，模型 `deepseek-flash`），也可填入任意兼容 OpenAI `/v1/chat/completions` 协议的接口（如 OpenAI、通义千问、硅基流动、Moonshot 等）。
    - 填入 API Key 后点击 **「测试连接」**，验证通过后即可回到首页开启场景对练。
 3. **本地私有模型（如 Ollama）**：出于 SSRF 安全防护，后端默认拒绝请求本机与内网地址。若需连接本机 Ollama，请在 `backend/.env` 中设置 `ALLOW_PRIVATE_LLM_HOSTS=1` 后重启后端。
 4. **可选语音合成（TTS）**：默认使用浏览器内置 `speechSynthesis` 免费朗读；如需高自然度神经网络语音，可在「设置」页配置兼容 OpenAI `/v1/audio/speech` 的 TTS 密钥与模型（如 OpenAI `tts-1` 或硅基流动 `FunAudioLLM/CosyVoice2-0.5B`）。前端先试 `POST /api/tts`，**任何失败都回落 `speechSynthesis`**。
@@ -304,7 +304,7 @@ python tools/generate_pdf.py
 | `ADMIN_KEY` | 首次启动自动生成 12 字节随机串 | 运营后台（`/admin`）管理密钥，生成时会打印在后端启动控制台 |
 | `DATABASE_URL` | `sqlite:///./speakpal.db` | 数据库连接串（优先级：真实进程环境变量 > `data_location.json` > `.env` > 默认值） |
 | `LLM_BASE_URL` | `https://api.deepseek.com/v1` | 默认大模型 API 基础地址（用户未在浏览器自定义时使用） |
-| `LLM_MODEL` | `deepseek-chat` | 默认对话与评分模型名称 |
+| `LLM_MODEL` | `deepseek-flash` | 默认对话与评分模型名称 |
 | `ALLOW_PRIVATE_LLM_HOSTS` | `0` | SSRF 防护开关：默认 `0` 禁止请求内网/本机地址；使用本地 Ollama 时设为 `1` |
 | `CORS_ORIGINS` | `http://127.0.0.1:5173,http://localhost:5173` | 跨域白名单（逗号分隔） |
 | `TTS_API_KEY` | 空 | 服务端可选兜底 TTS 密钥（留空则使用浏览器原生朗读或用户自带 TTS Key） |

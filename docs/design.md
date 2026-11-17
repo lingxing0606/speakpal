@@ -486,10 +486,10 @@ Difficulty: {difficulty}. Keep it friendly.
 - **`finish` 不拦**：练习已经做完，用户中途把 key 删了，也应该拿到一份 `not_configured` 的示例报告。
   拦截点只有「建会话」和「每轮对话」（`create_session` / `add_turn`）。这是预期行为，不是 bug，别改。
 
-`GET /api/config/llm`（登录）→ `{"env_configured": false, "default_base_url": "https://api.deepseek.com/v1", "default_model": "deepseek-chat"}`
+`GET /api/config/llm`（登录）→ `{"env_configured": false, "default_base_url": "https://api.deepseek.com/v1", "default_model": "deepseek-flash"}`
 ——只用于「去设置」页显示默认值，**不回显 key，也不再表示服务端有可用 key**。
 
-`POST /api/config/llm/test`（登录，key 取自 `X-LLM-Key` 头）→ `{"ok": true, "model": "deepseek-chat", "latency_ms": 812}`；
+`POST /api/config/llm/test`（登录，key 取自 `X-LLM-Key` 头）→ `{"ok": true, "model": "deepseek-flash", "latency_ms": 812}`；
 失败 `{"ok": false, "error_kind": "invalid_key" | "timeout" | "unreachable", "error": "..."}`。
 
 > 两个字段别混：`error_kind` 属测试接口（`invalid_key` / `timeout` / `unreachable`，设置页按它出文案），

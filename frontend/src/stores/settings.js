@@ -24,7 +24,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const saved = readSaved()
   const apiKey = ref(saved.api_key || '')
   const baseUrl = ref(saved.base_url || '')
-  const model = ref(saved.model || '')
+  const model = ref(saved.model === 'deepseek-chat' ? 'deepseek-flash' : saved.model || '')
 
   // 语音合成（可选）：不填就用浏览器内置朗读
   const ttsKey = ref(saved.tts_key || '')

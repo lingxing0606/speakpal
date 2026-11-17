@@ -814,7 +814,7 @@ def build_story(styles):
     def_headers = ["参数项", "默认值", "定义位置", "参数项", "默认值", "定义位置"]
     def_rows = [
         ["后端监听地址", "127.0.0.1:8000", "start-backend.bat", "前端监听地址", "127.0.0.1:5173", "frontend/vite.config.js"],
-        ["JWT 有效期", "10080 分钟（7 天）", "app/config.py", "默认大模型", "deepseek-chat", "app/config.py"],
+        ["JWT 有效期", "10080 分钟（7 天）", "app/config.py", "默认大模型", "deepseek-flash", "app/config.py"],
         ["对话保留上下文", "最近 8 条消息（约 4 轮）", "app/services/llm.py", "建议结束条件", "3 目标达成或 6 轮上限", "app/services/agent.py"],
         ["对话 / 评分温度", "0.7 / 0.2", "llm.py / scoring.py", "压分触发 / 回落", "高 20 分压回规则分 +10", "app/services/rules.py"],
         ["有声判定 RMS", "0.02（50ms 采样）", "src/utils/audio.js", "跟读通关相似度", "≥ 0.85", "app/routers/exercises.py"],

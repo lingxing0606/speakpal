@@ -1,9 +1,129 @@
 import json
+from urllib.parse import urlparse
 
 import httpx
 
 from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
-from .outbound import check_base_url
+from .outbound import UnsafeBaseURL, check_base_url
+
+
+def _loads_json(text: str):
+    """从模型输出里取第一个 JSON 对象；容忍前后带解释文字。"""
+    raw = text or ""
+    start = raw.find("{")
+    if start < 0:
+        return None
+    try:
+        data, _end = json.JSONDecoder().raw_decode(raw[start:])
+    except (ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def thinking_disabled(base_url: str) -> dict:
+    """官方主机默认开启思考模式，结构化输出不需要，显式关掉。
+
+    其他厂商不认识这个参数，带上可能直接 400，所以只给 api.deepseek.com 加。
+    """
+    try:
+        host = urlparse(base_url).hostname
+    except ValueError:
+        return {}
+    return {"thinking": {"type": "disabled"}} if host == "api.deepseek.com" else {}
+
+
+def chat(
+    llm: LLMConfig,
+    messages: list,
+    *,
+    temperature: float = 0.2,
+    max_tokens: int | None = None,
+    timeout: float = 30.0,
+    json_mode: bool = False,
+    tools: list | None = None,
+    tool_choice=None,
+) -> dict:
+    """统一的一次模型调用，返回 choices[0]["message"]。
+
+    401/403 且密钥来自用户时抛 UserKeyInvalid（路由层提示换 key），其他 HTTP
+    错误抛 httpx.HTTPStatusError，网络错误照常冒泡，由调用方各自降级。
+    """
+    check_base_url(llm.base_url)
+    payload = {
+        "model": llm.model,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if tools:
+        payload["tools"] = tools
+    if tool_choice is not None:
+        payload["tool_choice"] = tool_choice
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    payload.update(thinking_disabled(llm.base_url))
+
+    url = f"{llm.base_url.rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {llm.api_key}"}
+    with httpx.Client(timeout=timeout) as client:
+        resp = client.post(url, headers=headers, json=payload)
+        if json_mode and resp.status_code == 400:
+            # 有的兼容厂商不认 response_format：去掉再试一次，仍失败按原样报错
+            payload.pop("response_format", None)
+            resp = client.post(url, headers=headers, json=payload)
+        if resp.status_code in (401, 403) and llm.from_user:
+            raise UserKeyInvalid()
+        resp.raise_for_status()
+        choices = (resp.json() or {}).get("choices") or []
+    if not choices:
+        raise ValueError("模型返回缺少 choices")
+    return choices[0].get("message") or {}
+
+
+def chat_json(
+    llm: LLMConfig,
+    messages: list,
+    *,
+    validate=None,
+    retries: int = 1,
+    **kw,
+) -> dict | None:
+    """以 json_mode 调用并解析；校验失败时把错误追回去重试，全部失败返回 None。
+
+    UserKeyInvalid / UnsafeBaseURL 照常抛给调用方，其余失败都只降级不冒泡。
+    """
+    messages = list(messages)
+    for attempt in range(retries + 1):
+        try:
+            message = chat(llm, messages, json_mode=True, **kw)
+        except (UserKeyInvalid, UnsafeBaseURL):
+            raise
+        except Exception:  # noqa: BLE001 - 结构化输出失败由调用方降级
+            return None
+
+        content = str(message.get("content") or "").strip()
+        data = _loads_json(content) if content else None
+        if data is not None:
+            try:
+                if validate is not None:
+                    validate(data)
+                return data
+            except ValueError as exc:
+                error = str(exc)
+        else:
+            # DeepSeek JSON 模式下 content 可能全是空格，按失败处理
+            error = "Your last output was empty or not valid JSON."
+        if attempt >= retries:
+            break
+        messages.append(
+            {
+                "role": "user",
+                "content": f"Your last output was invalid: {error} Return only JSON.",
+            }
+        )
+    return None
+
 
 MOCK_FOLLOW_UPS = {
     "job_interview": [
@@ -104,24 +224,14 @@ def chat_reply(
 
     messages = build_messages(scene, difficulty, history, plan)
     try:
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(
-                f"{llm.base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {llm.api_key}"},
-                json={
-                    "model": llm.model,
-                    "messages": messages,
-                    "temperature": 0.7,
-                },
-            )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            if not content:
-                return _mock_reply(scene["id"], turn_index), True
-            return content, False
+        message = chat(llm, messages, temperature=0.7, timeout=30.0)
+        content = str(message.get("content") or "").strip()
+        if not content:
+            return _mock_reply(scene["id"], turn_index), True
+        return content, False
+    except UserKeyInvalid:
+        raise
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code in (401, 403) and llm.from_user:
-            raise UserKeyInvalid() from exc
         print(f"[llm] 对话降级为预设追问：HTTP {exc.response.status_code}", flush=True)
         return _mock_reply(scene["id"], turn_index), True
     except Exception as exc:  # noqa: BLE001 - 对话中断比整个请求失败更糟，降级成预设追问
@@ -202,6 +312,7 @@ def open_chat_stream(
                 "messages": build_messages(scene, difficulty, history, plan),
                 "temperature": 0.7,
                 "stream": True,
+                **thinking_disabled(llm.base_url),
             },
         )
         resp = client.send(request, stream=True)

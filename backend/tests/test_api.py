@@ -39,6 +39,7 @@ import httpx  # noqa: E402
 from app import security  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services import hints as hints_service  # noqa: E402
+from app.services import llm as llm_service  # noqa: E402
 from app.services import llm_config, outbound  # noqa: E402
 from app.services.rules import TASK_CHECKS  # noqa: E402
 from evaluation import bands  # noqa: E402
@@ -210,7 +211,7 @@ class SessionTests(ApiTestCase):
         self._dns.start()
         self.addCleanup(self._dns.stop)
         # Planner 在建会话时就会调一次模型：统一替身掉，测试绝不碰网络
-        self._planner = mock.patch("app.services.agent.httpx.Client", _FakePlanClient)
+        self._planner = mock.patch("app.services.llm.httpx.Client", _FakePlanClient)
         self._planner.start()
         self.addCleanup(self._planner.stop)
         _, auth = self.register()
@@ -428,6 +429,32 @@ class _SentenceClient(_FakeClient):
         return super().post(*a, **k)
 
 
+class _SequenceClient(_FakeClient):
+    """按 texts 依次回放，用来测 chat_json 的重试。"""
+
+    texts = ()
+    calls = 0
+
+    def post(self, *a, **k):
+        index = min(type(self).calls, len(type(self).texts) - 1)
+        type(self).calls += 1
+        return _FakeResp({"choices": [{"message": {"content": type(self).texts[index]}}]})
+
+    @classmethod
+    def with_texts(cls, texts):
+        return type("Seq", (cls,), {"texts": tuple(texts), "calls": 0})
+
+
+class _CaptureClient(_FakeClient):
+    """记录请求体，用来检查 thinking 参数只发给官方主机。"""
+
+    last_json = None
+
+    def post(self, *a, **k):
+        type(self).last_json = k.get("json")
+        return super().post(*a, **k)
+
+
 class _TimeoutClient:
     """模拟助记请求超时。"""
 
@@ -596,7 +623,7 @@ class PlanTests(SessionTests):
     """Planner：目标只能来自场景任务清单，模型挂了一样能开会话。"""
 
     def _create(self, client_cls=None, scene_id="cafe_order"):
-        with mock.patch("app.services.agent.httpx.Client", client_cls or _FakePlanClient):
+        with mock.patch("app.services.llm.httpx.Client", client_cls or _FakePlanClient):
             return self.client.post(
                 "/api/sessions", json={"scene_id": scene_id}, headers=self.headers
             )
@@ -684,7 +711,7 @@ class CriticTests(SessionTests):
     """Critic：只可收紧关键词命中，模型失败也不影响出报告。"""
 
     def _finish(self, sid, critic_json):
-        # scoring.httpx 与 agent.httpx 是同一个 httpx 模块，同时 patch 会互相覆盖，
+        # scoring.httpx 与 llm.httpx 是同一个 httpx 模块，同时 patch 会互相覆盖，
         # 所以评分走模型替身、复盘直接替 _request_json。
         with mock.patch(
             "app.services.scoring.httpx.Client", _ScriptedClient.with_text(_REPORT_JSON)
@@ -733,7 +760,7 @@ class HintTests(SessionTests):
         _HintClient.calls = 0
 
     def _hint(self, sid, client_cls=None, headers=None):
-        with mock.patch("app.services.hints.httpx.Client", client_cls or _HintClient):
+        with mock.patch("app.services.llm.httpx.Client", client_cls or _HintClient):
             return self.client.post(
                 f"/api/sessions/{sid}/hint", headers=headers or self.headers
             )
@@ -844,7 +871,7 @@ class HintTests(SessionTests):
         first = self._hint(sid).json()
         self.assertFalse(first["cached"])
         self.assertEqual(_HintClient.calls, 1)
-        with mock.patch("app.services.hints.httpx.Client", _HintClient):
+        with mock.patch("app.services.llm.httpx.Client", _HintClient):
             again = self.client.post(
                 f"/api/sessions/{sid}/hint",
                 json={"nonce": "abc123"},
@@ -1260,7 +1287,7 @@ class _WordAssistBase(ApiTestCase):
         self.headers = {**self.auth, **LLM_HEADERS}
 
     def _assist(self, term, meaning_zh="", client=None, headers=None):
-        with mock.patch("app.services.word_assist.httpx.Client", client or _WordAssistClient):
+        with mock.patch("app.services.llm.httpx.Client", client or _WordAssistClient):
             return self.client.post(
                 "/api/study/words/assist",
                 json={"term": term, "meaning_zh": meaning_zh},
@@ -1268,7 +1295,7 @@ class _WordAssistBase(ApiTestCase):
             )
 
     def _import(self, text, use_ai=True, client=None, headers=None):
-        with mock.patch("app.services.word_assist.httpx.Client", client or _WordAssistClient):
+        with mock.patch("app.services.llm.httpx.Client", client or _WordAssistClient):
             return self.client.post(
                 "/api/study/words/import",
                 json={"text": text, "use_ai": use_ai},
@@ -1287,7 +1314,7 @@ class _WordAssistBase(ApiTestCase):
         return self.client.post("/api/study/words/learn", json=body, headers=self.headers)
 
     def _check(self, term, sentence, client=None, headers=None):
-        with mock.patch("app.services.word_assist.httpx.Client", client or _SentenceClient):
+        with mock.patch("app.services.llm.httpx.Client", client or _SentenceClient):
             return self.client.post(
                 "/api/study/words/sentence-check",
                 json={"term": term, "sentence": sentence},
@@ -1419,7 +1446,7 @@ class WordImportTests(_WordAssistBase):
 
     def test_vocab_add_accepts_wordbank_external_term(self):
         headers = dict(self.auth)
-        with mock.patch("app.services.word_assist.httpx.Client", _WordAssistClient):
+        with mock.patch("app.services.llm.httpx.Client", _WordAssistClient):
             r = self.client.post(
                 "/api/study/vocab/add",
                 json={"scope": "cet4", "terms": ["zephyr"]},
@@ -1819,6 +1846,83 @@ class NoteLinkApiTests(NoteLinkBase):
         self.assertGreaterEqual(link["reps"], 1)
         self.assertIsNotNone(link["last_reviewed_at"])
         self.assertTrue(link["due_at"])
+
+
+class LlmUnifiedCallTests(unittest.TestCase):
+    """阶段 0：统一调用层——JSON 容错、重试、thinking 只给官方主机。"""
+
+    def setUp(self):
+        self._dns = mock.patch.object(outbound.socket, "getaddrinfo", _public_dns)
+        self._dns.start()
+        self.addCleanup(self._dns.stop)
+
+    @staticmethod
+    def _cfg(base_url="https://api.example.com/v1"):
+        return llm_config.LLMConfig(
+            api_key="sk-test",
+            base_url=base_url,
+            model="deepseek-flash",
+            key_source="user",
+        )
+
+    def test_loads_json_ignores_trailing_brace_explanation(self):
+        text = '{"bands": {"grammar_vocab": 5.0}} 说明里还有 } 和 {，不影响取第一个对象'
+        self.assertEqual(
+            llm_service._loads_json(text), {"bands": {"grammar_vocab": 5.0}}
+        )
+        self.assertIsNone(llm_service._loads_json("没有 JSON 的一段话"))
+
+    def test_chat_json_retries_after_invalid_json(self):
+        client = _SequenceClient.with_texts(["not json", '{"ok": true}'])
+        with mock.patch("app.services.llm.httpx.Client", client):
+            data = llm_service.chat_json(self._cfg(), [{"role": "user", "content": "hi"}])
+        self.assertEqual(data, {"ok": True})
+        self.assertEqual(client.calls, 2)
+
+    def test_chat_json_retries_blank_content(self):
+        client = _SequenceClient.with_texts(["   ", '{"ok": true}'])
+        with mock.patch("app.services.llm.httpx.Client", client):
+            data = llm_service.chat_json(self._cfg(), [{"role": "user", "content": "hi"}])
+        self.assertEqual(data, {"ok": True})
+        self.assertEqual(client.calls, 2)
+
+    def test_chat_json_gives_up_after_retries(self):
+        client = _SequenceClient.with_texts(["   "])
+        with mock.patch("app.services.llm.httpx.Client", client):
+            data = llm_service.chat_json(self._cfg(), [{"role": "user", "content": "hi"}])
+        self.assertIsNone(data)
+        self.assertEqual(client.calls, 2)
+
+    def test_chat_json_validate_error_retries(self):
+        seen = []
+
+        def validate(data):
+            seen.append(data)
+            if "bands" not in data:
+                raise ValueError("`bands` is required")
+
+        client = _SequenceClient.with_texts(['{"oops": 1}', '{"bands": {"grammar_vocab": 5}}'])
+        with mock.patch("app.services.llm.httpx.Client", client):
+            data = llm_service.chat_json(
+                self._cfg(), [{"role": "user", "content": "hi"}], validate=validate
+            )
+        self.assertEqual(data, {"bands": {"grammar_vocab": 5}})
+        self.assertEqual(len(seen), 2)
+
+    def test_thinking_only_sent_to_deepseek_host(self):
+        client = _CaptureClient
+        client.last_json = None
+        with mock.patch("app.services.llm.httpx.Client", client):
+            llm_service.chat(self._cfg(), [{"role": "user", "content": "hi"}])
+        self.assertNotIn("thinking", client.last_json)
+
+        client.last_json = None
+        with mock.patch("app.services.llm.httpx.Client", client):
+            llm_service.chat(
+                self._cfg("https://api.deepseek.com/v1"),
+                [{"role": "user", "content": "hi"}],
+            )
+        self.assertEqual(client.last_json["thinking"], {"type": "disabled"})
 
 
 class BandTests(unittest.TestCase):

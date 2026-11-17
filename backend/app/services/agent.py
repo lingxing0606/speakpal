@@ -13,8 +13,7 @@ from __future__ import annotations
 
 import json
 
-import httpx
-
+from .llm import _loads_json, chat
 from .llm_config import LLMConfig, build_llm_config
 from .outbound import UnsafeBaseURL, check_base_url
 from .rules import evaluate_task
@@ -27,32 +26,14 @@ PLAN_TIMEOUT = 12.0
 CRITIC_TIMEOUT = 20.0
 
 
-def _loads_json(text: str):
-    """从模型输出里取第一个 JSON 对象；容忍前后带解释文字。"""
-    raw = text or ""
-    start = raw.find("{")
-    if start < 0:
-        return None
-    try:
-        data, _end = json.JSONDecoder().raw_decode(raw[start:])
-    except (ValueError, TypeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def _request_json(llm: LLMConfig, prompt: str, timeout: float):
-    with httpx.Client(timeout=timeout) as client:
-        resp = client.post(
-            f"{llm.base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {llm.api_key}"},
-            json={
-                "model": llm.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2,
-            },
-        )
-        resp.raise_for_status()
-        return _loads_json(resp.json()["choices"][0]["message"]["content"])
+    message = chat(
+        llm,
+        [{"role": "user", "content": prompt}],
+        temperature=0.2,
+        timeout=timeout,
+    )
+    return _loads_json(message.get("content") or "")
 
 
 # ---------------------------------------------------------------- Planner

@@ -12,10 +12,10 @@ import threading
 import time
 from datetime import datetime
 
-import httpx
 from sqlalchemy import text
 
 from ..timeutil import utcnow
+from .llm import chat
 from .llm_config import LLMConfig, build_llm_config
 from .outbound import check_base_url
 from .scenes import get_frames
@@ -260,19 +260,14 @@ def frame_hints(scene_id: str) -> list:
 
 # ---------------------------------------------------------------- 主流程
 def _request_hints(llm: LLMConfig, messages: list) -> str:
-    with httpx.Client(timeout=HINT_TIMEOUT) as client:
-        resp = client.post(
-            f"{llm.base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {llm.api_key}"},
-            json={
-                "model": llm.model,
-                "messages": messages,
-                "temperature": HINT_TEMPERATURE,
-                "max_tokens": HINT_MAX_TOKENS,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+    message = chat(
+        llm,
+        messages,
+        temperature=HINT_TEMPERATURE,
+        max_tokens=HINT_MAX_TOKENS,
+        timeout=HINT_TIMEOUT,
+    )
+    return str(message.get("content") or "")
 
 
 def generate_hints(
