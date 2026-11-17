@@ -384,7 +384,7 @@ async function loadKnowledge() {
     const { data } = await api.get('/study/items', { params })
     if (token !== knowledgeRequest) return
     knowledgeItems.value = Array.isArray(data) ? data : []
-  } catch (e) {
+  } catch {
     if (token === knowledgeRequest) knowledgeError.value = '知识条目暂时取不到'
   } finally {
     if (token === knowledgeRequest) knowledgeLoading.value = false

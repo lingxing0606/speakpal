@@ -53,6 +53,7 @@
 - **样式体系**：Tailwind CSS 3 + 自定义语义化设计令牌（`style.css`）
 - **网络与流式通信**：Axios（统一 JWT 注入、`X-Auth-Reason` 401 分流拦截、`X-LLM-Key` 透传）+ 原生 `fetch` + `ReadableStream`（SSE 流式解析）
 - **浏览器原生能力**：Web Speech API（`SpeechRecognition` / `speechSynthesis`）、Web Audio API（`AudioContext` + `AnalyserNode` 时域 RMS 包络检测）、MediaRecorder + IndexedDB（本地录音持久化回放）
+- **工程化**：路由懒加载（`Login` / `Home` 静态，其余页面按页拆 chunk）+ `manualChunks` 抽离 vendor；TypeScript 渐进迁移（`vue-tsc --noEmit` 已接入构建，`npm run typecheck` / `npm run lint`）；生产构建入口 JS gzip 从 **145.49 kB 降到 17.83 kB**（vendor 60.96 kB 单独分包，首页 JS 合计 78.79 kB）
 
 ### 3.2 后端（`backend/`）
 
@@ -103,12 +104,15 @@
 │       └── static/                 # 运营后台单页（admin.html）与离线 Swagger UI 静态资源
 ├── frontend/                       # Vue 3 + Vite 前端工程
 │   ├── package.json                # 前端依赖与脚本定义
-│   ├── vite.config.js              # Vite 配置（127.0.0.1:5173 及 /api 反向代理至 :8000）
+│   ├── vite.config.js              # Vite 配置（127.0.0.1:5173 及 /api 反向代理至 :8000；vendor 单独分包）
+│   ├── tsconfig.json               # TypeScript 配置（strict / allowJs / noEmit）
+│   ├── eslint.config.js            # ESLint flat config（js + typescript-eslint + vue essential）
 │   ├── public/                     # 品牌 Logo 与 Favicon 矢量资源
 │   └── src/
 │       ├── main.js / App.vue / style.css
-│       ├── router/index.js         # 13 条业务路由 + catch-all 兜底与认证守卫
-│       ├── api/                    # Axios 实例封装（client.js）与 SSE 流式客户端（stream.js）
+│       ├── router/index.js         # 13 条业务路由（除 Login/Home 外按页懒加载）+ catch-all 兜底与认证守卫
+│       ├── api/                    # Axios 实例封装（client.ts）与 SSE 流式客户端（stream.ts）
+│       ├── types/api.ts            # 后端 schemas.py 对应的接口类型（手写，只含前端用到的字段）
 │       ├── stores/                 # Pinia 状态仓库（auth / session / settings）
 │       ├── components/             # AppHeader / HintCard / StudyDashboard / TabBar / BrandLogo /
 │       │                           #   SceneIcon / CountUp / EmptyState / BackLink / MnemonicCard /

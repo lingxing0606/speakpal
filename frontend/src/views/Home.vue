@@ -152,10 +152,6 @@ function startFromPhoto(photo) {
   })
 }
 
-function logout() {
-  auth.logout()
-  router.push('/login')
-}
 </script>
 
 <template>

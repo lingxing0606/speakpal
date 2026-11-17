@@ -57,11 +57,11 @@ function playBlob(blob, onFail) {
     audio.onended = () => URL.revokeObjectURL(url)
     audio.onerror = () => {
       URL.revokeObjectURL(url)
-      onFail && onFail()
+      onFail?.()
     }
     audio.play().catch(() => {
       URL.revokeObjectURL(url)
-      onFail && onFail()
+      onFail?.()
     })
     return true
   } catch {
@@ -79,7 +79,7 @@ export async function speakSmart(text, { lang = 'en-US', rate = 1 } = {}) {
   try {
     settings = useSettingsStore()
   } catch {
-    settings = null
+    // 拿不到 store（例如在 Pinia 之外调用）就按未配置处理
   }
 
   const hasBrowserKey = !!settings?.ttsConfigured

@@ -1,12 +1,9 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 
 import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
 import { createRecognizer, speakSmart } from '../utils/speech'
-
-const router = useRouter()
 
 const sets = ref([])
 const loading = ref(true)

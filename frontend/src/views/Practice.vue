@@ -707,7 +707,7 @@ async function startListening() {
   }
   try {
     capturer = await startAudioCapture()
-  } catch (e) {
+  } catch {
     capturer = null
   }
   interim.value = ''

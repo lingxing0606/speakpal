@@ -9,7 +9,7 @@ import StudyDashboard from '../components/StudyDashboard.vue'
 import TabBar from '../components/TabBar.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
-import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
+import { llmReady } from '../utils/llmGate'
 
 const router = useRouter()
 const session = useSessionStore()

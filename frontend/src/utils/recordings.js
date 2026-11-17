@@ -150,14 +150,14 @@ export async function playRecording(blob, onEnd) {
   player = audio
   audio.onended = () => {
     if (player === audio) stopRecording()
-    onEnd && onEnd()
+    onEnd?.()
   }
   try {
     await audio.play()
     return true
   } catch {
     if (player === audio) stopRecording()
-    onEnd && onEnd()
+    onEnd?.()
     return false
   }
 }

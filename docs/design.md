@@ -45,7 +45,7 @@ speakpal/
 │   │   ├── main.js
 │   │   ├── App.vue
 │   │   ├── router/index.js        # 含登录路由守卫
-│   │   ├── api/client.js          # axios 封装（自动带 token）
+│   │   ├── api/client.ts          # axios 封装（自动带 token）
 │   │   ├── stores/
 │   │   │   ├── auth.js            # 登录态 / token
 │   │   │   └── session.js         # 当前对话/评分
@@ -97,7 +97,7 @@ speakpal/
 - 登录 / 注册 切换
 - 错误提示（账号已存在、密码错误）
 - 登录成功 → 存 token → 跳首页
-- **token 过期回跳**：`client.js` 遇 401 跳 `/login?expired=1&next=<原路径>`；`next` 只接受 `/` 开头、排除 `//` 与 `/login`（防开放重定向），登录成功后优先回 `next`
+- **token 过期回跳**：`client.ts` 遇 401 跳 `/login?expired=1&next=<原路径>`；`next` 只接受 `/` 开头、排除 `//` 与 `/login`（防开放重定向），登录成功后优先回 `next`
 - **被踢要说原因**：改密码导致 `token_version` 失效时，401 响应带原因码，前端拦截器把 `?reason=password_changed` 带到登录页并显示「密码已修改，请重新登录」，
   不再一律显示「登录状态已过期」——用户分不清是自己掉线还是账号在别的设备被改。
 - **401 的落点按原因分两路（rc15 定稿，别混）**：
@@ -471,7 +471,7 @@ Difficulty: {difficulty}. Keep it friendly.
 - **跳过不等于可以免 key 开练**：本浏览器没有 key 时，`POST /api/sessions` 和 `POST /api/sessions/{id}/turn` 返回
   `409 {"kind": "llm_not_configured", "detail": "还没有接入模型密钥"}`；前端在场景列表上方展开页内面板，**只给「去设置填密钥 / 取消」两个出口**。
   没有「用服务端密钥继续（演示）」——服务端没有 key 可借。
-  **不能用 401**——前端 `client.js` 拦截器把任何 401 当登录失效并清 token 跳登录页。
+  **不能用 401**——前端 `client.ts` 拦截器把任何 401 当登录失效并清 token 跳登录页。
 - **自动化测试注意**：服务端兜底拿掉后，所有脚本必须自己在 `X-LLM-Key` 头里带真实 key，否则会一路 `409`/示例报告；
   不要为了测试方便把兜底加回来。
 - 失败分类（定稿口径），**不是所有失败都降级成示例报告**：
