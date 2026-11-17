@@ -199,7 +199,7 @@ class ReportOut(BaseModel):
     scales: Dict[str, Any] = {}
     # 阶段 4「AI 透明度」：model / safety / scores / coach；mock 报告为空
     transparency: Dict[str, Any] | None = None
-    note: str = "分数由 AI 估算，仅供参考。"
+    note: str = ""
 
 
 class HistoryItem(BaseModel):

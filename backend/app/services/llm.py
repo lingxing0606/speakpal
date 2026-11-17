@@ -271,8 +271,9 @@ def chat_reply(
 ) -> tuple[str, bool]:
     """多轮对话。
 
-    没带 key 时走 `.env` 兜底（不是“未配置”）；用户 key 被 401/403 拒绝时抛
-    UserKeyInvalid，让路由层立刻告诉用户去换 key，而不是继续聊一轮假对话。
+    没带 key 时直接返回预设追问并标 degraded（服务端没有 `.env` 兜底密钥，
+    不是走兜底 key）；用户 key 被 401/403 拒绝时抛 UserKeyInvalid，让路由层立刻
+    告诉用户去换 key，而不是继续聊一轮假对话。
 
     返回 (回复, degraded)。degraded=True 表示模型没回上来、用的是预设追问，
     前端要提示用户，不能让人以为 AI 在正常工作。base_url 不安全时抛 UnsafeBaseURL，
