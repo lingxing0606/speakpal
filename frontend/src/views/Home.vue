@@ -8,6 +8,7 @@ import CountUp from '../components/CountUp.vue'
 import EmptyState from '../components/EmptyState.vue'
 import TabBar from '../components/TabBar.vue'
 import SceneIcon from '../components/SceneIcon.vue'
+import PhotoScenePanel from '../components/PhotoScenePanel.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
@@ -99,12 +100,12 @@ onMounted(async () => {
   }
 })
 
-async function begin(scene) {
+async function begin(scene, extra = {}) {
   loading.value = true
   error.value = ''
   try {
     // 不传 difficulty：服务端会用「设置 → 练习偏好」里的值
-    const { data } = await api.post('/sessions', { scene_id: scene.id })
+    const { data } = await api.post('/sessions', { scene_id: scene.id, ...extra })
     let diff = usedDifficulty.value
     let plan = data.plan || null
     try {
@@ -131,6 +132,24 @@ function start(scene) {
     return
   }
   begin(scene)
+}
+
+function startFromPhoto(photo) {
+  if (!settings.configured) {
+    needKey.value = true
+    return
+  }
+  // 认出来的场景一定在 6 个之内；取本地场景对象是为拿到图标与文案
+  const scene = scenes.value.find((s) => s.id === photo.scene_id) || {
+    id: photo.scene_id,
+    name: photo.scene_name || '对话',
+    icon: 'book',
+    desc: '',
+  }
+  begin(scene, {
+    context: photo.context || '',
+    key_vocab: photo.key_vocab || [],
+  })
 }
 
 function logout() {
@@ -248,6 +267,7 @@ function logout() {
         </div>
 
         <div v-else-if="scenes.length" class="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <PhotoScenePanel @start="startFromPhoto" />
           <button
             v-for="(s, i) in scenes"
             :key="s.id"

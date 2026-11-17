@@ -12,6 +12,7 @@ from .db import Base, engine
 from .routers import (
     account,
     admin,
+    asr,
     auth,
     exercises,
     hints,
@@ -60,6 +61,9 @@ def _ensure_schema():
             "audio_json": "TEXT DEFAULT '{}'",
             # 旧对话默认按录音算（当时只有录音入口）
             "input_mode": "VARCHAR(8) DEFAULT 'voice'",
+            # 阶段 4：转写来源 + 安全标记；旧对话两者都为空
+            "asr_source": "VARCHAR(8)",
+            "safety_flag": "VARCHAR(32) DEFAULT ''",
         }
         for name, ddl in turn_cols.items():
             if name not in cols:
@@ -287,6 +291,7 @@ app.include_router(tts.router)
 app.include_router(study.router)
 app.include_router(words.router)
 app.include_router(knowledge.router)
+app.include_router(asr.router)
 
 
 _ADMIN_HTML = _STATIC_DIR / "admin.html"

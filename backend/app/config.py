@@ -114,6 +114,8 @@ class Settings:
     # 所以这里没有 llm_api_key；.env 里就算写了 LLM_API_KEY 也不会被读取。
     llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     llm_model: str = os.getenv("LLM_MODEL", "deepseek-flash")
+    # 服务端语音转写：DeepSeek 主机走 /tools/asr；其他兼容厂商走 /audio/transcriptions 的模型名
+    asr_model: str = os.getenv("ASR_MODEL", "whisper-1")
     # 语音合成（可选）：用的是 OpenAI 兼容的 /audio/speech，不填就走浏览器内置朗读
     tts_api_key: str = os.getenv("TTS_API_KEY", "")
     tts_base_url: str = os.getenv("TTS_BASE_URL", "https://api.openai.com/v1")

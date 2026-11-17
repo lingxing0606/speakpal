@@ -286,6 +286,22 @@
     @apply flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-50 text-xl ring-1 ring-brand-100;
   }
 
+  /* 拍照生成练习：虚线投放区（拖拽/点选） */
+  .sp-photo-drop {
+    @apply border border-dashed border-line transition duration-200 ease-out hover:border-brand-300;
+  }
+
+  /* 拍照生成练习：面板从入口卡下沿展开 */
+  .sp-photo-panel {
+    animation: sp-photo-open 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  /* AI 状态徽标：气泡外 4px，最多一枚；配色由组件按 surface 决定 */
+  .sp-ai-badge {
+    @apply inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded-full px-1.5 text-[10px] font-medium;
+    animation: sp-badge-in 160ms ease-out both;
+  }
+
   /* 录音音量圈：--level 0–1 由真实音量驱动 */
   .sp-mic-level {
     @apply pointer-events-none absolute inset-0 rounded-full bg-coral-300/40 transition-transform duration-100 ease-out;
@@ -490,6 +506,28 @@
   }
 }
 
+@keyframes sp-photo-open {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sp-badge-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* 减少动态：提示卡只淡入、不位移（覆盖全局 0.001ms 的压缩） */
 @media (prefers-reduced-motion: reduce) {
   .sp-hint-card-enter,
@@ -504,5 +542,14 @@
 
   .sp-hint-row-in {
     animation: none;
+  }
+
+  .sp-photo-panel {
+    animation: none;
+  }
+
+  .sp-ai-badge {
+    animation: sp-badge-in 120ms linear both;
+    animation-duration: 120ms !important;
   }
 }

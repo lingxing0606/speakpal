@@ -68,11 +68,28 @@ def stats(_=Depends(require_admin), db: OrmSession = Depends(get_db)):
     users = db.query(func.count(User.id)).scalar() or 0
     sessions = db.query(func.count(PracticeSession.id)).scalar() or 0
     reports = db.query(func.count(Report.id)).scalar() or 0
+    # 阶段 4：安全标记（输入命中注入 / 平台拒绝 / 回复被替换）按天计数，最近 14 天
+    flagged = Turn.safety_flag.isnot(None) & (Turn.safety_flag != "")
+    safety_rows = (
+        db.query(func.date(Turn.created_at), func.count(Turn.id))
+        .filter(flagged)
+        .group_by(func.date(Turn.created_at))
+        .order_by(func.date(Turn.created_at).desc())
+        .limit(14)
+        .all()
+    )
+    safety_by_day = [
+        {"date": str(day), "count": int(count)} for day, count in safety_rows if day
+    ]
     return {
         "users": users,
         "sessions": sessions,
         "reports": reports,
         "incomplete": max(sessions - reports, 0),
+        "security": {
+            "total": sum(one["count"] for one in safety_by_day),
+            "by_day": safety_by_day,
+        },
     }
 
 

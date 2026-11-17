@@ -59,6 +59,10 @@ class CreateSessionIn(BaseModel):
     scene_id: str
     # 不传就用设置里的偏好难度，见 PATCH /api/me/preferences
     difficulty: str | None = None
+    # 拍照生成的场景细节：由 /api/scenes/from-image 给出，作为数据注入 system prompt
+    context: str = Field(default="", max_length=300)
+    # 图片里出现的目标词，做 Planner 的用词焦点
+    key_vocab: List[Dict[str, str]] = []
 
 
 class SessionPlan(BaseModel):
@@ -95,6 +99,8 @@ class TurnIn(BaseModel):
     audio: AudioMeta | None = None
     # voice | typed。不传就按有没有音频推断（前端打字时 audio 为空）
     input_mode: str | None = None
+    # 转写来源：cloud（服务端 ASR）/ browser（浏览器识别）；打字轮不传
+    asr_source: str | None = None
 
 
 class TurnOut(BaseModel):
@@ -104,6 +110,12 @@ class TurnOut(BaseModel):
     should_finish: bool = False
     # 模型没回上来，这一轮用的是预设追问（前端据此提示）
     degraded: bool = False
+    # 安全替换：这一轮的回复不是模型原文，已换成预设追问（前端用 ai_reply 覆盖）
+    replaced: bool = False
+    # 这一轮用户输入被安全标记（不影响回复本身）
+    flagged: bool = False
+    # 这一轮用户输入的转写来源（回声给前端标气泡）
+    asr_source: str | None = None
     # 本场目标与最新进度（老会话为空 plan）
     plan: SessionPlan = SessionPlan()
 
@@ -185,6 +197,8 @@ class ReportOut(BaseModel):
     # 多量表派生视图（雅思/CEFR/托福/多邻国/四六级），见 evaluation/scales.py；
     # 不落库：有 band 就现算，旧报告自动获得
     scales: Dict[str, Any] = {}
+    # 阶段 4「AI 透明度」：model / safety / scores / coach；mock 报告为空
+    transparency: Dict[str, Any] | None = None
     note: str = "分数由 AI 估算，仅供参考。"
 
 
@@ -212,6 +226,8 @@ class SessionTurnOut(BaseModel):
     role: str  # ai | user
     content: str
     input_mode: str = "voice"  # ai 轮恒为 voice，无意义
+    # user 轮的转写来源：cloud / browser；打字轮与旧对话为空
+    asr_source: str | None = None
     created_at: str
 
 
@@ -268,6 +284,23 @@ class SceneFrame(BaseModel):
 class SceneFramesOut(BaseModel):
     scene_id: str
     frames: List[SceneFrame] = []
+
+
+class KeyVocabOut(BaseModel):
+    """图片里识别出的目标词：英文词 + 中文提示。"""
+
+    term: str
+    zh: str = ""
+
+
+class ImageSceneOut(BaseModel):
+    """拍照识图 → 场景：前端结果卡直接展示这些字段，开练时回传给建会话。"""
+
+    scene_id: str
+    scene_name: str
+    context: str = ""
+    key_vocab: List[KeyVocabOut] = []
+    opening: str = ""
 
 
 class HintItem(BaseModel):

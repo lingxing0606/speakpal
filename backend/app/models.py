@@ -62,6 +62,10 @@ class Turn(Base):
     # user 轮的输入方式：voice（录音）/ typed（打字），报告据此决定哪些维度能算
     input_mode = Column(String(8), default="voice")
     audio_json = Column(Text, default="{}")
+    # 转写来源（user 轮）：cloud（服务端 ASR）/ browser（浏览器识别）；打字轮为空
+    asr_source = Column(String(8), nullable=True)
+    # 安全标记：injection（输入命中注入）、risk（平台拒绝）、replaced（回复被替换），逗号分隔
+    safety_flag = Column(String(32), default="")
     created_at = Column(DateTime, default=utcnow)
 
     session = relationship("PracticeSession", back_populates="turns")

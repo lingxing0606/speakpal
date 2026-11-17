@@ -21,7 +21,7 @@
 以下内容**不在**当前实现范围内，请勿据此推断系统已具备相应能力：
 
 - **不做声学测评**：发音维度由大模型**依据转写文本推断**；报告页该维标题固定显示「发音清晰度」（`Report.vue:43`），只是给人看的栏目名，不代表声学清晰度测量。正常报告注脚为「分数由模型分与可测规则分融合得出，仅供参考」。
-- **不保存原始音频**：仅入库录音的**统计元信息**（时长、有声时长、停顿序列），录音文件只存在于浏览器本地 IndexedDB，用于回放。
+- **音频只用于转写**：录音会转成 16 kHz 单声道 WAV 上传到 `/api/asr` 做云端转写（失败回退浏览器识别），后端只在内存里转发、处理完立即丢弃，不写文件、不入库；入库的仍只是**统计元信息**（时长、有声时长、停顿序列），原始录音只存在于浏览器本地 IndexedDB，用于回放。
 - **无真实人工评分数据**：`evaluation/demo_data.csv` 是固定随机种子（`seed=42`）生成的 20 条合成数据，仅用于验证统计脚本链路可跑通，**不构成任何有效性结论**。
 - **无多租户 / 班级 / 教师端**：管理台只做只读统计与账号运维。
 
@@ -32,7 +32,8 @@
 | 模块分类 | 核心能力 | 关键实现与工程亮点 |
 |---|---|---|
 | **场景化多轮对练** | 6 大真实场景 + 3 档难度（`easy` / `medium` / `hard`）+ 句型脚手架（Frames） | 支持 **SSE 流式回复**（`/api/sessions/{id}/turn/stream`）与非流式自动回退；仅在完整生成后落库，杜绝半截脏数据 |
-| **双模态输入与音频分析** | Web Speech API 语音识别 + Web Audio API 50ms RMS 包络采样 + 浏览器本地录音回放 | 实时提取说话时长、有效发音时长、停顿次数与停顿序列；原始录音仅存于浏览器 IndexedDB/ObjectURL，**零音频上传**保护隐私 |
+| **双模态输入与音频分析** | Web Speech API 语音识别 + 服务端 ASR（失败回落浏览器）+ Web Audio API 50ms RMS 包络采样 + 浏览器本地录音回放 | 实时提取说话时长、有效发音时长、停顿次数与停顿序列；服务端 ASR 只在内存转发、处理完立即丢弃，**不落盘、不入库**；原始录音仍只存于浏览器 IndexedDB/ObjectURL |
+| **拍照生成练习与 AI 安全** | 图片 → 场景/场景细节/目标词/开场白（DeepSeek Vision，前端压到长边 1280）；平台 `safety_check: high`、注入标记、出戏/中文占比/超长/提示词泄露检查 | 图片只在内存里转发；注入只标记不拦截；不合格回复换成预设追问并在 `done.replaced` 标注；报告页「AI 透明度」展示模型、安全标记、分数构成与教练证据覆盖 |
 | **模型 + 规则融合评分** | 动态维度（纯录音 4 维 / 纯打字 3 维 / 混合 5 维）+ 单一换算锚 `S = 10B + 10` | 规则分对模型分执行"高出 20 分即压回规则分 +10"的防虚高约束；完整融合明细落库 `scoring_json`，前端可展开验算 |
 | **跨模式可比与降级保护** | 共享维度可比档（`comparable_band`）+ 诚实降级策略 | 成长曲线基于 `grammar_vocab` 与 `task_completion` 计算跨模式可比档；无密钥或断网降级报告（`source=mock`）显式标注「示例报告（模型不可用）· 本次不计分」，严禁伪造分数与假造原句 |
 | **SM-2 学习闭环** | 今日待复习队列 + 四大板块（复习 / 新词 / 语法 / 口语）+ 随堂笔记（`notes`） | 报告错句自动建卡 + 离线 JSON 题库（高考/四级/六级词库、时态/冠词/介词/从句语法卡、书面转口语卡），支持拼写、选句、造句客观判分驱动 SM-2 调度 |
@@ -92,12 +93,12 @@
 │       ├── security.py             # PBKDF2 散列、JWT 签发校验、Admin 鉴权
 │       ├── timeutil.py             # UTC 时间戳与带 Z ISO8601 格式化工具
 │       ├── data/                   # 离线教研数据包（wordbanks ×3 / grammar ×4 / spoken.json）
-│       ├── routers/                # 13 个路由模块（auth / scenes / sessions / reports /
+│       ├── routers/                # 14 个路由模块（auth / asr / scenes / sessions / reports /
 │       │                           #   exercises / hints / knowledge / study / words / account /
 │       │                           #   system / tts / admin）
-│       ├── services/               # 20 个领域服务（agent / llm / scoring / rules / srs / study /
+│       ├── services/               # 23 个领域服务（agent / llm / scoring / rules / srs / study /
 │       │                           #   dashboard / wordbank / library / pronunciation /
-│       │                           #   outbound / llm_config / storage …）
+│       │                           #   outbound / llm_config / storage / rag / safety / asr …）
 │       ├── tests/                  # unittest 回归（test_api.py / test_scales.py）
 │       └── static/                 # 运营后台单页（admin.html）与离线 Swagger UI 静态资源
 ├── frontend/                       # Vue 3 + Vite 前端工程
@@ -111,9 +112,10 @@
 │       ├── stores/                 # Pinia 状态仓库（auth / session / settings）
 │       ├── components/             # AppHeader / HintCard / StudyDashboard / TabBar / BrandLogo /
 │       │                           #   SceneIcon / CountUp / EmptyState / BackLink / MnemonicCard /
-│       │                           #   CoachPanel / AgentTrace / FinishProgress / McpConnect
+│       │                           #   CoachPanel / AgentTrace / FinishProgress / McpConnect /
+│       │                           #   AiStatusBadge / PhotoScenePanel / AiTransparency
 │       ├── utils/                  # 语音转写（speech.js）、音频包络（audio.js）、
-│       │                           #   录音存储（recordings.js）、密钥门禁（llmGate.js）
+│       │                           #   WAV 重采样编码（wav.js）、录音存储（recordings.js）、密钥门禁（llmGate.js）
 │       └── views/                  # 12 个页面视图（Login / Home / Practice / Report /
 │                                   #   History / Review / StudyHome / StudyScope / StudyLearn /
 │                                   #   Notes / Pronunciation / Settings）
@@ -363,7 +365,7 @@ backend\.venv\Scripts\python.exe -m evaluation.rag_eval
 
 ## 10. 接口规模
 
-后端按业务域划分为 13 个路由模块，共 **64 个 `/api` 操作**（63 个路由注册 + `GET /api/health`），落在 **57 条 `/api` 路径**上（2026-11-17 取自 `GET /openapi.json`），另有 3 个非 API 页面入口：`/` 与 `/admin`（管理控制台 HTML）、`/docs`（离线 Swagger UI）。
+后端按业务域划分为 14 个路由模块，共 **66 个 `/api` 操作**（65 个路由注册 + `GET /api/health`），落在 **59 条 `/api` 路径**上（2026-11-17 取自 `GET /openapi.json`），另有 3 个非 API 页面入口：`/` 与 `/admin`（管理控制台 HTML）、`/docs`（离线 Swagger UI）。
 
 | 模块 | 前缀 | 端点数 | 职责 |
 |---|---|---|---|
@@ -373,6 +375,7 @@ backend\.venv\Scripts\python.exe -m evaluation.rag_eval
 | `reports.py` | `/api` | 1 | 读取诊断报告 |
 | `exercises.py` | `/api` | 4 | 跟读重说队列与判分、最小对立对题组与判定 |
 | `hints.py` | `/api` | 1 | 句型提示 |
+| `asr.py` | `/api` | 1 | 服务端语音转写（DeepSeek / OpenAI 兼容，失败降级） |
 | `knowledge.py` | `/api/knowledge` | 2 | MCP / 外部客户端的知识检索与查词 |
 | `study.py` | `/api` | 21 | SM-2 学习闭环（今日队列/复习/建卡/词库/语法/口语）与随堂笔记 CRUD |
 | `words.py` | `/api/study/words` | 4 | 单词助手、导入、已学列表、造句检查 |

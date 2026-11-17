@@ -26,7 +26,15 @@ from ..schemas import (
 from ..security import get_current_user
 from ..timeutil import utc_iso
 from ..services.agent import coach, critic, plan_session, progress, should_finish
-from ..services.llm import StreamUnavailable, chat_reply, fallback_reply, open_chat_stream
+from ..services.llm import (
+    SafetyBlocked,
+    StreamUnavailable,
+    chat_reply,
+    fallback_reply,
+    open_chat_stream,
+    system_prompt,
+)
+from ..services.safety import check_input, check_reply
 from ..services.study import cards_from_fixes, create_cards
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
 from ..services.outbound import UnsafeBaseURL
@@ -50,6 +58,32 @@ KEY_REQUIRED_BODY = {
 
 # 单轮回答的长度上限：再长就说明不是一句话，前端也不好展示
 MAX_TRANSCRIPT_CHARS = 2000
+# 图片场景细节 / 目标词的上限（方案 §4.2）
+MAX_CONTEXT_CHARS = 300
+MAX_KEY_VOCAB = 8
+
+
+def _clean_context(value: str | None) -> str:
+    """图片场景细节：限长、去尖括号（防闭合 <context> 标签）、命中注入就丢掉。"""
+    text = (value or "").replace("<", "").replace(">", "").strip()[:MAX_CONTEXT_CHARS]
+    if text and check_input(text)["flag"]:
+        print("[safety] 图片场景细节命中注入检测，已丢弃", flush=True)
+        return ""
+    return text
+
+
+def _clean_key_vocab(items) -> list[dict]:
+    out: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        term = str(item.get("term") or "").strip()[:64]
+        if not term:
+            continue
+        out.append({"term": term, "zh": str(item.get("zh") or "").strip()[:40]})
+        if len(out) >= MAX_KEY_VOCAB:
+            break
+    return out
 
 
 def key_invalid_response() -> JSONResponse:
@@ -89,6 +123,13 @@ def create_session(
     # Planner：进对话前先定 3 个目标。模型不可用时退回场景清单，绝不让建会话失败。
     weakness = call_tool("recent_weakness", db=db, user_id=user.id) or []
     plan = plan_session(scene, difficulty, weakness, llm)
+    # 拍照生成的场景细节与目标词：只作为数据注入 prompt，不参与目标校验
+    context = _clean_context(body.context)
+    key_vocab = _clean_key_vocab(body.key_vocab)
+    if context:
+        plan = {**plan, "context": context}
+    if key_vocab:
+        plan = {**plan, "key_vocab": key_vocab}
     sess.plan_json = json.dumps(plan, ensure_ascii=False)
     db.add(Turn(session_id=sess.id, role="ai", content=scene["opening"]))
     db.commit()
@@ -109,6 +150,8 @@ class _TurnCtx:
     transcript: str
     input_mode: str
     audio_json: str
+    asr_source: str | None
+    safety_flag: str
     history: list
     user_count: int
     plan: dict
@@ -155,6 +198,12 @@ def _prepare_turn(
     input_mode = (body.input_mode or "").strip().lower()
     if input_mode not in ("voice", "typed"):
         input_mode = "voice" if body.audio else "typed"
+    # 转写来源：只有前端明确说 cloud / browser 才记，别的值当没有
+    asr_source = (body.asr_source or "").strip().lower()
+    if asr_source not in ("cloud", "browser"):
+        asr_source = None
+    # 注入检测只打标记，不拦截：学习者可能正在练这类句子
+    safety_flag = check_input(transcript)["flag"] or ""
 
     # 先把这一轮拼进内存里的 history，模型调用成功后才落库。
     # 否则 502 之后用户那句已经写进 turns，换好 key 重试会在对话里出现两遍。
@@ -173,13 +222,23 @@ def _prepare_turn(
         transcript=transcript,
         input_mode=input_mode,
         audio_json=audio_json,
+        asr_source=asr_source,
+        safety_flag=safety_flag,
         history=history,
         user_count=user_count,
         plan=plan,
     )
 
 
-def _save_turn_pair(db: OrmSession, ctx: _TurnCtx, reply: str) -> None:
+def _save_turn_pair(
+    db: OrmSession,
+    ctx: _TurnCtx,
+    reply: str,
+    *,
+    replaced: bool = False,
+    risk: bool = False,
+) -> None:
+    user_flag = ",".join(f for f in (ctx.safety_flag, "risk" if risk else "") if f)
     db.add(
         Turn(
             session_id=ctx.session_id,
@@ -187,19 +246,32 @@ def _save_turn_pair(db: OrmSession, ctx: _TurnCtx, reply: str) -> None:
             content=ctx.transcript,
             input_mode=ctx.input_mode,
             audio_json=ctx.audio_json,
+            asr_source=ctx.asr_source,
+            safety_flag=user_flag,
         )
     )
-    db.add(Turn(session_id=ctx.session_id, role="ai", content=reply, input_mode="voice"))
+    db.add(
+        Turn(
+            session_id=ctx.session_id,
+            role="ai",
+            content=reply,
+            input_mode="voice",
+            safety_flag="replaced" if replaced else "",
+        )
+    )
     db.commit()
 
 
-def _turn_out(ctx: _TurnCtx, reply: str, degraded: bool) -> TurnOut:
+def _turn_out(ctx: _TurnCtx, reply: str, degraded: bool, replaced: bool = False) -> TurnOut:
     return TurnOut(
         turn_index=ctx.user_count,
         ai_reply=reply,
         is_follow_up=True,
         should_finish=should_finish(ctx.plan, ctx.user_count),
         degraded=degraded,
+        replaced=replaced,
+        flagged=bool(ctx.safety_flag),
+        asr_source=ctx.asr_source,
         plan=SessionPlan(**ctx.plan),
     )
 
@@ -215,19 +287,30 @@ def add_turn(
     ctx = _prepare_turn(session_id, body, user, db, llm)
     if isinstance(ctx, JSONResponse):
         return ctx
+    replaced = False
+    risk = False
     try:
         reply, degraded = chat_reply(
             ctx.scene, ctx.difficulty, ctx.history, ctx.user_count, llm, ctx.plan
         )
+    except SafetyBlocked:
+        # 输入被平台拒绝：换成预设追问，这一轮不重试
+        reply, degraded = fallback_reply(ctx.scene["id"], ctx.user_count), False
+        replaced = risk = True
     except UserKeyInvalid:
         db.rollback()
         return key_invalid_response()
     except UnsafeBaseURL as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=exc.message)
+    if not degraded and not replaced:
+        ok, reason = check_reply(reply, system_prompt(ctx.scene, ctx.difficulty, ctx.plan))
+        if not ok:
+            print(f"[safety] 回复被替换：{reason}", flush=True)
+            reply, replaced = fallback_reply(ctx.scene["id"], ctx.user_count), True
 
-    _save_turn_pair(db, ctx, reply)
-    return _turn_out(ctx, reply, degraded)
+    _save_turn_pair(db, ctx, reply, replaced=replaced, risk=risk)
+    return _turn_out(ctx, reply, degraded, replaced)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -253,8 +336,13 @@ def add_turn_stream(
     ctx = _prepare_turn(session_id, body, user, db, llm)
     if isinstance(ctx, JSONResponse):
         return ctx
+    risk = False
     try:
         stream = open_chat_stream(ctx.scene, ctx.difficulty, ctx.history, llm, ctx.plan)
+    except SafetyBlocked:
+        # 输入被平台拒绝：不开流，等会儿用预设追问顶上
+        stream = None
+        risk = True
     except UserKeyInvalid:
         return key_invalid_response()
     except UnsafeBaseURL as exc:
@@ -265,7 +353,8 @@ def add_turn_stream(
 
     def events():
         parts: list[str] = []
-        broken = stream is None
+        broken = stream is None and not risk
+        refused = False
         if stream is not None:
             try:
                 for piece in stream:
@@ -275,11 +364,27 @@ def add_turn_stream(
                 print(f"[llm] 流式对话中途断开：{type(exc).__name__}", flush=True)
                 broken = True
             finally:
+                refused = bool(getattr(stream, "refused", False))
                 stream.close()
         reply = "".join(parts).strip()
+        replaced = False
         degraded = broken or not reply
-        if degraded:
+        if risk or refused:
+            # 平台拒绝生成：已经推出去的半句收不回来，done 里带替换文本让前端覆盖
+            print(f"[safety] 回复被替换：{'risk' if risk else 'refusal'}", flush=True)
             reply = fallback_reply(ctx.scene["id"], ctx.user_count)
+            replaced = True
+            degraded = False
+        elif degraded:
+            reply = fallback_reply(ctx.scene["id"], ctx.user_count)
+        else:
+            ok, reason = check_reply(
+                reply, system_prompt(ctx.scene, ctx.difficulty, ctx.plan)
+            )
+            if not ok:
+                print(f"[safety] 回复被替换：{reason}", flush=True)
+                reply = fallback_reply(ctx.scene["id"], ctx.user_count)
+                replaced = True
         # 请求级 db 会话不保证活到流结束，落库用独立会话
         with SessionLocal() as wdb:
             try:
@@ -287,13 +392,13 @@ def add_turn_stream(
                 if not sess or sess.status != "active":
                     yield _sse("error", {"detail": "会话已结束，这一轮没有记录"})
                     return
-                _save_turn_pair(wdb, ctx, reply)
+                _save_turn_pair(wdb, ctx, reply, replaced=replaced, risk=risk)
             except Exception as exc:  # noqa: BLE001
                 wdb.rollback()
                 print(f"[sessions] 流式对话落库失败：{type(exc).__name__}", flush=True)
                 yield _sse("error", {"detail": "保存这一轮失败，请重发"})
                 return
-        yield _sse("done", _turn_out(ctx, reply, degraded).model_dump())
+        yield _sse("done", _turn_out(ctx, reply, degraded, replaced).model_dump())
 
     return StreamingResponse(
         events(),
@@ -398,6 +503,8 @@ def _finish_report(session_id: int, user_id: int, llm: LLMConfig, emit=None) -> 
             )
         scoring_json = json.dumps(
             {
+                # 阶段 4「AI 透明度」要用：这份报告是哪个模型评的
+                "model": llm.model,
                 "dimensions": detail,
                 "note": data.get("scoring_note", ""),
                 # 作答模式与跨模式可比子分：打字/录音报告的综合分口径不同，
@@ -494,7 +601,8 @@ def finish_session_stream(
                 print(f"[sessions] 流式出报告失败：{type(exc).__name__}", flush=True)
                 emit("error", {"detail": "生成报告失败，请重试"})
             else:
-                emit("done", out.model_dump())
+                # done 统一带 replaced：出报告没有可替换的回复，这里恒为 False
+                emit("done", {**out.model_dump(), "replaced": False})
 
         threading.Thread(target=work, daemon=True).start()
         while True:
@@ -541,6 +649,7 @@ def get_session_detail(
                 role=t.role,
                 content=t.content,
                 input_mode=t.input_mode or "voice",
+                asr_source=t.asr_source,
                 created_at=utc_iso(t.created_at),
             )
             for t in sess.turns

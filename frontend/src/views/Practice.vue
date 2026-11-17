@@ -4,20 +4,24 @@ import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import { streamFinish, streamTurn } from '../api/stream'
+import AiStatusBadge from '../components/AiStatusBadge.vue'
 import AppHeader from '../components/AppHeader.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 import EmptyState from '../components/EmptyState.vue'
 import FinishProgress from '../components/FinishProgress.vue'
 import HintCard from '../components/HintCard.vue'
 import { useSessionStore } from '../stores/session'
+import { useSettingsStore } from '../stores/settings'
 import { startAudioCapture } from '../utils/audio'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
 import { loadRecordings, playRecording, saveRecording, stopRecording } from '../utils/recordings'
 import { createRecognizer, speakSmart, stopSpeaking } from '../utils/speech'
+import { blobToWav } from '../utils/wav'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
+const settings = useSettingsStore()
 
 const listening = ref(false)
 const interim = ref('')
@@ -87,6 +91,7 @@ function useFrame(f) {
   recognizedText.value = ''
   pendingAudio = null
   pendingBlob = null
+  pendingAsrSource = null
   framesOpen.value = false
   openManual()
 }
@@ -97,6 +102,9 @@ const recognizedText = ref('')
 let pendingAudio = null
 // 这句的录音文件（Promise<Blob|null>），发送成功后存到本地供回放
 let pendingBlob = null
+// 这一句的转写来源：cloud（服务端 ASR）/ browser（浏览器识别）；打字 / 改过文字为 null
+let pendingAsrSource = null
+const transcribing = ref(false)
 
 // 回放自己说过的话：同一时间只放一句
 const playingIndex = ref(-1)
@@ -242,6 +250,7 @@ function pickHint(hint, event) {
   recognizedText.value = ''
   pendingAudio = null
   pendingBlob = null
+  pendingAsrSource = null
   hintVisible.value = false
   nextTick(() => {
     const el = manualInput.value
@@ -557,7 +566,12 @@ async function loadSession(id) {
         id,
         { id: data.scene_id, name: data.scene_name },
         data.difficulty,
-        (data.turns || []).map((t) => ({ role: t.role, content: t.content, mode: t.input_mode })),
+        (data.turns || []).map((t) => ({
+          role: t.role,
+          content: t.content,
+          mode: t.input_mode,
+          asrSource: t.role === 'user' ? t.asr_source || null : null,
+        })),
         data.plan
       )
       shapeAchieved.value = [...planAchieved.value]
@@ -619,26 +633,53 @@ function stopTimer() {
   }
 }
 
+/** 把这一句的录音送服务端转写；没配 key、格式不支持或上游失败都返回空串，回退浏览器结果 */
+async function transcribeCloud(blobPromise) {
+  try {
+    const blob = blobPromise ? await blobPromise : null
+    if (!blob) return ''
+    const wav = await blobToWav(blob)
+    const form = new FormData()
+    form.append('file', new File([wav], 'answer.wav', { type: 'audio/wav' }))
+    const { data } = await api.post('/asr', form, { timeout: 30000 })
+    return String(data?.text || '').trim()
+  } catch {
+    return ''
+  }
+}
+
 async function startListening() {
   error.value = ''
   recognizer = createRecognizer(
     (text) => {
       interim.value = text
     },
-    () => {
+    async () => {
       listening.value = false
       stopTimer()
-      const text = interim.value.trim()
+      const browserText = interim.value.trim()
       pendingAudio = capturer ? capturer.stop() : null
       pendingBlob = capturer ? capturer.blob() : null
       capturer = null
       interim.value = ''
+      pendingAsrSource = null
+      let text = browserText
+      if (settings.configured && pendingBlob) {
+        transcribing.value = true
+        const cloud = await transcribeCloud(pendingBlob)
+        transcribing.value = false
+        if (cloud) {
+          text = cloud
+          pendingAsrSource = 'cloud'
+        }
+      }
       if (!text) {
         // 点了麦克风但没出声：必须给反馈，否则用户以为坏了
         error.value = '这次没听到声音，再点一次麦克风试试，或者改用「手动输入」。'
         nextTick(() => micBtn.value?.focus())
         return
       }
+      if (!pendingAsrSource && browserText) pendingAsrSource = 'browser'
       // 识别结果先落到输入条：说错、识别错都能改，按 Enter 才真的发出去
       recognizedText.value = text
       manualText.value = text
@@ -654,6 +695,7 @@ async function startListening() {
       }
       pendingAudio = null
       pendingBlob = null
+      pendingAsrSource = null
       interim.value = ''
       const msg = SPEECH_ERRORS[event?.error]
       if (msg) error.value = msg
@@ -687,7 +729,7 @@ function toggleListening() {
   else startListening()
 }
 
-async function send(text, audio = null, mode = 'typed', blobPromise = null) {
+async function send(text, audio = null, mode = 'typed', blobPromise = null, asrSource = null) {
   if (!text || sending.value) return false
   const gate = await llmReady()
   if (!gate.ok) {
@@ -697,7 +739,7 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
   sending.value = true
   error.value = ''
   hintVisible.value = false
-  const mine = { role: 'user', content: text, mode }
+  const mine = { role: 'user', content: text, mode, asrSource: mode === 'voice' ? asrSource : null }
   session.turns.push(mine)
   // 拿响应式代理（不是原对象），之后挂录音才会刷新界面
   const mineRef = session.turns[session.turns.length - 1]
@@ -708,7 +750,7 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
   try {
     const data = await streamTurn(
       session.sessionId,
-      { transcript: text, audio, input_mode: mode },
+      { transcript: text, audio, input_mode: mode, asr_source: asrSource },
       {
         signal: streamAbort.signal,
         onDelta(piece) {
@@ -724,12 +766,22 @@ async function send(text, audio = null, mode = 'typed', blobPromise = null) {
       }
     )
     // 以 done 里的整句为准：中途断流时服务端会换成预设追问
+    const aiStatus = data.replaced
+      ? 'replaced'
+      : data.degraded
+        ? 'degraded'
+        : data.flagged
+          ? 'flagged'
+          : null
     if (aiRef) {
       aiRef.content = data.ai_reply
       aiRef.streaming = false
+      aiRef.aiStatus = aiStatus
     } else {
-      session.turns.push({ role: 'ai', content: data.ai_reply })
+      session.turns.push({ role: 'ai', content: data.ai_reply, aiStatus })
     }
+    // 服务端最终采用的转写来源（用户改过文字时它不会带来源）
+    mineRef.asrSource = mode === 'voice' ? data.asr_source || null : null
     if (blobPromise) {
       const sid = session.sessionId
       blobPromise.then((blob) => {
@@ -808,6 +860,7 @@ function discardManual() {
   recognizedText.value = ''
   pendingAudio = null
   pendingBlob = null
+  pendingAsrSource = null
   manualOpen.value = false
   nextTick(() => manualBtn.value?.focus())
 }
@@ -819,12 +872,14 @@ async function submitManual() {
   const mode = audio ? 'voice' : 'typed'
   // 改过文字就不算这段录音的转写了，录音也不留（和语速指标同一条规则）
   const blobPromise = audio ? pendingBlob : null
-  const ok = await send(text, audio, mode, blobPromise)
+  const asrSource = audio ? pendingAsrSource : null
+  const ok = await send(text, audio, mode, blobPromise, asrSource)
   if (!ok) return
   manualText.value = ''
   recognizedText.value = ''
   pendingAudio = null
   pendingBlob = null
+  pendingAsrSource = null
   manualOpen.value = false
   nextTick(() => manualBtn.value?.focus())
 }
@@ -991,6 +1046,7 @@ async function finish() {
         class="animate-rise"
       >
         <span v-if="t.role === 'ai'" class="mb-0.5 hidden shrink-0 sm:inline-flex" aria-hidden="true"><BrandLogo :size="28" /></span>
+        <div class="flex min-w-0 max-w-[82%] flex-col" :class="t.role === 'ai' ? 'items-start' : 'items-end'">
         <div
           :data-role="t.role"
           :class="
@@ -998,7 +1054,7 @@ async function finish() {
               ? 'rounded-[1.25rem] rounded-bl-md bg-white text-ink ring-1 ring-line/80'
               : 'rounded-[1.25rem] rounded-br-md bg-brand-600 text-white'
           "
-          class="max-w-[82%] px-4 py-3 text-[15px] leading-7 shadow-soft"
+          class="max-w-full px-4 py-3 text-[15px] leading-7 shadow-soft"
         >
           <span
             v-if="t.role === 'user'"
@@ -1014,6 +1070,12 @@ async function finish() {
             </svg>
             {{ t.mode === 'voice' ? '录音' : '打字' }}
           </span>
+          <AiStatusBadge
+            v-if="t.role === 'user' && t.asrSource"
+            class="mb-1 ml-1.5"
+            :status="t.asrSource"
+            surface="bubble"
+          />
           <button
             v-if="t.role === 'user' && t.blob"
             class="mb-1 ml-1 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white/90 transition hover:bg-white/25"
@@ -1045,6 +1107,10 @@ async function finish() {
               <path d="M16 9.2a4 4 0 0 1 0 5.6" />
             </svg>
           </button>
+        </div>
+        <div v-if="t.role === 'ai' && t.aiStatus" class="mt-1">
+          <AiStatusBadge :status="t.aiStatus" surface="bubble" />
+        </div>
         </div>
       </div>
 
@@ -1223,7 +1289,7 @@ async function finish() {
               </svg>
             </button>
             <span class="h-4 text-[11px]" :class="listening ? 'font-medium text-ink-soft' : 'text-ink-mute'">
-              {{ listening ? `录音中 ${elapsedText}` : sending ? '正在回复…' : '点一下说话' }}
+              {{ listening ? `录音中 ${elapsedText}` : transcribing ? '云端转写中…' : sending ? '正在回复…' : '点一下说话' }}
             </span>
           </div>
 

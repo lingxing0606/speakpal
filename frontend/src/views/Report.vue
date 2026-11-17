@@ -3,6 +3,7 @@ import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref } fr
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
+import AiTransparency from '../components/AiTransparency.vue'
 import AppHeader from '../components/AppHeader.vue'
 import CoachPanel from '../components/CoachPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -1119,6 +1120,8 @@ function again() {
             </span>
           </span>
         </button>
+
+        <AiTransparency v-if="report.transparency" :transparency="report.transparency" />
 
         <div class="flex flex-col gap-2.5">
           <button class="sp-btn-primary w-full py-3" @click="nextPractice">按推荐再练一次</button>
