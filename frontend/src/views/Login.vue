@@ -114,8 +114,7 @@ async function submit() {
     <div class="relative flex min-h-screen items-center justify-center px-5 py-10">
       <div class="w-full max-w-[400px]">
         <div class="mb-8 flex flex-col items-center text-center lg:items-start lg:text-left">
-          <span class="lg:hidden"><BrandLogo :size="46" /></span>
-          <div class="sp-eyebrow mt-4 lg:mt-0">SpeakPal</div>
+          <span class="lg:hidden"><BrandLogo :size="46" wordmark /></span>
           <h1 class="mt-2 text-[28px] font-bold tracking-tight text-ink">{{ mode === 'login' ? '欢迎回来' : '创建账号' }}</h1>
           <p class="mt-1.5 text-sm text-ink-soft">{{ mode === 'login' ? '登录后继续你的口语练习' : '注册后即可开始练习，记录只属于你' }}</p>
         </div>
