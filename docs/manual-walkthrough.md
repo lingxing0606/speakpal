@@ -46,7 +46,7 @@
 
 ### 步骤 3 · 测试连接
 
-- `测试连接` → `测试中…` → `连通 · 模型 deepseek-chat · 123 ms`；坏 key → `密钥无效或被拒绝：…`。
+- `测试连接` → `测试中…` → `连通 · 模型 deepseek-flash · 123 ms`；坏 key → `密钥无效或被拒绝：…`。
 - 断言：`POST /api/config/llm/test`；失败 `error_kind=invalid_key`；页面与响应都不回显完整 key。
 - 截图位 S06。
 
