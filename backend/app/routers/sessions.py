@@ -1,5 +1,7 @@
 import json
+import queue
 import re
+import threading
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,7 +25,7 @@ from ..schemas import (
 )
 from ..security import get_current_user
 from ..timeutil import utc_iso
-from ..services.agent import critic, plan_session, progress, should_finish
+from ..services.agent import coach, critic, plan_session, progress, should_finish
 from ..services.llm import StreamUnavailable, chat_reply, fallback_reply, open_chat_stream
 from ..services.study import cards_from_fixes, create_cards
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
@@ -300,128 +302,212 @@ def add_turn_stream(
     )
 
 
+def _finish_report(session_id: int, user_id: int, llm: LLMConfig, emit=None) -> ReportOut:
+    """finish 与 finish/stream 共用：生成（或读取已有）报告。
+
+    `emit(event, data)` 只给 SSE 用：stage 报阶段进度、tool 报教练的工具调用；
+    普通 finish 不传，行为与以前一致。
+    """
+
+    def stage(name: str) -> None:
+        if emit is not None:
+            emit("stage", {"name": name})
+
+    with SessionLocal() as db:
+        sess = db.get(PracticeSession, session_id)
+        if not sess or sess.user_id != user_id:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        if sess.report:
+            # 带上 db：重复打开时也要返回这次自动建的学习卡，和第一次一致
+            return report_out(sess.report, db)
+        # finish 故意不拦「没有 key」：练习已经做完，key 中途被删也该给出一份报告，
+        # 走 not_configured 的示例报告（分数留空），而不是把用户卡在报告页外面。
+        # 拦只在 create_session / add_turn 两个“进入对话”的入口做。
+
+        scene = get_scene(sess.scene_id)
+        user_turns = [t for t in sess.turns if t.role == "user"]
+        if not user_turns:
+            # 一句没说就出报告，只会拿到一份“没有可展示的句子”的空报告，没有意义
+            raise HTTPException(status_code=400, detail="还没有任何回答，先至少聊一轮再生成报告")
+
+        voice_turns = [t for t in user_turns if (t.input_mode or "voice") == "voice"]
+        typed_turns = [t for t in user_turns if (t.input_mode or "voice") == "typed"]
+        typed_count = len(typed_turns)
+
+        history = [
+            {
+                "role": t.role,
+                "content": t.content,
+                "input_mode": t.input_mode or "voice",
+            }
+            for t in sess.turns
+        ]
+        user_text = " ".join(t.content for t in user_turns)
+        voice_text = " ".join(t.content for t in voice_turns)
+        audio_metas = [json.loads(t.audio_json or "{}") for t in voice_turns]
+
+        # 先算可测特征，再打分：规则子分要拿 features 才能和模型分融合。
+        # 词汇多样性、句长这类文本特征用全部发言；填充词、语速、停顿只从录音轮算——
+        # 打字里写的 like / well 不是口头填充，不能拉低流利度（否则和「打字不计流利度」矛盾）。
+        features = fluency_features(user_text)
+        if voice_turns:
+            voice_features = fluency_features(voice_text)
+            features["filler_count"] = voice_features.get("filler_count", 0)
+            features["filler_rate"] = voice_features.get("filler_rate", 0.0)
+            features.update(
+                speech_features([len(tokenize(t.content)) for t in voice_turns], audio_metas)
+            )
+            features["voice_word_count"] = len(tokenize(voice_text))
+        else:
+            # 纯打字：填充词/停顿是口头指标，不产出，报告页也就不会显示
+            for key in ("filler_count", "filler_rate", "pause_count", "mean_pause_sec"):
+                features.pop(key, None)
+        features["voice_turns"] = len(voice_turns)
+        features["typed_turns"] = typed_count
+        stage("scoring")
+        data = generate_report(scene, sess.difficulty, history, llm)
+        data = apply_to_report(
+            data,
+            features,
+            sess.scene_id,
+            user_text,
+            has_voice=bool(voice_turns),
+            has_typed=typed_count > 0,
+        )
+        detail = data.get("scoring_detail") or {}
+        # Critic：出报告前复盘目标达成度。示例报告不计分，也就只按关键词规则算，不调模型。
+        stage("critic")
+        plan = _plan_of(sess)
+        if plan.get("goals"):
+            if data.get("source") == "llm":
+                plan = critic(scene, plan, history, user_text, llm)
+            else:
+                plan = progress(sess.scene_id, plan, user_text)
+        # 诊断教练：只有真模型报告才跑；失败只回退 skipped，不影响报告
+        coach_data: dict = {}
+        if data.get("source") == "llm":
+            stage("coach")
+            coach_data = coach(
+                scene,
+                history,
+                data.get("sentence_fixes") or [],
+                db,
+                user_id,
+                llm,
+                on_step=(lambda entry: emit("tool", entry)) if emit is not None else None,
+            )
+        scoring_json = json.dumps(
+            {
+                "dimensions": detail,
+                "note": data.get("scoring_note", ""),
+                # 作答模式与跨模式可比子分：打字/录音报告的综合分口径不同，
+                # 报告页和历史曲线要用 comparable_*，不能拿 total_score 跨模式比。
+                "answer_mode": data.get("answer_mode"),
+                "comparable_score": data.get("comparable_score"),
+                "comparable_band": data.get("comparable_band"),
+            },
+            ensure_ascii=False,
+        )
+
+        stage("cards")
+        rep = Report(
+            session_id=sess.id,
+            total_score=data.get("total_score"),
+            band=data.get("band"),
+            cefr=data.get("cefr"),
+            source=data.get("source", "llm"),
+            mock_reason=data.get("mock_reason"),
+            answer_mode=data.get("answer_mode"),
+            comparable_band=data.get("comparable_band"),
+            dimensions_json=json.dumps(data.get("dimensions", {}), ensure_ascii=False),
+            bands_json=json.dumps(data.get("bands", {}), ensure_ascii=False),
+            fixes_json=json.dumps(data.get("sentence_fixes", []), ensure_ascii=False),
+            features_json=json.dumps(features, ensure_ascii=False),
+            scoring_json=scoring_json,
+            plan_json=json.dumps(plan, ensure_ascii=False),
+            coach_json=json.dumps(coach_data, ensure_ascii=False) if coach_data else "{}",
+            comment=data.get("comment", ""),
+        )
+        db.add(rep)
+        sess.status = "finished"
+        # §16.4：只给 spelling / stiffness 自动建卡（草稿、立即可复习），其余类型由用户手动加入
+        create_cards(db, user_id, sess.id, cards_from_fixes(data.get("sentence_fixes") or []))
+        try:
+            db.commit()
+        except IntegrityError:
+            # 两个 finish 并发：另一个请求已经写了报告（session_id 唯一），返回那一份
+            db.rollback()
+            existing = db.query(Report).filter(Report.session_id == sess.id).first()
+            if not existing:
+                raise
+            return report_out(existing, db)
+        db.refresh(rep)
+        return report_out(rep, db)
+
+
 @router.post("/sessions/{session_id}/finish", response_model=ReportOut)
 def finish_session(
+    session_id: int,
+    user: User = Depends(get_current_user),
+    llm: LLMConfig = Depends(get_llm_config),
+):
+    try:
+        return _finish_report(session_id, user.id, llm)
+    except UserKeyInvalid:
+        return key_invalid_response()
+
+
+@router.post("/sessions/{session_id}/finish/stream")
+def finish_session_stream(
     session_id: int,
     user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
     llm: LLMConfig = Depends(get_llm_config),
 ):
+    """和 /finish 相同的报告生成，但把阶段与教练工具调用实时推送。
+
+    事件：stage（scoring / critic / coach / cards）、tool（教练的一次工具调用）、
+    done（完整 ReportOut）、error。校验失败仍在开流前返回普通 HTTP 错误，
+    前端遇到 404/405 回落普通 /finish。
+    """
     sess = db.get(PracticeSession, session_id)
     if not sess or sess.user_id != user.id:
         raise HTTPException(status_code=404, detail="会话不存在")
-    if sess.report:
-        # 带上 db：重复打开时也要返回这次自动建的学习卡，和第一次一致
-        return report_out(sess.report, db)
-    # finish 故意不拦「没有 key」：练习已经做完，key 中途被删也该给出一份报告，
-    # 走 not_configured 的示例报告（分数留空），而不是把用户卡在报告页外面。
-    # 拦只在 create_session / add_turn 两个“进入对话”的入口做。
-
-    scene = get_scene(sess.scene_id)
-    user_turns = [t for t in sess.turns if t.role == "user"]
-    if not user_turns:
-        # 一句没说就出报告，只会拿到一份“没有可展示的句子”的空报告，没有意义
+    if not sess.report and not any(t.role == "user" for t in sess.turns):
         raise HTTPException(status_code=400, detail="还没有任何回答，先至少聊一轮再生成报告")
+    user_id = user.id
 
-    voice_turns = [t for t in user_turns if (t.input_mode or "voice") == "voice"]
-    typed_turns = [t for t in user_turns if (t.input_mode or "voice") == "typed"]
-    typed_count = len(typed_turns)
+    def events():
+        channel: queue.Queue = queue.Queue()
 
-    history = [
-        {
-            "role": t.role,
-            "content": t.content,
-            "input_mode": t.input_mode or "voice",
-        }
-        for t in sess.turns
-    ]
-    user_text = " ".join(t.content for t in user_turns)
-    voice_text = " ".join(t.content for t in voice_turns)
-    audio_metas = [json.loads(t.audio_json or "{}") for t in voice_turns]
+        def emit(event: str, data: dict) -> None:
+            channel.put((event, data))
 
-    # 先算可测特征，再打分：规则子分要拿 features 才能和模型分融合。
-    # 词汇多样性、句长这类文本特征用全部发言；填充词、语速、停顿只从录音轮算——
-    # 打字里写的 like / well 不是口头填充，不能拉低流利度（否则和「打字不计流利度」矛盾）。
-    features = fluency_features(user_text)
-    if voice_turns:
-        voice_features = fluency_features(voice_text)
-        features["filler_count"] = voice_features.get("filler_count", 0)
-        features["filler_rate"] = voice_features.get("filler_rate", 0.0)
-        features.update(
-            speech_features([len(tokenize(t.content)) for t in voice_turns], audio_metas)
-        )
-        features["voice_word_count"] = len(tokenize(voice_text))
-    else:
-        # 纯打字：填充词/停顿是口头指标，不产出，报告页也就不会显示
-        for key in ("filler_count", "filler_rate", "pause_count", "mean_pause_sec"):
-            features.pop(key, None)
-    features["voice_turns"] = len(voice_turns)
-    features["typed_turns"] = typed_count
-    try:
-        data = generate_report(scene, sess.difficulty, history, llm)
-    except UserKeyInvalid:
-        return key_invalid_response()
-    data = apply_to_report(
-        data,
-        features,
-        sess.scene_id,
-        user_text,
-        has_voice=bool(voice_turns),
-        has_typed=typed_count > 0,
+        def work() -> None:
+            try:
+                out = _finish_report(session_id, user_id, llm, emit)
+            except UserKeyInvalid:
+                emit("error", dict(KEY_INVALID_BODY))
+            except HTTPException as exc:
+                emit("error", {"detail": exc.detail})
+            except Exception as exc:  # noqa: BLE001 - 出错也要让前端拿到明确事件
+                print(f"[sessions] 流式出报告失败：{type(exc).__name__}", flush=True)
+                emit("error", {"detail": "生成报告失败，请重试"})
+            else:
+                emit("done", out.model_dump())
+
+        threading.Thread(target=work, daemon=True).start()
+        while True:
+            event, payload = channel.get()
+            yield _sse(event, payload)
+            if event in ("done", "error"):
+                return
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-    detail = data.get("scoring_detail") or {}
-    # Critic：出报告前复盘目标达成度。示例报告不计分，也就只按关键词规则算，不调模型。
-    plan = _plan_of(sess)
-    if plan.get("goals"):
-        if data.get("source") == "llm":
-            plan = critic(scene, plan, history, user_text, llm)
-        else:
-            plan = progress(sess.scene_id, plan, user_text)
-    scoring_json = json.dumps(
-        {
-            "dimensions": detail,
-            "note": data.get("scoring_note", ""),
-            # 作答模式与跨模式可比子分：打字/录音报告的综合分口径不同，
-            # 报告页和历史曲线要用 comparable_*，不能拿 total_score 跨模式比。
-            "answer_mode": data.get("answer_mode"),
-            "comparable_score": data.get("comparable_score"),
-            "comparable_band": data.get("comparable_band"),
-        },
-        ensure_ascii=False,
-    )
-
-    rep = Report(
-        session_id=sess.id,
-        total_score=data.get("total_score"),
-        band=data.get("band"),
-        cefr=data.get("cefr"),
-        source=data.get("source", "llm"),
-        mock_reason=data.get("mock_reason"),
-        answer_mode=data.get("answer_mode"),
-        comparable_band=data.get("comparable_band"),
-        dimensions_json=json.dumps(data.get("dimensions", {}), ensure_ascii=False),
-        bands_json=json.dumps(data.get("bands", {}), ensure_ascii=False),
-        fixes_json=json.dumps(data.get("sentence_fixes", []), ensure_ascii=False),
-        features_json=json.dumps(features, ensure_ascii=False),
-        scoring_json=scoring_json,
-        plan_json=json.dumps(plan, ensure_ascii=False),
-        comment=data.get("comment", ""),
-    )
-    db.add(rep)
-    sess.status = "finished"
-    # §16.4：只给 spelling / stiffness 自动建卡（草稿、立即可复习），其余类型由用户手动加入
-    create_cards(db, user.id, sess.id, cards_from_fixes(data.get("sentence_fixes") or []))
-    try:
-        db.commit()
-    except IntegrityError:
-        # 两个 finish 并发：另一个请求已经写了报告（session_id 唯一），返回那一份
-        db.rollback()
-        existing = db.query(Report).filter(Report.session_id == sess.id).first()
-        if not existing:
-            raise
-        return report_out(existing, db)
-    db.refresh(rep)
-    return report_out(rep, db)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailOut)

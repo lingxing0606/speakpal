@@ -1,8 +1,11 @@
-"""Agent 编排层的工具注册表：编排代码按名字调用的只读 Python 函数。
+"""Agent 编排层的工具注册表：只读 Python 函数 + OpenAI function calling schema。
 
-本轮不要求模型自己发起调用（不走 OpenAI function calling），所以这里只做三件事：
-「名字 → 函数 + 必填参数校验 + 一行审计日志」。所有工具都只读：不写库、不发网络请求。
-工具失败不抛给调用方——Agent 的每一段都不该因为「查不到一个词」而中断。
+两种用法：
+- 编排代码按名字直接调（Planner / Critic），参数由代码保证；
+- 出报告时把 `openai_tools()` 交给模型，让模型自己决定调哪些。模型传来的参数
+  在这里按 schema 校验：多余参数丢弃，缺必填 / 类型不对返回 {"error": ...} 给
+  模型自己修正，不抛异常。
+所有工具都只读：不写库、不发网络请求；工具执行失败也不抛给调用方。
 """
 
 from __future__ import annotations
@@ -77,25 +80,135 @@ def _grammar_card(query: str) -> dict | None:
 
 
 TOOLS = {
-    "scene_checklist": {"func": _scene_checklist, "schema": {"scene_id": str}},
-    "get_frames": {"func": _get_frames, "schema": {"scene_id": str}},
-    "recent_weakness": {"func": _recent_weakness, "schema": {"db": object, "user_id": int}},
-    "lookup_word": {"func": _lookup_word, "schema": {"term": str}},
-    "grammar_card": {"func": _grammar_card, "schema": {"query": str}},
+    "scene_checklist": {
+        "func": _scene_checklist,
+        "schema": {"scene_id": str},
+        "description": "List the communication goals (checklist labels) for a practice scene.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "scene_id": {
+                    "type": "string",
+                    "description": "Scene id, for example cafe_order or job_interview.",
+                }
+            },
+            "required": ["scene_id"],
+        },
+    },
+    "get_frames": {
+        "func": _get_frames,
+        "schema": {"scene_id": str},
+        "description": "Vetted English sentence frames for a scene, with Chinese hints.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "scene_id": {
+                    "type": "string",
+                    "description": "Scene id, for example cafe_order or job_interview.",
+                }
+            },
+            "required": ["scene_id"],
+        },
+    },
+    "recent_weakness": {
+        "func": _recent_weakness,
+        "schema": {"db": object, "user_id": int},
+        "description": (
+            "The learner's recent error reasons from scored reports. "
+            "The server injects the learner identity; call it with no arguments."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "lookup_word": {
+        "func": _lookup_word,
+        "schema": {"term": str},
+        "description": "Look up a word in the built-in vocabulary bank.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "term": {
+                    "type": "string",
+                    "description": "One English word, for example serendipity.",
+                }
+            },
+            "required": ["term"],
+        },
+    },
+    "grammar_card": {
+        "func": _grammar_card,
+        "schema": {"query": str},
+        "description": "Find one grammar card by keyword (point, rule or example sentence).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Keyword or rule name, for example present perfect.",
+                }
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 
+def openai_tools(names: list[str]) -> list[dict]:
+    """把指定工具转成 OpenAI function calling 的 tools 参数；未知名字跳过。"""
+    out = []
+    for name in names:
+        tool = TOOLS.get(name)
+        if not tool:
+            continue
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": tool["description"],
+                    "parameters": tool["parameters"],
+                },
+            }
+        )
+    return out
+
+
 def call(name: str, **kwargs):
-    """按名字调工具：校验必填参数、隔离异常、打印一行审计日志。"""
+    """按名字调工具：按 schema 校验参数、隔离异常、打印一行审计日志。
+
+    参数不合法时返回 {"error": ...}（给模型自己修正），不抛；
+    工具执行异常仍返回 None，调用方的 `or []` 兜底照旧。
+    """
     tool = TOOLS.get(name)
     if not tool:
-        raise KeyError(f"未知工具：{name}")
-    missing = [key for key in tool["schema"] if key not in kwargs]
+        return {"error": f"未知工具：{name}"}
+    args = {}
+    invalid = []
+    for key, expected in tool["schema"].items():
+        if key not in kwargs:
+            continue
+        value = kwargs[key]
+        # bool 是 int 的子类：user_id=True 这类值不能当整数放过去
+        if isinstance(value, bool) and expected is not bool:
+            invalid.append(key)
+            continue
+        if not isinstance(value, expected):
+            invalid.append(key)
+            continue
+        args[key] = value
+    missing = [key for key in tool["schema"] if key not in args]
     if missing:
-        raise ValueError(f"工具 {name} 缺少参数：{', '.join(missing)}")
+        detail = f"工具 {name} 缺少参数：{', '.join(missing)}"
+        if invalid:
+            detail += f"（类型不对：{', '.join(invalid)}）"
+        return {"error": detail}
+    # 多余参数在 args 组装时已经丢掉
     started = time.perf_counter()
     try:
-        result = tool["func"](**kwargs)
+        result = tool["func"](**args)
     except Exception as exc:  # noqa: BLE001 - 工具失败只降级，不冒泡
         print(f"[tools] {name} 失败：{type(exc).__name__}", flush=True)
         return None

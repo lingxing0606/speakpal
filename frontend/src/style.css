@@ -123,6 +123,50 @@
     animation: sp-shimmer 1.6s linear infinite;
   }
 
+  /* 出报告的流式阶段：一行四步，窄屏自动换行 */
+  .sp-stage {
+    @apply flex flex-wrap items-center gap-x-2 gap-y-1.5;
+  }
+
+  /* 教练诊断时间线：左侧连线串起步骤圆点 */
+  .sp-timeline {
+    @apply relative m-0 list-none space-y-4 p-0;
+  }
+
+  .sp-timeline > li::before {
+    content: '';
+    position: absolute;
+    left: 9px;
+    top: 24px;
+    bottom: -16px;
+    width: 2px;
+    background-color: theme('colors.line');
+  }
+
+  .sp-timeline > li:last-child::before {
+    content: none;
+  }
+
+  /* 证据原文：点 chip 就地展开 220ms，内容内部滚动 */
+  .sp-evidence {
+    @apply mt-2 overflow-hidden rounded-xl bg-paper ring-1 ring-line/70;
+    max-height: 0;
+    opacity: 0;
+    transition: max-height 220ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 180ms ease-out;
+  }
+
+  .sp-evidence.is-open {
+    max-height: 16rem;
+    overflow-y: auto;
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sp-evidence {
+      transition: none;
+    }
+  }
+
   /* 分段切换（学习页板块、语速） */
   .sp-segment {
     @apply inline-flex items-center gap-1 rounded-full bg-sand-50 p-1 ring-1 ring-line/80;

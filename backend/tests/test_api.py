@@ -39,6 +39,7 @@ import httpx  # noqa: E402
 from app import security  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services import hints as hints_service  # noqa: E402
+from app.services import agent as agent_service  # noqa: E402
 from app.services import llm as llm_service  # noqa: E402
 from app.services import llm_config, outbound  # noqa: E402
 from app.services.rules import TASK_CHECKS  # noqa: E402
@@ -453,6 +454,36 @@ class _CaptureClient(_FakeClient):
     def post(self, *a, **k):
         type(self).last_json = k.get("json")
         return super().post(*a, **k)
+
+
+class _ToolCallClient(_FakeClient):
+    """按 messages 依次回放 assistant message，用来测教练的工具循环。"""
+
+    messages = ()
+    calls = 0
+    requests = []
+
+    def post(self, *a, **k):
+        type(self).requests.append(k.get("json") or {})
+        index = min(type(self).calls, len(type(self).messages) - 1)
+        type(self).calls += 1
+        return _FakeResp({"choices": [{"message": type(self).messages[index]}]})
+
+    @classmethod
+    def with_messages(cls, messages):
+        return type(
+            "Coach",
+            (cls,),
+            {"messages": tuple(messages), "calls": 0, "requests": []},
+        )
+
+
+def _tool_call(call_id, name, arguments):
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": _json.dumps(arguments, ensure_ascii=False)},
+    }
 
 
 class _TimeoutClient:
@@ -1846,6 +1877,287 @@ class NoteLinkApiTests(NoteLinkBase):
         self.assertGreaterEqual(link["reps"], 1)
         self.assertIsNotNone(link["last_reviewed_at"])
         self.assertTrue(link["due_at"])
+
+
+class ToolSchemaTests(unittest.TestCase):
+    """阶段 1：工具 schema 与参数校验（模型传来的参数不会抛异常）。"""
+
+    def test_openai_tools_carry_description_and_parameters(self):
+        from app.services.tools import openai_tools
+
+        tools = openai_tools(["lookup_word", "recent_weakness", "no_such_tool"])
+        self.assertEqual([t["function"]["name"] for t in tools], ["lookup_word", "recent_weakness"])
+        self.assertTrue(tools[0]["function"]["description"])
+        self.assertEqual(tools[0]["function"]["parameters"]["type"], "object")
+        self.assertEqual(tools[1]["function"]["parameters"]["properties"], {})
+        self.assertEqual(tools[1]["function"]["parameters"]["required"], [])
+
+    def test_call_drops_extra_args_and_returns_error_instead_of_raising(self):
+        from app.services.tools import call
+
+        hit = call("lookup_word", term="abandon", user_id=99)
+        self.assertEqual(hit["term"], "abandon")
+        missing = call("lookup_word")
+        self.assertIn("error", missing)
+        self.assertIn("term", missing["error"])
+        self.assertIn("error", call("lookup_word", term=123))
+        self.assertIn("error", call("no_such_tool"))
+        self.assertIn("error", call("recent_weakness"))
+
+
+class CoachAgentTests(unittest.TestCase):
+    """阶段 1：诊断教练的工具循环、证据校验与降级。"""
+
+    def setUp(self):
+        self._dns = mock.patch.object(outbound.socket, "getaddrinfo", _public_dns)
+        self._dns.start()
+        self.addCleanup(self._dns.stop)
+        from app.db import SessionLocal
+
+        self.db = SessionLocal()
+        self.addCleanup(self.db.close)
+
+    @staticmethod
+    def _cfg():
+        return llm_config.LLMConfig(
+            api_key="sk-test",
+            base_url="https://api.example.com/v1",
+            model="deepseek-flash",
+            key_source="user",
+        )
+
+    @staticmethod
+    def _scene():
+        from app.services.scenes import get_scene
+
+        return get_scene("cafe_order")
+
+    @staticmethod
+    def _history():
+        return [
+            {"role": "ai", "content": "Welcome, what can I get you?"},
+            {"role": "user", "content": "I want a coffee."},
+        ]
+
+    @staticmethod
+    def _fixes():
+        return [
+            {
+                "original": "I want a coffee.",
+                "better": "I'd like a coffee, please.",
+                "reason": "语气太直接",
+                "error_type": "stiffness",
+            }
+        ]
+
+    def _run(self, client, user_id=1, on_step=None):
+        with mock.patch("app.services.llm.httpx.Client", client):
+            return agent_service.coach(
+                self._scene(),
+                self._history(),
+                self._fixes(),
+                self.db,
+                user_id,
+                self._cfg(),
+                on_step=on_step,
+            )
+
+    @staticmethod
+    def _final(evidence_ref="abandon", fix_index=0):
+        return _json.dumps(
+            {
+                "priorities": [
+                    {
+                        "fix_index": fix_index,
+                        "title": "先把语气改礼貌",
+                        "why": "I want 太直接。",
+                        "evidence": [{"tool": "lookup_word", "ref": evidence_ref}],
+                        "next_step": "用 I'd like 再造一句。",
+                    }
+                ],
+                "summary": "先把语气改礼貌。",
+            },
+            ensure_ascii=False,
+        )
+
+    def test_coach_calls_tool_then_returns_grounded_priorities(self):
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})],
+                },
+                {"content": self._final()},
+            ]
+        )
+        steps = []
+        result = self._run(client, on_step=steps.append)
+        self.assertEqual(result["source"], "llm")
+        self.assertEqual(len(result["trace"]), 1)
+        self.assertEqual(result["trace"][0]["tool"], "lookup_word")
+        self.assertTrue(result["trace"][0]["ok"])
+        self.assertEqual(steps, result["trace"], "on_step 与最终 trace 一致")
+        self.assertEqual(len(result["priorities"]), 1)
+        self.assertTrue(result["priorities"][0]["grounded"])
+        second = client.requests[1]["messages"]
+        self.assertEqual(second[-1]["role"], "tool")
+        self.assertEqual(second[-1]["tool_call_id"], "call_1")
+        self.assertIn("abandon", second[-1]["content"])
+        self.assertEqual(
+            client.requests[0]["tools"][0]["function"]["parameters"]["type"], "object"
+        )
+
+    def test_hallucinated_evidence_is_dropped(self):
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})],
+                },
+                {"content": self._final(evidence_ref="not-in-any-result")},
+            ]
+        )
+        result = self._run(client)
+        self.assertEqual(result["source"], "llm")
+        priority = result["priorities"][0]
+        self.assertEqual(priority["evidence"], [])
+        self.assertFalse(priority["grounded"])
+
+    def test_out_of_range_fix_index_is_dropped(self):
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})],
+                },
+                {"content": self._final(fix_index=5)},
+            ]
+        )
+        result = self._run(client)
+        self.assertEqual(result["priorities"], [])
+
+    def test_model_rejecting_tools_skips_without_raising(self):
+        request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
+        error = httpx.HTTPStatusError(
+            "400", request=request, response=httpx.Response(400, request=request)
+        )
+        with mock.patch("app.services.agent.chat", side_effect=error):
+            result = agent_service.coach(
+                self._scene(), self._history(), self._fixes(), self.db, 1, self._cfg()
+            )
+        self.assertEqual(result["source"], "skipped")
+        self.assertEqual(result["priorities"], [])
+        self.assertEqual(result["trace"], [])
+
+    def test_model_supplied_identity_is_ignored(self):
+        seen = {}
+
+        def fake_call(name, **kwargs):
+            seen.update(kwargs)
+            return ["grammar: 时态用错"]
+
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "tool_calls": [_tool_call("call_1", "recent_weakness", {"user_id": 999})],
+                },
+                {"content": _json.dumps({"priorities": [], "summary": ""}, ensure_ascii=False)},
+            ]
+        )
+        with mock.patch("app.services.agent.call_tool", fake_call):
+            result = self._run(client, user_id=42)
+        self.assertEqual(seen["user_id"], 42, "模型传的 user_id 必须被忽略")
+        self.assertIs(seen["db"], self.db)
+        self.assertEqual(len(result["trace"]), 1)
+
+
+class CoachReportTests(SessionTests):
+    """阶段 1：教练失败不影响报告，coach 结果落库并进 ReportOut。"""
+
+    def _finish_with_coach_error(self, sid):
+        report_raw = {**_json.loads(_REPORT_JSON), "source": "llm"}
+        request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
+        error = httpx.HTTPStatusError(
+            "400", request=request, response=httpx.Response(400, request=request)
+        )
+        with mock.patch(
+            "app.routers.sessions.generate_report", return_value=report_raw
+        ), mock.patch("app.services.agent._request_json", return_value=None), mock.patch(
+            "app.services.agent.chat", side_effect=error
+        ):
+            return self.client.post(f"/api/sessions/{sid}/finish", headers=self.headers)
+
+    def test_report_still_generated_when_coach_fails(self):
+        sid = self._start()
+        self._turn(sid)
+        r = self._finish_with_coach_error(sid)
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["source"], "llm")
+        self.assertEqual(body["coach"]["source"], "skipped")
+        self.assertEqual(body["coach"]["priorities"], [])
+
+        again = self.client.get(f"/api/sessions/{sid}/report", headers=self.headers)
+        self.assertEqual(again.json()["coach"]["source"], "skipped")
+
+
+class FinishStreamTests(SessionTests):
+    """阶段 1：finish/stream 按 stage → tool → done 推送。"""
+
+    def test_finish_stream_sends_stages_tool_and_done(self):
+        sid = self._start()
+        self._turn(sid)
+        final = _json.dumps(
+            {
+                "priorities": [
+                    {
+                        "fix_index": 0,
+                        "title": "先把语气改礼貌",
+                        "why": "太直接。",
+                        "evidence": [{"tool": "lookup_word", "ref": "abandon"}],
+                        "next_step": "再造一句。",
+                    }
+                ],
+                "summary": "先把语气改礼貌。",
+            },
+            ensure_ascii=False,
+        )
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})],
+                },
+                {"content": final},
+            ]
+        )
+        with mock.patch(
+            "app.routers.sessions.generate_report",
+            return_value={**_json.loads(_REPORT_JSON), "source": "llm"},
+        ), mock.patch("app.services.agent._request_json", return_value=None), mock.patch(
+            "app.services.llm.httpx.Client", client
+        ):
+            resp = self.client.post(
+                f"/api/sessions/{sid}/finish/stream", headers=self.headers
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        events = _parse_sse(resp.text)
+        names = [name for name, _data in events]
+        self.assertEqual(names[-1], "done", resp.text)
+        self.assertIn("tool", names)
+        stages = [data["name"] for name, data in events if name == "stage"]
+        self.assertEqual(stages, ["scoring", "critic", "coach", "cards"])
+        tool_event = next(data for name, data in events if name == "tool")
+        self.assertEqual(tool_event["tool"], "lookup_word")
+        done = events[-1][1]
+        self.assertEqual(done["source"], "llm")
+        self.assertEqual(done["coach"]["source"], "llm")
+        self.assertTrue(done["report_id"])
+        self.assertEqual(
+            self.client.get(f"/api/sessions/{sid}/report", headers=self.headers).status_code,
+            200,
+        )
 
 
 class LlmUnifiedCallTests(unittest.TestCase):

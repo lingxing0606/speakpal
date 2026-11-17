@@ -177,6 +177,8 @@ class ReportOut(BaseModel):
     scoring_detail: Dict[str, Any] = {}
     # 本轮目标达成（老报告为空 plan，报告页据此隐藏这一块）
     plan: SessionPlan = SessionPlan()
+    # 诊断教练结果（阶段 1）；旧报告 / 示例报告为 None，整块不渲染
+    coach: Dict[str, Any] | None = None
     # 多量表派生视图（雅思/CEFR/托福/多邻国/四六级），见 evaluation/scales.py；
     # 不落库：有 band 就现算，旧报告自动获得
     scales: Dict[str, Any] = {}

@@ -16,6 +16,13 @@ def report_out(rep: Report, db=None) -> ReportOut:
     source = rep.source or "llm"
     bands = json.loads(rep.bands_json or "{}")
     scales = scales_for_band(rep.band, bands)
+    # 教练诊断：旧报告 / 示例报告没有这一段，前端整块不渲染
+    try:
+        coach = json.loads(rep.coach_json or "{}")
+    except (TypeError, ValueError):
+        coach = {}
+    if not isinstance(coach, dict) or not coach:
+        coach = None
     if source == "mock":
         # 示例报告没有分数，不能按「低于 A2」解释
         scales["items"] = None
@@ -46,6 +53,7 @@ def report_out(rep: Report, db=None) -> ReportOut:
         features=json.loads(rep.features_json or "{}"),
         scoring_detail=json.loads(rep.scoring_json or "{}"),
         plan=json.loads(rep.plan_json or "{}"),
+        coach=coach,
         scales=scales,
         note=MOCK_NOTE if source == "mock" else DEFAULT_NOTE,
     )

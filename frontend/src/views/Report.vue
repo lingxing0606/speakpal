@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
+import CoachPanel from '../components/CoachPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
@@ -500,6 +501,33 @@ function onTabKeydown(event, i) {
   const next = (i + delta + TABS.value.length) % TABS.value.length
   setTab(TABS.value[next].key)
   nextTick(() => tabEls[next]?.focus())
+}
+
+// 教练建议「看这句」：切到逐句纠错，并把目标句滚到视口中间、闪一次
+const fixEls = []
+const highlightFix = ref(-1)
+
+function openFix(index) {
+  const target = Number(index)
+  if (!Number.isInteger(target) || target < 0) return
+  setTab('fixes')
+  const scroll = () => {
+    const el = fixEls[target]
+    if (!el) return false
+    el.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' })
+    highlightFix.value = target
+    setTimeout(() => {
+      if (highlightFix.value === target) highlightFix.value = -1
+    }, 450)
+    return true
+  }
+  if (scroll()) return
+  // 页签 out-in 切换期间目标列表还没挂载：等它出现再滚
+  let tries = 0
+  const timer = setInterval(() => {
+    tries += 1
+    if (scroll() || tries > 20) clearInterval(timer)
+  }, 60)
 }
 
 // mode="out-in"：旧页先退（160ms），新页再进（240ms，延迟 80ms）
@@ -1012,6 +1040,7 @@ function again() {
           </aside>
 
           <div class="min-w-0 space-y-5 lg:col-span-8 lg:col-start-1 lg:row-start-1">
+        <CoachPanel v-if="report.coach" :coach="report.coach" @open-fix="openFix" />
         <div v-if="reportGoals.length" class="sp-card p-6">
           <div class="flex items-baseline justify-between gap-2">
             <div class="sp-section-title">本轮目标达成</div>
@@ -1081,8 +1110,10 @@ function again() {
           <div
             v-for="(f, i) in (report.sentence_fixes || [])"
             :key="i"
+            :ref="(el) => (fixEls[i] = el)"
             :style="{ '--i': Math.min(i, 10) }"
             class="sp-reveal mt-3 rounded-2xl bg-paper p-4 text-sm ring-1 ring-line/70 transition duration-200 hover:ring-brand-200"
+            :class="highlightFix === i ? '!ring-2 !ring-brand-200' : ''"
           >
             <div class="flex items-start gap-2">
               <span class="mt-0.5 text-[11px] font-medium text-ink-mute">原句</span>

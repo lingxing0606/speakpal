@@ -30,6 +30,27 @@ function httpError(status, data) {
   return err
 }
 
+/** 读取 SSE 响应；onEvent 返回非 undefined 时直接返回该值结束读取。 */
+async function readSse(resp, onEvent) {
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+    let cut
+    while ((cut = buffer.indexOf('\n\n')) >= 0) {
+      const ev = parseEvent(buffer.slice(0, cut))
+      buffer = buffer.slice(cut + 2)
+      if (!ev) continue
+      const result = onEvent(ev)
+      if (result !== undefined) return result
+    }
+  }
+  return undefined
+}
+
 /**
  * 提交一轮作答并流式接收回复。onDelta(text) 每收到一段调用一次。
  * 成功返回与 /turn 相同的 TurnOut；失败抛错（这一轮服务端没有记录）。
@@ -62,23 +83,66 @@ export async function streamTurn(sessionId, payload, { onDelta, signal } = {}) {
     throw httpError(resp.status, data)
   }
 
-  const reader = resp.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
-    let cut
-    while ((cut = buffer.indexOf('\n\n')) >= 0) {
-      const ev = parseEvent(buffer.slice(0, cut))
-      buffer = buffer.slice(cut + 2)
-      if (!ev) continue
-      if (ev.event === 'delta') onDelta?.(ev.data.text || '')
-      else if (ev.event === 'done') return ev.data
-      else if (ev.event === 'error') throw httpError(500, ev.data)
+  const result = await readSse(resp, (ev) => {
+    if (ev.event === 'delta') {
+      onDelta?.(ev.data.text || '')
+      return undefined
     }
-  }
+    if (ev.event === 'done') return ev.data
+    if (ev.event === 'error') throw httpError(500, ev.data)
+    return undefined
+  })
+  if (result !== undefined) return result
   // 连接断在 done 之前：服务端整句收完才落库，这一轮按没发出去处理
   throw httpError(0, { detail: '连接中断，这句没有记录，请重发' })
+}
+
+/**
+ * 结束练习并流式接收报告生成进度。
+ * onStage({name}) 每进入一个阶段调用一次；onTool(traceEntry) 每有一次工具调用调用一次。
+ * 成功返回 { report, fallback }；404/405 回落普通 finish（fallback=true），401 交给 axios 拦截器登出。
+ */
+export async function streamFinish(sessionId, { onStage, onTool, onFallback, signal } = {}) {
+  const auth = useAuthStore()
+  const settings = useSettingsStore()
+  const headers = { Accept: 'text/event-stream', ...settings.headers() }
+  if (auth.token) headers.Authorization = `Bearer ${auth.token}`
+
+  const resp = await fetch(`/api/sessions/${sessionId}/finish/stream`, {
+    method: 'POST',
+    headers,
+    signal,
+  })
+
+  if (!resp.ok) {
+    if (FALLBACK_STATUS.has(resp.status)) {
+      // 旧后端没有流式接口 / 登录失效：先告诉界面切成不确定态，再走普通 finish
+      onFallback?.()
+      const { data } = await api.post(`/sessions/${sessionId}/finish`)
+      return { report: data, fallback: true }
+    }
+    let data = null
+    try {
+      data = await resp.json()
+    } catch {
+      data = null
+    }
+    throw httpError(resp.status, data)
+  }
+
+  const result = await readSse(resp, (ev) => {
+    if (ev.event === 'stage') {
+      onStage?.(ev.data)
+      return undefined
+    }
+    if (ev.event === 'tool') {
+      onTool?.(ev.data)
+      return undefined
+    }
+    if (ev.event === 'done') return { report: ev.data, fallback: false }
+    if (ev.event === 'error') throw httpError(500, ev.data)
+    return undefined
+  })
+  if (result !== undefined) return result
+  throw httpError(0, { detail: '连接中断，报告可能还没生成完，请重试' })
 }

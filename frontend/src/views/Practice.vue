@@ -3,10 +3,11 @@ import { computed, markRaw, nextTick, onMounted, onUnmounted, ref, watch } from 
 import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
-import { streamTurn } from '../api/stream'
+import { streamFinish, streamTurn } from '../api/stream'
 import AppHeader from '../components/AppHeader.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 import EmptyState from '../components/EmptyState.vue'
+import FinishProgress from '../components/FinishProgress.vue'
 import HintCard from '../components/HintCard.vue'
 import { useSessionStore } from '../stores/session'
 import { startAudioCapture } from '../utils/audio'
@@ -26,6 +27,12 @@ const streaming = ref(false)
 let streamAbort = null
 const finishing = ref(false)
 const confirmingFinish = ref(false)
+// 出报告的流式进度：阶段、教练工具调用、开始时间与失败信息
+const finishStage = ref('')
+const finishTools = ref([])
+const finishStartedAt = ref(0)
+const finishFailed = ref('')
+const finishFallback = ref(false)
 const canFinish = ref(false)
 const error = ref('')
 const chatEl = ref(null)
@@ -840,15 +847,47 @@ function requestFinish() {
   confirmingFinish.value = true
 }
 
+function cancelFinish() {
+  confirmingFinish.value = false
+  finishFailed.value = ''
+  finishStage.value = ''
+  finishTools.value = []
+}
+
 async function finish() {
+  if (finishing.value) return
   finishing.value = true
   error.value = ''
+  finishFailed.value = ''
+  finishFallback.value = false
+  finishStage.value = ''
+  finishTools.value = []
+  finishStartedAt.value = Date.now()
   try {
-    await api.post(`/sessions/${session.sessionId}/finish`)
+    const { fallback } = await streamFinish(session.sessionId, {
+      onStage: (event) => {
+        finishStage.value = event?.name || ''
+      },
+      onTool: (entry) => {
+        finishTools.value = [...finishTools.value, entry]
+      },
+      onFallback: () => {
+        finishFallback.value = true
+      },
+    })
+    finishFallback.value = fallback
+    finishStage.value = 'done'
+    if (!fallback && !reducedMotion()) {
+      await new Promise((resolve) => setTimeout(resolve, 160))
+    }
     router.push(`/report/${session.sessionId}`)
   } catch (e) {
-    confirmingFinish.value = false
-    error.value = '生成报告失败：' + (e?.response?.data?.detail || e.message)
+    if (e?.response?.status === 409) {
+      // 会话已经结束（另一个页面/请求先生成了报告）：直接去看报告
+      router.replace(`/report/${session.sessionId}`)
+      return
+    }
+    finishFailed.value = e?.response?.data?.detail || e.message || '生成报告失败'
   } finally {
     finishing.value = false
   }
@@ -1069,16 +1108,24 @@ async function finish() {
           已经聊了几轮，可以点右下「结束并出报告」看评分了。
         </div>
 
+        <FinishProgress
+          v-if="confirmingFinish && (finishing || finishFailed)"
+          :stage="finishStage"
+          :tools="finishTools"
+          :started-at="finishStartedAt"
+          :failed="finishFailed"
+          :fallback="finishFallback"
+          @retry="finish"
+        />
+
         <div
-          v-if="confirmingFinish"
+          v-else-if="confirmingFinish"
           class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800 ring-1 ring-amber-100"
         >
           <span>生成报告后这次对话就结束了，确定吗？</span>
           <div class="flex gap-2">
-            <button class="sp-btn-primary py-1.5" :disabled="finishing" @click="finish">
-              {{ finishing ? '生成中…' : '确认生成' }}
-            </button>
-            <button class="sp-btn-ghost py-1.5" @click="confirmingFinish = false">继续聊</button>
+            <button class="sp-btn-primary py-1.5" @click="finish">确认生成</button>
+            <button class="sp-btn-ghost py-1.5" @click="cancelFinish">继续聊</button>
           </div>
         </div>
 
@@ -1104,7 +1151,11 @@ async function finish() {
           </p>
         </div>
 
-        <div v-if="manualOpen" class="space-y-2">
+        <div
+          v-if="manualOpen"
+          class="space-y-2"
+          :class="finishing ? 'pointer-events-none opacity-60' : ''"
+        >
           <p v-if="recognizedText" class="text-xs text-brand-700">
             这是识别到的内容，确认或改一下，按 Enter 发送。
           </p>
@@ -1136,7 +1187,11 @@ async function finish() {
           </div>
         </div>
 
-        <div v-else class="flex items-center justify-between gap-3">
+        <div
+          v-else
+          class="flex items-center justify-between gap-3"
+          :class="finishing ? 'pointer-events-none opacity-60' : ''"
+        >
           <div class="flex flex-col gap-1.5">
             <button ref="manualBtn" class="sp-btn-secondary" :disabled="sending" @click="openManual">手动输入</button>
             <button class="sp-btn-ghost !px-2 !py-1 text-[11px]" :disabled="sending" @click="toggleFrames">

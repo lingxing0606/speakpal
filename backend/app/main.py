@@ -45,6 +45,7 @@ def _ensure_schema():
         "comparable_band": "REAL",
         "scoring_json": "TEXT DEFAULT '{}'",
         "plan_json": "TEXT DEFAULT '{}'",
+        "coach_json": "TEXT DEFAULT '{}'",
     }
     if "reports" in tables:
         cols = {c["name"] for c in insp.get_columns("reports")}

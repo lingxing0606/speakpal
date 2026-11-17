@@ -87,6 +87,8 @@ class Report(Base):
     scoring_json = Column(Text, default="{}")
     # Agent 目标达成度（Critic 复盘结果），示例报告为规则兜底结果
     plan_json = Column(Text, default="{}")
+    # 诊断教练（阶段 1）：priorities / source / trace；旧报告为空
+    coach_json = Column(Text, default="{}")
     fixes_json = Column(Text, default="[]")
     features_json = Column(Text, default="{}")
     comment = Column(Text, default="")
