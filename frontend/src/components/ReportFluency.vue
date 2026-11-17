@@ -1,11 +1,13 @@
-<script setup>
+<script setup lang="ts">
+import type { PropType } from 'vue'
+
 import EmptyState from './EmptyState.vue'
 
 const props = defineProps({
   // 已按中文标签筛好的指标（Report.vue 里算，页签计数也用同一份）
-  items: { type: Object, default: () => ({}) },
+  items: { type: Object as PropType<Record<string, unknown>>, default: () => ({}) },
   // 字段中文名：筛选与展示共用同一份表，避免两处漂移
-  labels: { type: Object, default: () => ({}) },
+  labels: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
   typedOnly: { type: Boolean, default: false },
 })
 </script>

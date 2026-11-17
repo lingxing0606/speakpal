@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, markRaw, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -16,6 +16,13 @@ import { useSessionStore } from '../stores/session'
 import { KEY_REQUIRED_MESSAGE, llmReady } from '../utils/llmGate'
 import { loadRecordings, playRecording, saveRecording, stopRecording } from '../utils/recordings'
 import { speakSmart, stopSpeaking } from '../utils/speech'
+import type { AgentTraceStep, AsrSource, AudioMeta, HintItem, SceneFrameOut, SessionTurnOut } from '../types/api'
+import type { ChatTurn } from '../stores/session'
+
+interface ApiError {
+  message?: string
+  response?: { status?: number; data?: { detail?: string } }
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -25,20 +32,20 @@ const finishing = ref(false)
 const confirmingFinish = ref(false)
 // 出报告的流式进度：阶段、教练工具调用、开始时间与失败信息
 const finishStage = ref('')
-const finishTools = ref([])
+const finishTools = ref<AgentTraceStep[]>([])
 const finishStartedAt = ref(0)
 const finishFailed = ref('')
 const finishFallback = ref(false)
 const canFinish = ref(false)
 const error = ref('')
-const chatEl = ref(null)
+const chatEl = ref<HTMLElement | null>(null)
 // 目标条与控制组件（GoalProgress / 录音 / 流式各管一段，这里只留引用）
-const goalRef = ref(null)
-const micBtn = ref(null)
-const manualBtn = ref(null)
+const goalRef = ref<InstanceType<typeof GoalProgress> | null>(null)
+const micBtn = ref<HTMLButtonElement | null>(null)
+const manualBtn = ref<HTMLButtonElement | null>(null)
 const manualOpen = ref(false)
 const manualText = ref('')
-const manualInput = ref(null)
+const manualInput = ref<HTMLTextAreaElement | null>(null)
 const loadingSession = ref(false)
 // AI 朗读语速：A2 听不懂时能降速重听
 const speechRate = ref(1)
@@ -49,7 +56,7 @@ const SPEECH_RATES = [
 ]
 
 // 句型脚手架：卡住时给三条场景句式，用提示不扣分
-const frames = ref([])
+const frames = ref<SceneFrameOut[]>([])
 const framesOpen = ref(false)
 const framesLoading = ref(false)
 
@@ -62,7 +69,8 @@ async function ensureFrames() {
     const { data } = await api.get(`/scenes/${sceneId}/frames`)
     frames.value = data?.frames || []
   } catch (e) {
-    error.value = '拿不到句型提示：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '拿不到句型提示：' + (err?.response?.data?.detail || err.message)
   } finally {
     framesLoading.value = false
   }
@@ -77,7 +85,7 @@ async function toggleFrames() {
   await ensureFrames()
 }
 
-function useFrame(f) {
+function useFrame(f: SceneFrameOut) {
   manualText.value = f.en
   recognizedText.value = ''
   pendingAudio = null
@@ -90,16 +98,16 @@ function useFrame(f) {
 // 识别出来的这句连同录音一起暂存，用户确认发送时才带上；
 // 用户改过文字就不带录音了，免得「语速/停顿」指标和文字对不上
 const recognizedText = ref('')
-let pendingAudio = null
+let pendingAudio: AudioMeta | null = null
 // 这句的录音文件（Promise<Blob|null>），发送成功后存到本地供回放
-let pendingBlob = null
+let pendingBlob: Promise<Blob | null> | null = null
 // 这一句的转写来源：cloud（服务端 ASR）/ browser（浏览器识别）；打字 / 改过文字为 null
-let pendingAsrSource = null
+let pendingAsrSource: AsrSource | null = null
 
 // 回放自己说过的话：同一时间只放一句
 const playingIndex = ref(-1)
 
-async function togglePlayback(t, i) {
+async function togglePlayback(t: ChatTurn, i: number) {
   if (playingIndex.value === i) {
     stopRecording()
     playingIndex.value = -1
@@ -114,15 +122,15 @@ async function togglePlayback(t, i) {
 }
 
 // 朗读某条 AI 回复（气泡里的喇叭按钮）
-function onSpeakTurn(t) {
+function onSpeakTurn(t: ChatTurn) {
   speakSmart(t.content, { rate: speechRate.value })
 }
 
 // 重试：沿用原句，替换这条气泡；记 h0 保持高度，内容先淡出 120ms 再回到三点
-async function retryTurn(t) {
+async function retryTurn(t: ChatTurn) {
   if (sending.value) return
   const el = document.querySelector(`[data-turn="${session.turns.indexOf(t)}"]`)
-  const bubble = el?.querySelector('[data-role="ai"]')
+  const bubble = el?.querySelector<HTMLElement>('[data-role="ai"]')
   t.minHeight = bubble?.offsetHeight || 0
   t.fading = true
   await new Promise((resolve) => setTimeout(resolve, 120))
@@ -131,7 +139,7 @@ async function retryTurn(t) {
 }
 
 // 按「第几句用户发言」把本地录音挂回对话（刷新 / 从历史回来时）
-async function attachRecordings(id) {
+async function attachRecordings(id: number) {
   const blobs = await loadRecordings(id)
   if (!Object.keys(blobs).length) return
   let ord = 0
@@ -145,13 +153,13 @@ async function attachRecordings(id) {
 // ---- 动态提示卡：8 秒自动 / ? 手动 / 预取 / 换一批（规格见 docs/ui-visual.md 7.3）----
 const hintVisible = ref(false)
 const hintOffered = ref(false) // 本轮是否已自动递过
-const hints = ref([])
+const hints = ref<HintItem[]>([])
 const hintSource = ref('frames')
 const hintLoading = ref(false)
 const hintRefreshLeft = ref(2) // 每轮换一批上限
 const hintDegraded = ref(false) // 本会话已降到通用句型，不再重试模型
-const hintGhostLayer = ref(null)
-let hintTimer = null
+const hintGhostLayer = ref<HTMLElement | null>(null)
+let hintTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearHintTimer() {
   if (hintTimer) {
@@ -160,12 +168,12 @@ function clearHintTimer() {
   }
 }
 
-function framesAsHints() {
+function framesAsHints(): HintItem[] {
   return frames.value.slice(0, 3).map((f) => ({ en: f.en, zh: f.zh, tag: '通用句型' }))
 }
 
 // 取提示：失败不弹错，回场景句型（与后端降级同一口径）
-async function fetchHints({ refresh = false } = {}) {
+async function fetchHints({ refresh = false }: { refresh?: boolean } = {}) {
   if (!session.sessionId || hintLoading.value) return false
   hintLoading.value = true
   try {
@@ -193,7 +201,7 @@ async function useFramesFallback() {
   return true
 }
 
-async function showHints({ force = false } = {}) {
+async function showHints({ force = false }: { force?: boolean } = {}) {
   if (!manualOpen.value) return
   if (hintVisible.value && !force) return
   if (hintDegraded.value) {
@@ -251,8 +259,8 @@ function prefetchHints() {
 }
 
 // 点条目：覆盖草稿、光标置末尾、输入框闪一次；英文 ghost 从条目飞进输入框
-function pickHint(hint, event) {
-  const rowRect = event?.currentTarget?.getBoundingClientRect() || null
+function pickHint(hint: HintItem, event?: MouseEvent) {
+  const rowRect = (event?.currentTarget as HTMLElement | null)?.getBoundingClientRect() || null
   manualText.value = hint.en
   recognizedText.value = ''
   pendingAudio = null
@@ -277,7 +285,7 @@ function pickHint(hint, event) {
   })
 }
 
-function flyHintGhost(text, fromRect, toRect) {
+function flyHintGhost(text: string, fromRect: DOMRect, toRect: DOMRect) {
   const layer = hintGhostLayer.value
   if (!layer) return
   const el = document.createElement('span')
@@ -310,7 +318,7 @@ watch([manualOpen, manualText], ([open, text]) => {
   scheduleHint()
 })
 
-const DIFFICULTY_LABELS = { easy: '简单', medium: '中等', hard: '困难' }
+const DIFFICULTY_LABELS: Record<string, string> = { easy: '简单', medium: '中等', hard: '困难' }
 const difficultyLabel = computed(() => DIFFICULTY_LABELS[session.difficulty] || session.difficulty || '—')
 const hasUserTurn = computed(() => session.turns.some((t) => t.role === 'user'))
 const userTurnCount = computed(() => session.turns.filter((t) => t.role === 'user').length)
@@ -454,7 +462,7 @@ onMounted(async () => {
 })
 
 // 刷进 /practice/:id：先用服务端记录回填，刷新不丢对话
-async function loadSession(id) {
+async function loadSession(id: number) {
   if (id && session.sessionId !== id) {
     loadingSession.value = true
     try {
@@ -468,7 +476,7 @@ async function loadSession(id) {
         id,
         { id: data.scene_id, name: data.scene_name },
         data.difficulty,
-        (data.turns || []).map((t) => ({
+        (data.turns || []).map((t: SessionTurnOut) => ({
           role: t.role,
           content: t.content,
           mode: t.input_mode,
@@ -483,10 +491,11 @@ async function loadSession(id) {
       // 回填时不重播开场白，否则刷新一次就念一遍
       return
     } catch (e) {
+      const err = e as ApiError
       error.value =
-        e?.response?.status === 404
+        err?.response?.status === 404
           ? '这次对话找不到了，回首页重新开始一次吧。'
-          : '恢复对话失败：' + (e?.response?.data?.detail || e.message)
+          : '恢复对话失败：' + (err?.response?.data?.detail || err.message)
       return
     } finally {
       loadingSession.value = false
@@ -512,7 +521,13 @@ function scrollBottom() {
   })
 }
 
-async function send(text, audio = null, mode = 'typed', blobPromise = null, asrSource = null) {
+async function send(
+  text: string,
+  audio: AudioMeta | null = null,
+  mode: 'voice' | 'typed' = 'typed',
+  blobPromise: Promise<Blob | null> | null = null,
+  asrSource: AsrSource | null = null
+) {
   if (!text || sending.value) return false
   const gate = await llmReady()
   if (!gate.ok) {
@@ -564,7 +579,7 @@ async function submitManual() {
   nextTick(() => manualBtn.value?.focus())
 }
 
-function onManualKeydown(event) {
+function onManualKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     submitManual()
@@ -599,7 +614,7 @@ async function finish() {
   finishTools.value = []
   finishStartedAt.value = Date.now()
   try {
-    const { fallback } = await streamFinish(session.sessionId, {
+    const { fallback } = await streamFinish(session.sessionId as number, {
       onStage: (event) => {
         finishStage.value = event?.name || ''
       },
@@ -617,12 +632,13 @@ async function finish() {
     }
     router.push(`/report/${session.sessionId}`)
   } catch (e) {
-    if (e?.response?.status === 409) {
+    const err = e as ApiError
+    if (err?.response?.status === 409) {
       // 会话已经结束（另一个页面/请求先生成了报告）：直接去看报告
       router.replace(`/report/${session.sessionId}`)
       return
     }
-    finishFailed.value = e?.response?.data?.detail || e.message || '生成报告失败'
+    finishFailed.value = err?.response?.data?.detail || err.message || '生成报告失败'
   } finally {
     finishing.value = false
   }

@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from 'vue'
 
 import { useAuthStore } from '../stores/auth'
@@ -29,7 +29,7 @@ const config = computed(() =>
   )
 )
 
-async function copyText(text) {
+async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text)
     return true

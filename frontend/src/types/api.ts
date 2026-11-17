@@ -179,6 +179,24 @@ export interface ReportTransparency {
   coach: { grounded: number; total: number } | null
 }
 
+/** 多量表视图（evaluation/scales.py）：由 band 派生的展示值，不落库 */
+export interface ScaleItemOut {
+  value?: number | string
+  display: string
+  tier: string
+  range?: number[] | null
+  cet4?: string | null
+  cet6?: string | null
+}
+
+export interface ReportScales {
+  version?: string
+  primary?: string
+  items?: Record<string, ScaleItemOut> | null
+  reason?: string
+  dimensions?: Record<string, { ielts?: number; cefr?: string }>
+}
+
 export interface ReportOut {
   report_id: number
   total_score: number | null
@@ -189,7 +207,7 @@ export interface ReportOut {
   answer_mode?: AnswerMode | null
   comparable_band?: number | null
   dimensions: Record<string, number>
-  bands: Record<string, number>
+  bands: Record<string, number | null>
   sentence_fixes: SentenceFix[]
   study_items: StudyItemOut[]
   comment: string
@@ -197,7 +215,7 @@ export interface ReportOut {
   scoring_detail: Record<string, unknown>
   plan: SessionPlan
   coach?: CoachResult | null
-  scales: Record<string, unknown>
+  scales: ReportScales
   transparency?: ReportTransparency | null
   note: string
 }
@@ -239,8 +257,41 @@ export interface HintsOut {
   cached: boolean
 }
 
+/** 场景句型（GET /api/scenes/{id}/frames） */
+export interface SceneFrameOut {
+  en: string
+  zh: string
+}
+
 export interface PreferencesOut {
   practice_difficulty: Difficulty
   word_scope: WordScope
   report_scale: string
+}
+
+/** GET /api/sessions/{id}/drills：报告里「重说这句」的跟读题 */
+export interface DrillItem {
+  index: number
+  source: string
+  target: string
+  focus: string
+  attempts: number
+  best_similarity: number | null
+  passed: boolean
+}
+
+export interface DrillsOut {
+  report_id: number
+  pass_threshold: number
+  items: DrillItem[]
+}
+
+/** POST /api/sessions/{id}/drills/{index}/attempt */
+export interface DrillAttemptOut {
+  index: number
+  similarity: number
+  passed: boolean
+  attempts: number
+  best_similarity: number
+  feedback: string
 }

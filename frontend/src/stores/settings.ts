@@ -7,7 +7,19 @@ const SCALE_KEY = 'speakpal.reportScale'
 const CET_VIEW_KEY = 'speakpal.reportCetView'
 const SCALE_IDS = ['ielts', 'cefr', 'toefl', 'duolingo', 'cet']
 
-function readSaved() {
+interface SavedSettings {
+  api_key?: string
+  base_url?: string
+  model?: string
+  tts_key?: string
+  tts_base_url?: string
+  tts_model?: string
+  tts_voice?: string
+  pref_difficulty?: string
+  word_scope?: string
+}
+
+function readSaved(): SavedSettings {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
   } catch {
@@ -17,7 +29,7 @@ function readSaved() {
 
 function readScale() {
   const saved = localStorage.getItem(SCALE_KEY)
-  return SCALE_IDS.includes(saved) ? saved : 'ielts'
+  return saved && SCALE_IDS.includes(saved) ? saved : 'ielts'
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -46,7 +58,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const ttsConfigured = computed(() => !!ttsKey.value.trim())
 
   /** 只显示后四位，界面上不出现完整密钥 */
-  function mask(key) {
+  function mask(key: string) {
     const k = (key || '').trim()
     if (!k) return ''
     return k.length <= 4 ? '****' : `****${k.slice(-4)}`
@@ -71,14 +83,14 @@ export const useSettingsStore = defineStore('settings', () => {
     )
   }
 
-  function save({ apiKey: key, baseUrl: base, model: name }) {
+  function save({ apiKey: key, baseUrl: base, model: name }: { apiKey?: string; baseUrl?: string; model?: string }) {
     apiKey.value = key || ''
     baseUrl.value = base || ''
     model.value = name || ''
     persist()
   }
 
-  function saveTts({ key, baseUrl: base, model: name, voice }) {
+  function saveTts({ key, baseUrl: base, model: name, voice }: { key?: string; baseUrl?: string; model?: string; voice?: string }) {
     ttsKey.value = key || ''
     ttsBaseUrl.value = base || ''
     ttsModel.value = name || ''
@@ -86,29 +98,29 @@ export const useSettingsStore = defineStore('settings', () => {
     persist()
   }
 
-  function setPrefDifficulty(value) {
+  function setPrefDifficulty(value: string) {
     prefDifficulty.value = value || ''
     persist()
   }
 
-  function setWordScope(value) {
+  function setWordScope(value: string) {
     wordScope.value = value || ''
     persist()
   }
 
   /** 默认量表：本地先存，报告页/设置页共用；服务端值为准时由调用方覆盖 */
-  function setReportScale(value) {
+  function setReportScale(value: string) {
     reportScale.value = SCALE_IDS.includes(value) ? value : 'ielts'
     localStorage.setItem(SCALE_KEY, reportScale.value)
   }
 
   /** 四六级展示方式：range（分数段）| pass（只看通过水平），只存本地 */
-  function setReportCetView(value) {
+  function setReportCetView(value: string) {
     reportCetView.value = value === 'pass' ? 'pass' : 'range'
     localStorage.setItem(CET_VIEW_KEY, reportCetView.value)
   }
 
-  function setCetPassOnly(value) {
+  function setCetPassOnly(value: boolean) {
     setReportCetView(value ? 'pass' : 'range')
   }
 
@@ -125,7 +137,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 每个请求带上自己的密钥，服务端不落库，用完即弃 */
   function headers() {
-    const out = {}
+    const out: Record<string, string> = {}
     if (apiKey.value.trim()) out['X-LLM-Key'] = apiKey.value.trim()
     if (baseUrl.value.trim()) out['X-LLM-Base-URL'] = baseUrl.value.trim()
     if (model.value.trim()) out['X-LLM-Model'] = model.value.trim()

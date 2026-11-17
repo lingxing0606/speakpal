@@ -239,7 +239,7 @@ S_task_final = 0.6·S_task_rule + 0.4·S_pragmatic_llm     # 40% 来自语用得
 
 | 信号 | 现状 | 做法 |
 |---|---|---|
-| `SpeechRecognition` 的 `confidence`（每条 alternative 附带 0–1） | `frontend/src/utils/speech.js` 只取了 `transcript`，confidence 丢弃 | 随 `audio_json` 上报；仅作**相对**比较，不同设备/网络的绝对值不可比 |
+| `SpeechRecognition` 的 `confidence`（每条 alternative 附带 0–1） | `frontend/src/utils/speech.ts` 只取了 `transcript`，confidence 丢弃 | 随 `audio_json` 上报；仅作**相对**比较，不同设备/网络的绝对值不可比 |
 | 同句重读的一致性 | 没有 | 让用户重读报告里的一句，比较两次转写的编辑距离：`stability = 1 − edit_distance/len`。两次都转错成不同结果 → 发音不稳定；两次都稳定转错 → 转写本身不可信 |
 
 `stability` 是自洽指标，**不需要声学模型**，能在答辩时讲清楚「我们没有音素级测评，但我们有一个可复现的清晰度代理」。

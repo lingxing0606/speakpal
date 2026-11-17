@@ -1,25 +1,52 @@
-<script setup>
+<script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
-import { createRecognizer, speakSmart } from '../utils/speech'
+import { createRecognizer, speakSmart, type SpeechRecognizer } from '../utils/speech'
 
-const sets = ref([])
+interface MinimalPair {
+  a: string
+  zh_a: string
+  b: string
+  zh_b: string
+}
+
+interface PairSet {
+  id: string
+  focus: string
+  zh_focus: string
+  pairs: MinimalPair[]
+}
+
+interface PairResult {
+  correct: boolean
+  reason: string
+}
+
+interface ApiError {
+  message?: string
+  response?: { data?: { detail?: string } }
+}
+
+type Side = 'a' | 'b'
+
+const sets = ref<PairSet[]>([])
 const loading = ref(true)
 const error = ref('')
 const activeKey = ref('')
 const listening = ref(false)
 const heard = ref('')
-const results = ref({})
-let recognizer = null
+const results = ref<Record<string, PairResult | null>>({})
+let recognizer: SpeechRecognizer | null = null
 
 onMounted(async () => {
   try {
     const { data } = await api.get('/pronunciation/minimal-pairs')
     sets.value = data?.sets || []
   } catch (e) {
-    error.value = '加载发音对比词表失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '加载发音对比词表失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     loading.value = false
   }
@@ -27,11 +54,11 @@ onMounted(async () => {
 
 onBeforeUnmount(stopRec)
 
-function keyOf(set, idx, side) {
+function keyOf(set: PairSet, idx: number, side: Side) {
   return `${set.id}:${idx}:${side}`
 }
 
-function say(word) {
+function say(word: string) {
   speakSmart(word, { rate: 0.9 })
 }
 
@@ -43,16 +70,17 @@ function stopRec() {
   listening.value = false
 }
 
-async function check(target, key) {
+async function check(target: string, key: string) {
   try {
     const { data } = await api.post('/pronunciation/check', { target, heard: heard.value })
     results.value = { ...results.value, [key]: data }
   } catch (e) {
-    error.value = '判定失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '判定失败：' + (err?.response?.data?.detail || err.message)
   }
 }
 
-function startCheck(set, idx, side) {
+function startCheck(set: PairSet, idx: number, side: Side) {
   const pair = set.pairs[idx]
   const target = pair[side]
   const key = keyOf(set, idx, side)
@@ -75,12 +103,12 @@ function startCheck(set, idx, side) {
     },
     (event) => {
       listening.value = false
-      const map = {
+      const map: Record<string, string> = {
         'not-allowed': '麦克风权限被拒了。允许麦克风后再试。',
         'no-speech': '没听到声音，再说一遍。',
         'audio-capture': '没找到麦克风。',
       }
-      const msg = map[event?.error]
+      const msg = map[event?.error || '']
       if (msg) error.value = msg
     }
   )
@@ -164,12 +192,12 @@ function startCheck(set, idx, side) {
             >
               <template v-if="results[keyOf(set, i, side)]">
                 <span
-                  :class="results[keyOf(set, i, side)].correct ? 'text-good' : 'text-danger'"
+                  :class="results[keyOf(set, i, side)]?.correct ? 'text-good' : 'text-danger'"
                   class="font-medium"
                 >
-                  {{ results[keyOf(set, i, side)].correct ? '✓ 读对了' : '✗ 读错了' }}
+                  {{ results[keyOf(set, i, side)]?.correct ? '✓ 读对了' : '✗ 读错了' }}
                 </span>
-                <span class="ml-1 text-ink-soft">{{ results[keyOf(set, i, side)].reason }}</span>
+                <span class="ml-1 text-ink-soft">{{ results[keyOf(set, i, side)]?.reason }}</span>
               </template>
             </div>
           </div>

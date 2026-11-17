@@ -1,63 +1,95 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import TabBar from '../components/TabBar.vue'
+import type { StudyItemOut } from '../types/api'
+
+interface NoteItem {
+  id: number
+  title: string
+  body: string
+  created_at: string
+  updated_at?: string | null
+}
+
+/** 笔记正文里的知识条目命中：start/end 是正文区间，其余字段来自关联条目 */
+interface NoteLink {
+  item_id: number
+  start: number
+  end: number
+  term: string
+  kind: string
+  phonetic?: string | null
+  meaning_zh?: string | null
+  example?: string | null
+}
+
+interface Draft {
+  id: number | null
+  title: string
+  body: string
+}
+
+interface ApiError {
+  message?: string
+  response?: { status?: number; data?: { detail?: string } }
+}
 
 const loading = ref(true)
 const error = ref('')
-const notes = ref([])
+const notes = ref<NoteItem[]>([])
 const editing = ref(false)
 const saving = ref(false)
-const draft = ref({ id: null, title: '', body: '' })
-const menuFor = ref(null)
-const confirming = ref(null)
+const draft = ref<Draft>({ id: null, title: '', body: '' })
+const menuFor = ref<number | null>(null)
+const confirming = ref<NoteItem | null>(null)
 
 // 编辑卡 FLIP：从底部按钮（或点开的卡片）长到列表首位；取消时反向收回按钮
-const editorEl = ref(null)
-const newNoteBtn = ref(null)
+const editorEl = ref<HTMLElement | null>(null)
+const newNoteBtn = ref<HTMLButtonElement | null>(null)
 const editorContentShown = ref(true)
 const closing = ref(false)
-let editorStyleTimer = null
+let editorStyleTimer: ReturnType<typeof setTimeout> | undefined
 
 // 阅读态
-const reading = ref(null)
-const readingLinks = ref([])
+const reading = ref<NoteItem | null>(null)
+const readingLinks = ref<NoteLink[]>([])
 const readingLoading = ref(false)
 let readToken = 0
 
 // 知识条目侧栏 / 窄屏折叠条
-const knowledgeItems = ref([])
+const knowledgeItems = ref<StudyItemOut[]>([])
 const knowledgeQuery = ref('')
 const knowledgeLoading = ref(false)
 const knowledgeError = ref('')
 const knowledgeOpen = ref(false)
 const knowledgeShown = ref(false)
-const flashItemId = ref(null)
-const bodyInputEl = ref(null)
-const ghostLayer = ref(null)
+const flashItemId = ref<number | null>(null)
+const bodyInputEl = ref<HTMLTextAreaElement | null>(null)
+const ghostLayer = ref<HTMLElement | null>(null)
 const lastSelection = ref({ start: 0, end: 0 })
-let knowledgeTimer = null
+let knowledgeTimer: ReturnType<typeof setTimeout> | undefined
 let knowledgeRequest = 0
-let flashTimer = null
+let flashTimer: ReturnType<typeof setTimeout> | undefined
 
 // 悬停小窗 / 窄屏 sheet
-const tipLink = ref(null)
-const tipStyle = ref({})
-const sheetLink = ref(null)
-let hoverTimer = null
-let hideTimer = null
+const tipLink = ref<NoteLink | null>(null)
+const tipStyle = ref<Record<string, string>>({})
+const sheetLink = ref<NoteLink | null>(null)
+let hoverTimer: ReturnType<typeof setTimeout> | undefined
+let hideTimer: ReturnType<typeof setTimeout> | undefined
 
-const KIND_LABELS = { word: '单词', phrase: '短语', spelling: '拼写', grammar: '语法' }
+const KIND_LABELS: Record<string, string> = { word: '单词', phrase: '短语', spelling: '拼写', grammar: '语法' }
 
 const readSegments = computed(() => {
   const body = reading.value?.body || ''
   const links = [...(readingLinks.value || [])]
     .filter((link) => link.start >= 0 && link.end <= body.length && link.end > link.start)
     .sort((a, b) => a.start - b.start)
-  const out = []
+  const out: { text: string; link?: NoteLink }[] = []
   let cursor = 0
   for (const link of links) {
     if (link.start < cursor) continue
@@ -77,11 +109,11 @@ function isNarrow() {
   return window.matchMedia('(max-width: 1023px)').matches
 }
 
-function kindLabel(kind) {
+function kindLabel(kind: string) {
   return KIND_LABELS[kind] || kind
 }
 
-async function openEditor(from) {
+async function openEditor(from?: DOMRect | null) {
   menuFor.value = null
   reading.value = null
   tipLink.value = null
@@ -131,7 +163,7 @@ async function openEditor(from) {
 }
 
 // 列表退场：opacity 1→0 + 上移 8px，140ms，不做 stagger
-function fadeListOut(el, done) {
+function fadeListOut(el: Element, done: () => void) {
   if (reduceMotion()) {
     done()
     return
@@ -152,10 +184,11 @@ async function load() {
     const { data } = await api.get('/notes')
     notes.value = Array.isArray(data) ? data : data?.items || []
   } catch (e) {
-    if (e?.response?.status === 404) {
+    const err = e as ApiError
+    if (err?.response?.status === 404) {
       notes.value = []
     } else {
-      error.value = '加载笔记失败：' + (e?.response?.data?.detail || e.message)
+      error.value = '加载笔记失败：' + (err?.response?.data?.detail || err.message)
     }
   } finally {
     loading.value = false
@@ -182,13 +215,13 @@ function startNew() {
   openEditor(newNoteBtn.value?.getBoundingClientRect())
 }
 
-function startEdit(note, event) {
+function startEdit(note: NoteItem, event?: MouseEvent) {
   reading.value = null
   draft.value = { id: note.id, title: note.title || '', body: note.body || '' }
-  openEditor(event?.currentTarget?.getBoundingClientRect() || newNoteBtn.value?.getBoundingClientRect())
+  openEditor((event?.currentTarget as HTMLElement | null)?.getBoundingClientRect() || newNoteBtn.value?.getBoundingClientRect())
 }
 
-function startEditFromRead(event) {
+function startEditFromRead(event?: MouseEvent) {
   if (!reading.value) return
   const note = reading.value
   startEdit(note, event)
@@ -251,39 +284,41 @@ async function save() {
     draft.value = { id: null, title: '', body: '' }
     await load()
   } catch (e) {
-    error.value = '保存失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '保存失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     saving.value = false
   }
 }
 
-function askRemove(note) {
+function askRemove(note: NoteItem) {
   menuFor.value = null
   confirming.value = note
 }
 
-async function remove(note) {
+async function remove(note: NoteItem) {
   try {
     await api.delete(`/notes/${note.id}`)
     confirming.value = null
     if (reading.value?.id === note.id) reading.value = null
     await load()
   } catch (e) {
-    error.value = '删除失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '删除失败：' + (err?.response?.data?.detail || err.message)
   }
 }
 
-function when(iso) {
+function when(iso?: string | null) {
   if (!iso) return ''
   const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso)
   const d = new Date(hasZone ? iso : `${iso}Z`)
   if (Number.isNaN(d.getTime())) return iso
-  const p = (n) => String(n).padStart(2, '0')
+  const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 // ---------------------------------------------------------------- 阅读态
-async function openRead(note) {
+async function openRead(note: NoteItem) {
   menuFor.value = null
   reading.value = note
   readingLinks.value = []
@@ -295,8 +330,9 @@ async function openRead(note) {
     if (token !== readToken) return
     readingLinks.value = Array.isArray(data) ? data : []
   } catch (e) {
+    const err = e as ApiError
     if (token === readToken) {
-      error.value = '加载知识关联失败：' + (e?.response?.data?.detail || e.message)
+      error.value = '加载知识关联失败：' + (err?.response?.data?.detail || err.message)
     }
   } finally {
     if (token === readToken) readingLoading.value = false
@@ -310,7 +346,7 @@ function closeRead() {
   sheetLink.value = null
 }
 
-async function muteLink(link) {
+async function muteLink(link: NoteLink) {
   if (!reading.value || !link) return
   try {
     await api.post(`/notes/${reading.value.id}/mutes`, { item_id: link.item_id })
@@ -318,7 +354,8 @@ async function muteLink(link) {
     hideTip()
     sheetLink.value = null
   } catch (e) {
-    error.value = '取消关联失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '取消关联失败：' + (err?.response?.data?.detail || err.message)
   }
 }
 
@@ -332,7 +369,7 @@ function hideTip() {
   tipLink.value = null
 }
 
-function showTip(link, el) {
+function showTip(link: NoteLink, el?: Element | null) {
   const rect = el?.getBoundingClientRect()
   if (!rect) return
   const half = 120
@@ -347,12 +384,12 @@ function showTip(link, el) {
   tipLink.value = link
 }
 
-function onTermEnter(link, event) {
+function onTermEnter(link: NoteLink, event: MouseEvent) {
   if (isNarrow()) return
   const el = event.currentTarget
   clearTimeout(hoverTimer)
   clearTimeout(hideTimer)
-  hoverTimer = setTimeout(() => showTip(link, el), 400)
+  hoverTimer = setTimeout(() => showTip(link, el as Element), 400)
 }
 
 function onTermLeave() {
@@ -362,13 +399,13 @@ function onTermLeave() {
   hideTimer = setTimeout(hideTip, 120)
 }
 
-function onTermClick(link, event) {
+function onTermClick(link: NoteLink, event: MouseEvent) {
   if (isNarrow()) {
     sheetLink.value = link
     return
   }
   clearTimeout(hoverTimer)
-  showTip(link, event.currentTarget)
+  showTip(link, event.currentTarget as Element)
 }
 
 // ---------------------------------------------------------------- 知识条目
@@ -378,7 +415,7 @@ async function loadKnowledge() {
   knowledgeLoading.value = true
   knowledgeError.value = ''
   try {
-    const params = { limit: 100 }
+    const params: { limit: number; q?: string } = { limit: 100 }
     const keyword = knowledgeQuery.value.trim()
     if (keyword) params.q = keyword
     const { data } = await api.get('/study/items', { params })
@@ -406,7 +443,7 @@ function captureSelection() {
   }
 }
 
-function spawnGhost(text, sourceEl, targetEl) {
+function spawnGhost(text: string, sourceEl?: Element | null, targetEl?: Element | null) {
   if (reduceMotion() || !ghostLayer.value || !sourceEl || !targetEl || !text) return
   const from = sourceEl.getBoundingClientRect()
   const to = targetEl.getBoundingClientRect()
@@ -434,7 +471,7 @@ function spawnGhost(text, sourceEl, targetEl) {
     .finished.then(() => el.remove(), () => el.remove())
 }
 
-function insertItem(item, event) {
+function insertItem(item: StudyItemOut, event?: MouseEvent) {
   const el = bodyInputEl.value
   const body = draft.value.body || ''
   if (!el || !item?.term) return
@@ -444,7 +481,7 @@ function insertItem(item, event) {
   draft.value.body = body.slice(0, start) + text + body.slice(end)
   const caret = start + text.length
   lastSelection.value = { start: caret, end: caret }
-  spawnGhost(text, event?.currentTarget, el)
+  spawnGhost(text, event?.currentTarget as Element | undefined, el)
   flashItemId.value = item.id
   clearTimeout(flashTimer)
   flashTimer = setTimeout(() => {
@@ -589,7 +626,7 @@ function insertItem(item, event) {
               :key="n.id"
               :style="{ '--i': Math.min(ni, 12) }"
               class="sp-reveal sp-hover group flex min-h-[9rem] cursor-pointer flex-col justify-between gap-4 rounded-2xl bg-white p-5 ring-1 ring-line/80"
-              @click="openRead(n, $event)"
+              @click="openRead(n)"
             >
               <div class="min-w-0">
                 <div class="truncate font-semibold text-ink">{{ n.title || '无标题' }}</div>

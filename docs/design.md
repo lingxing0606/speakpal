@@ -61,7 +61,7 @@ speakpal/
 │   │   │   ├── MicButton.vue      # 录音 + 转写
 │   │   │   ├── ScoreCard.vue
 │   │   │   └── SentenceFix.vue
-│   │   └── utils/speech.js        # Web Speech API 封装
+│   │   └── utils/speech.ts        # Web Speech API 封装
 │   ├── index.html
 │   ├── vite.config.js
 │   ├── tailwind.config.js
@@ -557,7 +557,7 @@ Difficulty: {difficulty}. Keep it friendly.
 
 ### 13.4 语音合成密钥（可选，`X-TTS-*`）
 
-朗读默认用浏览器内置 `speechSynthesis`（`frontend/src/utils/speech.js`，不需要 key）。想更自然就填第三方 TTS，**不填不影响任何功能**。
+朗读默认用浏览器内置 `speechSynthesis`（`frontend/src/utils/speech.ts`，不需要 key）。想更自然就填第三方 TTS，**不填不影响任何功能**。
 
 - 设置页第二块「语音合成密钥（可选）」，四个字段：`key / base_url / model / voice`。
   说明必须写清两件事：**不填就用浏览器内置朗读**；**填了走第三方计费**（谁付费、谁承担，讲明白）。

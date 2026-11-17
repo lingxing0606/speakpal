@@ -27,7 +27,7 @@ interface ApiError {
 }
 
 interface SessionLike {
-  sessionId: number | string
+  sessionId: number | string | null
   turns: Turn[]
 }
 
@@ -114,7 +114,7 @@ export function useTurnStream({ session, scrollBottom, ...hooks }: TurnStreamHoo
     startThinking()
     let first = true
     const data = await streamTurn(
-      session.sessionId,
+      session.sessionId as number | string,
       { transcript: req.text, audio: req.audio, input_mode: req.mode, asr_source: req.asrSource } as unknown as TurnIn,
       {
         signal: streamAbort.signal,

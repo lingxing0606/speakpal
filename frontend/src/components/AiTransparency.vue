@@ -1,11 +1,13 @@
-<script setup>
-import { computed } from 'vue'
+<script setup lang="ts">
+import { computed, type PropType } from 'vue'
+
+import type { ReportTransparency } from '../types/api'
 
 const props = defineProps({
-  transparency: { type: Object, default: null },
+  transparency: { type: Object as PropType<ReportTransparency>, default: null },
 })
 
-const safety = computed(() => props.transparency?.safety || {})
+const safety = computed(() => props.transparency?.safety || { flagged_inputs: 0, replaced_replies: 0 })
 const scores = computed(() => props.transparency?.scores || null)
 const coach = computed(() => props.transparency?.coach || null)
 const model = computed(() => String(props.transparency?.model || ''))
@@ -51,8 +53,8 @@ const coachText = computed(() => {
       <div class="flex items-baseline gap-2 max-sm:flex-col max-sm:gap-0.5">
         <span class="w-[72px] shrink-0 text-[11px] text-ink-mute max-sm:w-auto">分数构成</span>
         <span v-if="hasScores" class="text-xs text-ink">
-          模型 <span class="sp-num">{{ scores.model_ratio }}%</span> ·
-          规则 <span class="sp-num">{{ scores.rule_ratio }}%</span>
+          模型 <span class="sp-num">{{ scores?.model_ratio }}%</span> ·
+          规则 <span class="sp-num">{{ scores?.rule_ratio }}%</span>
         </span>
         <span v-else class="text-xs text-ink-mute">—</span>
       </div>

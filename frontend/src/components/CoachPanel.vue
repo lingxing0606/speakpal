@@ -1,14 +1,15 @@
-<script setup>
-import { computed, ref } from 'vue'
+<script setup lang="ts">
+import { computed, ref, type PropType } from 'vue'
 
 import AgentTrace from './AgentTrace.vue'
+import type { AgentTraceStep, CoachEvidence, CoachPriority, CoachResult } from '../types/api'
 
 const props = defineProps({
-  coach: { type: Object, default: null },
+  coach: { type: Object as PropType<CoachResult>, default: null },
 })
 const emit = defineEmits(['open-fix'])
 
-const TOOL_LABELS = {
+const TOOL_LABELS: Record<string, string> = {
   lookup_word: '词库',
   grammar_card: '语法卡',
   recent_weakness: '近期错因',
@@ -22,38 +23,38 @@ const traceOpen = ref(false)
 // `${priorityIndex}-${evidenceIndex}`：同一时间只展开一处证据原文
 const activeEvidence = ref('')
 
-function traceFor(evidence) {
+function traceFor(evidence: CoachEvidence) {
   const ref = String(evidence?.ref || '')
   if (!ref) return null
   return trace.value.find((entry) => String(entry.result || '').includes(ref)) || null
 }
 
-function visibleEvidence(priority) {
+function visibleEvidence(priority: CoachPriority) {
   return (priority.evidence || []).filter((evidence) => traceFor(evidence))
 }
 
-function chipLabel(evidence) {
+function chipLabel(evidence: CoachEvidence) {
   const tool = TOOL_LABELS[evidence.tool] || evidence.tool || '工具'
   const ref = String(evidence.ref || '')
   const short = ref.length > 24 ? `${ref.slice(0, 24)}…` : ref
   return `${tool} · ${short}`
 }
 
-function toggleEvidence(priorityIndex, evidenceIndex) {
+function toggleEvidence(priorityIndex: number, evidenceIndex: number) {
   const key = `${priorityIndex}-${evidenceIndex}`
   activeEvidence.value = activeEvidence.value === key ? '' : key
 }
 
-function activeEntry(priorityIndex, priority) {
+function activeEntry(priorityIndex: number, priority: CoachPriority) {
   const index = visibleEvidence(priority).findIndex(
     (_evidence, evidenceIndex) => activeEvidence.value === `${priorityIndex}-${evidenceIndex}`
   )
   return index < 0 ? null : traceFor(visibleEvidence(priority)[index])
 }
 
-function argsText(entry) {
+function argsText(entry: AgentTraceStep | null) {
   try {
-    return JSON.stringify(entry.args || {})
+    return JSON.stringify(entry?.args || {})
   } catch {
     return '{}'
   }
@@ -143,7 +144,7 @@ function argsText(entry) {
                   </p>
                   <pre
                     class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-ink-soft"
-                  >{{ activeEntry(priorityIndex, priority).result }}</pre>
+                  >{{ activeEntry(priorityIndex, priority)?.result }}</pre>
                 </template>
               </div>
             </div>

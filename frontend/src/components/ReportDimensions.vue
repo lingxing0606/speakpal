@@ -1,9 +1,13 @@
-<script setup>
+<script setup lang="ts">
+import type { PropType } from 'vue'
+
+import type { ReportOut } from '../types/api'
+
 const props = defineProps({
-  report: { type: Object, default: null },
+  report: { type: Object as PropType<ReportOut>, default: null },
 })
 
-const dimLabels = {
+const dimLabels: Record<string, string> = {
   pronunciation: '发音清晰度',
   fluency: '流利度',
   grammar_vocab: '语法词汇',
@@ -11,7 +15,7 @@ const dimLabels = {
   written_expression: '文字表达',
 }
 
-function dimBand(name) {
+function dimBand(name: string) {
   const fromScales = props.report?.scales?.dimensions?.[name]?.ielts
   if (typeof fromScales === 'number') return fromScales.toFixed(1)
   const b = props.report?.bands?.[name]
@@ -19,7 +23,7 @@ function dimBand(name) {
   return typeof b === 'number' ? b.toFixed(1) : b
 }
 
-function dimCefr(name) {
+function dimCefr(name: string) {
   return props.report?.scales?.dimensions?.[name]?.cefr || ''
 }
 </script>

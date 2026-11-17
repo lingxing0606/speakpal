@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -10,6 +10,39 @@ import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
 import { clearRecordings } from '../utils/recordings'
 import { resetTtsProbe } from '../utils/speech'
+
+interface ServerStatus {
+  env_configured?: boolean | null
+  tts_env_configured?: boolean | null
+  default_tts_base_url?: string
+  default_tts_model?: string
+  default_tts_voice?: string
+  error: string
+}
+
+interface TestState {
+  running: boolean
+  ok: boolean | null
+  message: string
+}
+
+interface TtsInput {
+  key: string
+  base: string
+  model: string
+  voice: string
+}
+
+interface TtsDefaults {
+  base: string
+  model: string
+  voice: string
+}
+
+interface ApiError {
+  message?: string
+  response?: { status?: number; data?: { detail?: unknown; text?: () => Promise<string> } }
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -27,7 +60,7 @@ const SECTIONS = [
   { id: 'account', label: '注销账号' },
 ]
 const activeSection = ref('profile')
-let sectionObserver = null
+let sectionObserver: IntersectionObserver | null = null
 
 function watchSections() {
   if (!('IntersectionObserver' in window)) return
@@ -54,26 +87,26 @@ const DIFFICULTIES = [
   { value: 'hard', label: '困难' },
 ]
 
-function diffLabel(value) {
+function diffLabel(value: string) {
   return DIFFICULTIES.find((d) => d.value === value)?.label || '中等'
 }
 
 const keyInput = ref(settings.apiKey)
 const baseInput = ref(settings.baseUrl)
 const modelInput = ref(settings.model)
-const server = ref({ env_configured: null, error: '' })
+const server = ref<ServerStatus>({ env_configured: null, error: '' })
 const saveTip = ref('')
-const testState = ref({ running: false, ok: null, message: '' })
+const testState = ref<TestState>({ running: false, ok: null, message: '' })
 
 // 语音合成（可选）：不填就用浏览器朗读
-const ttsInput = ref({
+const ttsInput = ref<TtsInput>({
   key: settings.ttsKey,
   base: settings.ttsBaseUrl,
   model: settings.ttsModel,
   voice: settings.ttsVoice,
 })
 const ttsTip = ref('')
-const ttsTest = ref({ running: false, ok: null, message: '' })
+const ttsTest = ref<TestState>({ running: false, ok: null, message: '' })
 
 // 留空时实际会用到的默认值。页面上教的供应商是硅基流动，所以：
 // 服务端给了「非 OpenAI 出厂值」的默认就尊重它，否则用硅基流动这套——
@@ -84,8 +117,8 @@ const TTS_FALLBACK = {
   voice: 'FunAudioLLM/CosyVoice2-0.5B:alex',
 }
 
-function ttsDefaults() {
-  const s = server.value || {}
+function ttsDefaults(): TtsDefaults {
+  const s: Partial<ServerStatus> = server.value || {}
   const isStockOpenAi = /api\.openai\.com/i.test(s.default_tts_base_url || '')
   return {
     base: (!isStockOpenAi && s.default_tts_base_url) || TTS_FALLBACK.base,
@@ -130,10 +163,11 @@ async function testTts() {
     await audio.play()
     ttsTest.value = { running: false, ok: true, message: '试听成功：语音合成已生效，练习里的朗读会用它。' }
   } catch (e) {
-    const status = e?.response?.status
+    const err = e as ApiError
+    const status = err?.response?.status
     // 失败体是 blob（responseType: blob），读回来才知道是 key 被拒还是连不上
     let kind = ''
-    const body = e?.response?.data
+    const body = err?.response?.data
     if (body && typeof body.text === 'function') {
       try {
         kind = JSON.parse(await body.text())?.kind || ''
@@ -170,14 +204,15 @@ const accountOpen = ref(false)
 const accountWord = ref('')
 const accountState = ref({ running: false, error: '' })
 
-function errText(e) {
-  const detail = e?.response?.data?.detail
+function errText(e: unknown) {
+  const err = e as ApiError
+  const detail = err?.response?.data?.detail
   // FastAPI 校验错误是数组，别把整段英文 JSON 甩给用户
   if (Array.isArray(detail)) {
-    const first = detail[0]
+    const first = detail[0] as { msg?: string }
     return first?.msg ? `输入格式不对：${first.msg}` : '输入格式不对，检查一下再提交'
   }
-  return detail || e?.message || '未知错误'
+  return (detail as string) || err?.message || '未知错误'
 }
 
 async function loadServerStatus() {
@@ -232,35 +267,38 @@ async function loadPrefs() {
   }
 }
 
-async function pickReportScale(id) {
+async function pickReportScale(id: string) {
   settings.setReportScale(id)
   reportPrefError.value = ''
   try {
     await api.patch('/me/settings', { report_scale: id })
   } catch (e) {
-    reportPrefError.value = '保存失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    reportPrefError.value = '保存失败：' + ((err?.response?.data?.detail as string) || err.message)
   }
 }
 
-async function pickDifficulty(value) {
+async function pickDifficulty(value: string) {
   prefsTip.value = { running: true, message: '' }
   try {
     await api.patch('/me/settings', { practice_difficulty: value })
     settings.setPrefDifficulty(value)
     prefsTip.value = { running: false, message: `已设为${diffLabel(value)}` }
   } catch (e) {
-    prefsTip.value = { running: false, message: '保存失败：' + (e?.response?.data?.detail || e.message) }
+    const err = e as ApiError
+    prefsTip.value = { running: false, message: '保存失败：' + ((err?.response?.data?.detail as string) || err.message) }
   }
 }
 
-async function pickScope(id) {
+async function pickScope(id: string) {
   prefsTip.value = { running: true, message: '' }
   try {
     await api.patch('/me/settings', { word_scope: id })
     settings.setWordScope(id)
     prefsTip.value = { running: false, message: `新词范围已设为${SCOPES.find((s) => s.id === id)?.label || id}` }
   } catch (e) {
-    prefsTip.value = { running: false, message: '保存失败：' + (e?.response?.data?.detail || e.message) }
+    const err = e as ApiError
+    prefsTip.value = { running: false, message: '保存失败：' + ((err?.response?.data?.detail as string) || err.message) }
   }
 }
 
@@ -299,7 +337,7 @@ async function testKey() {
     if (data.ok) {
       testState.value = { running: false, ok: true, message: `连通 · 模型 ${data.model || '—'} · ${data.latency_ms ?? '—'} ms` }
     } else {
-      const labels = {
+      const labels: Record<string, string> = {
         invalid_key: '密钥无效或被拒绝',
         timeout: '请求超时',
         unreachable: '服务不可达',
@@ -536,7 +574,7 @@ function logout() {
                 class="sp-select"
                 aria-label="默认量表"
                 :value="settings.reportScale"
-                @change="pickReportScale($event.target.value)"
+                @change="pickReportScale(($event.target as HTMLSelectElement).value)"
               >
                 <option v-for="s in SCALE_OPTIONS" :key="s.id" :value="s.id">{{ s.label }}</option>
               </select>

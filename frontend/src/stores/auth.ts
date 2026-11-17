@@ -3,21 +3,22 @@ import { defineStore } from 'pinia'
 
 import { clearRecordings } from '../utils/recordings'
 import { useSettingsStore } from './settings'
+import type { UserOut } from '../types/api'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('sp_token') || '')
-  const user = ref(JSON.parse(localStorage.getItem('sp_user') || 'null'))
+  const user = ref<UserOut | null>(JSON.parse(localStorage.getItem('sp_user') || 'null'))
 
   const isLoggedIn = computed(() => !!token.value)
 
-  function setAuth(newToken, newUser) {
+  function setAuth(newToken: string, newUser: UserOut) {
     token.value = newToken
     user.value = newUser
     localStorage.setItem('sp_token', newToken)
     localStorage.setItem('sp_user', JSON.stringify(newUser))
   }
 
-  function logout({ clearKey = true } = {}) {
+  function logout({ clearKey = true }: { clearKey?: boolean } = {}) {
     token.value = ''
     user.value = null
     localStorage.removeItem('sp_token')

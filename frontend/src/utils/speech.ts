@@ -1,10 +1,40 @@
 import api from '../api/client'
 import { useSettingsStore } from '../stores/settings'
 
-let currentAudio = null
+// 浏览器语音识别（Web Speech API）没有进 TS 标准库，这里按项目用到的字段最小声明
+interface SpeechRecognitionAlternativeLike {
+  transcript: string
+}
+
+type SpeechRecognitionResultLike = ArrayLike<SpeechRecognitionAlternativeLike>
+
+type SpeechRecognitionResultListLike = ArrayLike<SpeechRecognitionResultLike>
+
+interface SpeechRecognitionEventLike {
+  results: SpeechRecognitionResultListLike
+}
+
+export interface SpeechRecognizer {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onend: (() => void) | null
+  onerror: ((event: { error?: string }) => void) | null
+  start(): void
+  stop(): void
+  abort(): void
+}
+
+type SpeechWindow = Window & {
+  SpeechRecognition?: new () => SpeechRecognizer
+  webkitSpeechRecognition?: new () => SpeechRecognizer
+}
+
+let currentAudio: HTMLAudioElement | null = null
 // 浏览器没配 key 时也允许试服务端兜底；409 之后本次会话不再重试，避免每条回复白打一次
 let serverTtsTried = false
-let serverTtsEnv = null
+let serverTtsEnv: boolean | null = null
 
 async function serverTtsAvailable() {
   if (serverTtsEnv !== null) return serverTtsEnv
@@ -35,7 +65,7 @@ function stopAudio() {
 }
 
 /** 浏览器内置朗读（不需要 key，永远可用的兜底） */
-export function speak(text, lang = 'en-US', rate = 1) {
+export function speak(text: string, lang = 'en-US', rate = 1) {
   stopAudio()
   if (!('speechSynthesis' in window)) return
   window.speechSynthesis.cancel()
@@ -48,7 +78,7 @@ export function speak(text, lang = 'en-US', rate = 1) {
 /**
  * 播放服务端返回的音频。返回 false 表示确实放不出来，调用方要回落浏览器朗读。
  */
-function playBlob(blob, onFail) {
+function playBlob(blob: Blob, onFail?: () => void) {
   try {
     stopAudio()
     const url = URL.createObjectURL(blob)
@@ -73,9 +103,9 @@ function playBlob(blob, onFail) {
  * 优先用服务端的语音合成，没配或任何一步失败都回落浏览器朗读。
  * 朗读挂掉不能把整个练习带崩，所以这里永远不抛错。
  */
-export async function speakSmart(text, { lang = 'en-US', rate = 1 } = {}) {
+export async function speakSmart(text: string, { lang = 'en-US', rate = 1 }: { lang?: string; rate?: number } = {}) {
   if (!text) return
-  let settings = null
+  let settings: ReturnType<typeof useSettingsStore> | null = null
   try {
     settings = useSettingsStore()
   } catch {
@@ -117,8 +147,12 @@ export function stopSpeaking() {
   if ('speechSynthesis' in window) window.speechSynthesis.cancel()
 }
 
-export function createRecognizer(onResult, onEnd, onError) {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+export function createRecognizer(
+  onResult: (text: string) => void,
+  onEnd: () => void,
+  onError?: (event: { error?: string }) => void
+): SpeechRecognizer | null {
+  const SpeechRecognition = (window as SpeechWindow).SpeechRecognition || (window as SpeechWindow).webkitSpeechRecognition
   if (!SpeechRecognition) return null
 
   const rec = new SpeechRecognition()

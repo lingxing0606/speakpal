@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
 import api from '../api/client'
@@ -6,17 +6,32 @@ import AppHeader from '../components/AppHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import TabBar from '../components/TabBar.vue'
 import { speakSmart } from '../utils/speech'
+import type { StudyItemOut } from '../types/api'
 
-const KIND_LABELS = { word: '单词', spelling: '拼写', grammar: '语法', phrase: '短语' }
+interface ReviewGroup {
+  items: StudyItemOut[]
+}
+
+interface Judged {
+  grade: string
+  text: string
+}
+
+interface ApiError {
+  message?: string
+  response?: { status?: number; data?: { detail?: string } }
+}
+
+const KIND_LABELS: Record<string, string> = { word: '单词', spelling: '拼写', grammar: '语法', phrase: '短语' }
 
 const loading = ref(true)
 const error = ref('')
-const groups = ref([])
+const groups = ref<ReviewGroup[]>([])
 const index = ref(0)
 const revealed = ref(false)
 const busy = ref(false)
 const answer = ref('')
-const judged = ref(null)
+const judged = ref<Judged | null>(null)
 
 const queue = computed(() => groups.value.flatMap((g) => g.items || []))
 const current = computed(() => queue.value[index.value] || null)
@@ -32,8 +47,14 @@ const emptyState = computed(() => {
   return { title: '这一轮做完了', text: '做过的卡会按记忆间隔排到后面几天，先把今天这几张记住就够。' }
 })
 
-function words(arr) {
-  return (arr || [])
+interface WordLike {
+  term?: string
+  word?: string
+}
+
+function words(arr: unknown) {
+  const list = Array.isArray(arr) ? (arr as (string | WordLike)[]) : []
+  return list
     .map((x) => (typeof x === 'string' ? x : x?.term || x?.word || ''))
     .filter(Boolean)
 }
@@ -54,7 +75,7 @@ const grammarAnswerHint = computed(() => String(current.value?.related?.answer |
 // 拼写卡的纠错原因放在 related.reason，判完之后才显示，不能出现在题干上
 const spellingReason = computed(() => String(current.value?.related?.reason || ''))
 
-function cardLabel(item) {
+function cardLabel(item: StudyItemOut | null) {
   if (!item) return ''
   if (item.kind === 'phrase') return item.source === 'spoken' ? '口语' : '短语'
   return KIND_LABELS[item.kind] || item.kind
@@ -69,10 +90,11 @@ async function loadToday() {
     index.value = 0
     resetCard()
   } catch (e) {
-    if (e?.response?.status === 404) {
+    const err = e as ApiError
+    if (err?.response?.status === 404) {
       groups.value = []
     } else {
-      error.value = '加载复习清单失败：' + (e?.response?.data?.detail || e.message)
+      error.value = '加载复习清单失败：' + (err?.response?.data?.detail || err.message)
     }
   } finally {
     loading.value = false
@@ -98,7 +120,7 @@ function speakTerm() {
 }
 
 // 拼写卡：本地先算差值给一句人话，最终档位以服务端返回为准
-function distance(a, b) {
+function distance(a: string, b: string) {
   const s = (a || '').toLowerCase().trim()
   const t = (b || '').toLowerCase().trim()
   const dp = Array.from({ length: s.length + 1 }, (_, i) => [i, ...Array(t.length).fill(0)])
@@ -151,7 +173,7 @@ async function submitSpoken() {
   revealed.value = true
 }
 
-async function gradeSelf(g) {
+async function gradeSelf(g: string) {
   if (busy.value) return
   await sendReview({ grade: g })
 }
@@ -161,7 +183,7 @@ function nextCard() {
   resetCard()
 }
 
-async function sendReview(payload, { advance = true } = {}) {
+async function sendReview(payload: Record<string, unknown>, { advance = true }: { advance?: boolean } = {}) {
   const item = current.value
   if (!item) return null
   busy.value = true
@@ -170,7 +192,8 @@ async function sendReview(payload, { advance = true } = {}) {
     if (advance) nextCard()
     return data
   } catch (e) {
-    error.value = '提交复习结果失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '提交复习结果失败：' + (err?.response?.data?.detail || err.message)
     return null
   } finally {
     busy.value = false

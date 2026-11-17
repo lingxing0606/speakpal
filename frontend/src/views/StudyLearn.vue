@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
@@ -6,6 +6,30 @@ import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
 import MnemonicCard from '../components/MnemonicCard.vue'
 import { useSettingsStore } from '../stores/settings'
+
+interface Word {
+  term: string
+  meaning_zh?: string
+  example?: string
+  example_zh?: string
+  phonetic?: string
+  pos?: string
+  context?: string
+  related?: Record<string, unknown>
+}
+
+interface Batch {
+  scope: string
+  scopeName?: string
+  words: Word[]
+}
+
+interface UseFeedback {
+  title: string
+  body: string
+  passed: boolean
+  neutral?: boolean
+}
 
 const BATCH_KEY = 'speakpal.studyBatch'
 const MAX_BATCH = 50
@@ -19,7 +43,7 @@ const route = useRoute()
 const router = useRouter()
 const settings = useSettingsStore()
 
-const batch = ref(null)
+const batch = ref<Batch | null>(null)
 const ready = ref(false)
 const index = ref(0)
 const step = ref('recognize')
@@ -29,7 +53,7 @@ const processing = ref(false)
 const finishing = ref(false)
 const done = ref(false)
 const flash = ref(false)
-const cardEl = ref(null)
+const cardEl = ref<HTMLElement | null>(null)
 
 const showLeaveConfirm = ref(false)
 const pendingPath = ref('')
@@ -38,30 +62,30 @@ const leaveConfirmed = ref(false)
 const mnemonicOpen = ref(false)
 const mnemonicLoading = ref(false)
 const mnemonicFailed = ref(false)
-const mnemonicCache = new Map()
+const mnemonicCache = new Map<string, Record<string, unknown>>()
 
-const options = ref([])
+const options = ref<string[]>([])
 const correctIndex = ref(-1)
 const selected = ref(-1)
 const recognizedAnswer = ref('')
-const distractorPool = ref([])
-const optionEls = []
+const distractorPool = ref<string[]>([])
+const optionEls: (Element | null)[] = []
 
 const spellInput = ref('')
-const spellInputEl = ref(null)
+const spellInputEl = ref<HTMLInputElement | null>(null)
 const spellAttempts = ref(0)
 const spellDone = ref(false)
 const spellFailed = ref(false)
 const spellResult = ref('')
 
 const useText = ref('')
-const useInputEl = ref(null)
+const useInputEl = ref<HTMLTextAreaElement | null>(null)
 const useChecking = ref(false)
-const useFeedback = ref(null)
+const useFeedback = ref<UseFeedback | null>(null)
 const wordPassed = ref(true)
 const finishedWord = ref(false)
 
-let flashTimer = null
+let flashTimer: ReturnType<typeof setTimeout> | undefined
 
 const scope = computed(() => String(route.params.scope || '').toLowerCase())
 const total = computed(() => batch.value?.words?.length || 0)
@@ -100,7 +124,7 @@ function reducedMotion() {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 }
 
-function distance(a, b) {
+function distance(a: string, b: string) {
   const s = (a || '').toLowerCase().trim()
   const t = (b || '').toLowerCase().trim()
   const dp = Array.from({ length: s.length + 1 }, (_, i) => [i, ...Array(t.length).fill(0)])
@@ -117,7 +141,7 @@ function distance(a, b) {
   return dp[s.length][t.length]
 }
 
-function shuffle(list) {
+function shuffle<T>(list: T[]): T[] {
   const out = [...list]
   for (let i = out.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1))
@@ -126,7 +150,7 @@ function shuffle(list) {
   return out
 }
 
-function readBatch() {
+function readBatch(): Batch | null {
   try {
     const raw = sessionStorage.getItem(BATCH_KEY)
     if (!raw) return null
@@ -199,7 +223,7 @@ function resetWordState() {
   buildOptions()
 }
 
-function shakeOption(i) {
+function shakeOption(i: number) {
   if (reducedMotion()) return
   const el = optionEls[i]
   el?.animate(
@@ -213,7 +237,7 @@ function shakeOption(i) {
   )
 }
 
-function chooseOption(i) {
+function chooseOption(i: number) {
   if (recognizedAnswer.value || processing.value || done.value) return
   selected.value = i
   if (i === correctIndex.value) {
@@ -224,7 +248,7 @@ function chooseOption(i) {
   }
 }
 
-function optionClass(i) {
+function optionClass(i: number) {
   if (!recognizedAnswer.value) return 'hover:ring-brand-300'
   if (i === correctIndex.value) return 'ring-brand-400 bg-brand-50 text-brand-700'
   if (i === selected.value) return 'ring-rose-300 bg-rose-50'
@@ -237,7 +261,7 @@ function openMnemonic() {
   mnemonicLoading.value = true
 }
 
-function onMnemonicDone(payload) {
+function onMnemonicDone(payload: Record<string, unknown>) {
   mnemonicLoading.value = false
   if (word.value) mnemonicCache.set(word.value.term, payload)
 }
@@ -292,7 +316,7 @@ async function submitUse() {
   }
   try {
     const { data } = await api.post('/study/words/sentence-check', {
-      term: word.value.term,
+      term: word.value?.term,
       sentence: useText.value.trim(),
     })
     if (data?.ok) {
@@ -344,10 +368,10 @@ async function completeWord() {
   if (wordPassed.value) {
     try {
       await api.post('/study/words/learn', {
-        term: word.value.term,
-        meaning_zh: word.value.meaning_zh || '',
-        example: word.value.example || '',
-        context: word.value.context || '',
+        term: word.value?.term,
+        meaning_zh: word.value?.meaning_zh || '',
+        example: word.value?.example || '',
+        context: word.value?.context || '',
         recognized: true,
         spelled: true,
         used: true,
@@ -439,9 +463,9 @@ async function skipWord() {
   processing.value = false
 }
 
-function onKeydown(event) {
+function onKeydown(event: KeyboardEvent) {
   if (done.value || showLeaveConfirm.value || finishing.value) return
-  const tag = event.target?.tagName
+  const tag = (event.target as HTMLElement | null)?.tagName
   const typing = tag === 'INPUT' || tag === 'TEXTAREA'
   if (step.value === 'recognize' && !typing && /^[1-4]$/.test(event.key)) {
     event.preventDefault()
@@ -569,7 +593,7 @@ onBeforeUnmount(() => {
                 <button
                   v-for="(opt, i) in options"
                   :key="`${word.term}-${i}`"
-                  :ref="(el) => (optionEls[i] = el)"
+                  :ref="(el) => (optionEls[i] = el as Element | null)"
                   class="sp-pick"
                   :class="optionClass(i)"
                   :disabled="!!recognizedAnswer"

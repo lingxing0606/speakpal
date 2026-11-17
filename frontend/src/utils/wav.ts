@@ -1,8 +1,12 @@
 // 录音 Blob（webm/opus 等）→ 16 kHz 单声道 16-bit PCM WAV。
 // DeepSeek ASR 只接受 16-bit PCM WAV / Ogg Opus，而 MediaRecorder 录出来的是 webm/opus。
-export async function blobToWav(blob) {
+
+// 旧版 Safari 只在 webkitAudioContext 上提供 Web Audio
+type AudioWindow = Window & { webkitAudioContext?: typeof AudioContext }
+
+export async function blobToWav(blob: Blob): Promise<Blob> {
   const arrayBuffer = await blob.arrayBuffer()
-  const AudioCtx = window.AudioContext || window.webkitAudioContext
+  const AudioCtx: typeof AudioContext = window.AudioContext || (window as AudioWindow).webkitAudioContext!
   const ctx = new AudioCtx()
   let audioBuffer
   try {
@@ -25,7 +29,7 @@ export async function blobToWav(blob) {
   return encodeWav(rendered.getChannelData(0), rate)
 }
 
-function encodeWav(samples, sampleRate) {
+function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   const buffer = new ArrayBuffer(44 + samples.length * 2)
   const view = new DataView(buffer)
   writeString(view, 0, 'RIFF')
@@ -50,7 +54,7 @@ function encodeWav(samples, sampleRate) {
   return new Blob([buffer], { type: 'audio/wav' })
 }
 
-function writeString(view, offset, text) {
+function writeString(view: DataView, offset: number, text: string) {
   for (let i = 0; i < text.length; i += 1) {
     view.setUint8(offset + i, text.charCodeAt(i))
   }

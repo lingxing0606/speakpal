@@ -1,67 +1,73 @@
-<script setup>
-import { computed, onUnmounted, ref } from 'vue'
+<script setup lang="ts">
+import { computed, onUnmounted, ref, type PropType } from 'vue'
 import { useRoute } from 'vue-router'
 
 import api from '../api/client'
 import EmptyState from './EmptyState.vue'
 import { playRecording, stopRecording } from '../utils/recordings'
-import { createRecognizer, speakSmart, stopSpeaking } from '../utils/speech'
+import { createRecognizer, speakSmart, stopSpeaking, type SpeechRecognizer } from '../utils/speech'
+import type { DrillAttemptOut, DrillItem, ReportOut, SentenceFix } from '../types/api'
 
 const props = defineProps({
-  report: { type: Object, default: null },
+  report: { type: Object as PropType<ReportOut>, default: null },
   // 本轮跟读题（GET /sessions/{id}/drills）：概览页签的「已通过 N/M」也用它
-  drills: { type: Object, default: () => ({ items: [], pass_threshold: 0.85 }) },
+  drills: { type: Object as PropType<{ items: DrillItem[]; pass_threshold: number }>, default: () => ({ items: [], pass_threshold: 0.85 }) },
   // 每条纠错对应的本地录音（只在录过这次练习的浏览器里有）
-  fixRecordings: { type: Array, default: () => [] },
+  fixRecordings: { type: Array as PropType<(Blob | null)[]>, default: () => [] },
   // 教练「看这句」高亮的序号：由父组件切换页签后传入
   highlightFix: { type: Number, default: -1 },
 })
 
 const route = useRoute()
 
+interface ApiError {
+  message?: string
+  response?: { data?: { detail?: string } }
+}
+
 // ---- 跟读重说：把报告的「改写句」做成练-错-立刻改的闭环 ----
-const drillOpen = ref(null)
+const drillOpen = ref<number | null>(null)
 const drillListening = ref(false)
 const drillText = ref('')
-const drillResult = ref(null)
+const drillResult = ref<DrillAttemptOut | null>(null)
 const drillBusy = ref(false)
 const drillError = ref('')
-let drillRecognizer = null
+let drillRecognizer: SpeechRecognizer | null = null
 
 const topFixes = computed(() => (props.drills.items || []).slice(0, 3).filter((it) => it.target))
 const passedCount = computed(() => topFixes.value.filter((it) => it.passed).length)
 const drillByIndex = computed(() =>
-  Object.fromEntries((props.drills.items || []).map((it) => [it.index, it]))
+  Object.fromEntries((props.drills.items || []).map((it) => [it.index, it] as [number, DrillItem]))
 )
 
 // ---- 加入学习清单：语法/啰嗦两类后端不会自动建卡，要用户自己挑 ----
-const ERROR_LABELS = {
+const ERROR_LABELS: Record<string, string> = {
   spelling: '拼写',
   grammar: '语法',
   stiffness: '表达僵硬',
   wordiness: '啰嗦',
 }
-const addedMap = ref({})
-const addBusy = ref(null)
-const addError = ref({})
+const addedMap = ref<Record<number, boolean>>({})
+const addBusy = ref<number | null>(null)
+const addError = ref<Record<number, string>>({})
 
 // RAG 依据卡（阶段 2）：展开卡片原文 / 加入复习
-const ruleOpen = ref({})
-const ruleAdded = ref({})
-const ruleBusy = ref(null)
-const ruleError = ref({})
+const ruleOpen = ref<Record<number, boolean>>({})
+const ruleAdded = ref<Record<number, boolean>>({})
+const ruleBusy = ref<number | null>(null)
+const ruleError = ref<Record<number, string>>({})
 
-function toggleRule(i) {
+function toggleRule(i: number) {
   ruleOpen.value = { ...ruleOpen.value, [i]: !ruleOpen.value[i] }
 }
 
-function ruleKindLabel(kind) {
+function ruleKindLabel(kind: unknown) {
   if (kind === 'spoken') return '口语卡'
   if (kind === 'grammar') return '语法卡'
   return '依据卡'
 }
 
-async function addRuleToStudy(fix, i) {
+async function addRuleToStudy(fix: SentenceFix, i: number) {
   if (!fix.rule || ruleAdded.value[i] || ruleBusy.value === i) return
   ruleBusy.value = i
   ruleError.value = { ...ruleError.value, [i]: '' }
@@ -77,20 +83,21 @@ async function addRuleToStudy(fix, i) {
     })
     ruleAdded.value = { ...ruleAdded.value, [i]: true }
   } catch (e) {
+    const err = e as ApiError
     ruleError.value = {
       ...ruleError.value,
-      [i]: '加入失败：' + (e?.response?.data?.detail || e.message),
+      [i]: '加入失败：' + (err?.response?.data?.detail || err.message),
     }
   } finally {
     ruleBusy.value = null
   }
 }
 
-function errorLabel(type) {
+function errorLabel(type: string) {
   return ERROR_LABELS[type] || '表达'
 }
 
-async function addToStudy(fix, i) {
+async function addToStudy(fix: SentenceFix, i: number) {
   if (addedMap.value[i] || addBusy.value === i) return
   addBusy.value = i
   addError.value = { ...addError.value, [i]: '' }
@@ -112,7 +119,8 @@ async function addToStudy(fix, i) {
     })
     addedMap.value = { ...addedMap.value, [i]: true }
   } catch (e) {
-    addError.value = { ...addError.value, [i]: '加入失败：' + (e?.response?.data?.detail || e.message) }
+    const err = e as ApiError
+    addError.value = { ...addError.value, [i]: '加入失败：' + (err?.response?.data?.detail || err.message) }
   } finally {
     addBusy.value = null
   }
@@ -125,7 +133,7 @@ function reducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-async function toggleFixPlayback(i) {
+async function toggleFixPlayback(i: number) {
   if (playingFix.value === i) {
     stopRecording()
     playingFix.value = -1
@@ -146,7 +154,7 @@ function stopDrillListen() {
   drillListening.value = false
 }
 
-function openDrill(item) {
+function openDrill(item: DrillItem) {
   stopDrillListen()
   drillError.value = ''
   drillOpen.value = item.index
@@ -162,7 +170,7 @@ function closeDrill() {
   drillText.value = ''
 }
 
-function toggleDrillListen(item) {
+function toggleDrillListen(item: DrillItem) {
   if (drillListening.value) {
     stopDrillListen()
     return
@@ -180,12 +188,12 @@ function toggleDrillListen(item) {
     },
     (event) => {
       drillListening.value = false
-      const map = {
+      const map: Record<string, string> = {
         'not-allowed': '麦克风权限被拒绝了。请在地址栏左侧允许，或先听一遍原句。',
         'no-speech': '没听到声音，再点一次麦克风试试。',
         'audio-capture': '没找到麦克风，检查一下设备。',
       }
-      const msg = map[event?.error]
+      const msg = map[event?.error || '']
       if (msg) drillError.value = msg
     }
   )
@@ -197,7 +205,7 @@ function toggleDrillListen(item) {
   drillRecognizer.start()
 }
 
-async function submitDrill(item) {
+async function submitDrill(item: DrillItem) {
   const text = drillText.value.trim()
   if (!text || drillBusy.value) return
   drillBusy.value = true
@@ -210,16 +218,17 @@ async function submitDrill(item) {
     item.best_similarity = data.best_similarity
     item.passed = data.passed
   } catch (e) {
-    drillError.value = '评定失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    drillError.value = '评定失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     drillBusy.value = false
   }
 }
 
 // 教练建议「看这句」：父组件切到本页签后调这里，把目标句滚到视口中间并闪一次
-const fixEls = []
+const fixEls: (HTMLElement | null)[] = []
 
-function scrollTo(index) {
+function scrollTo(index: number) {
   const el = fixEls[index]
   if (!el) return false
   el.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' })
@@ -254,7 +263,7 @@ onUnmounted(() => {
     <div
       v-for="(f, i) in (report.sentence_fixes || [])"
       :key="i"
-      :ref="(el) => (fixEls[i] = el)"
+      :ref="(el) => (fixEls[i] = el as HTMLElement | null)"
       :style="{ '--i': Math.min(i, 10) }"
       class="sp-reveal mt-3 rounded-2xl bg-paper p-4 text-sm ring-1 ring-line/70 transition duration-200 hover:ring-brand-200"
       :class="highlightFix === i ? '!ring-2 !ring-brand-200' : ''"

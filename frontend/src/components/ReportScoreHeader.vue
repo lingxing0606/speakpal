@@ -1,11 +1,25 @@
-<script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+<script setup lang="ts">
+import { computed, nextTick, onMounted, onUnmounted, ref, type PropType } from 'vue'
 
 import api from '../api/client'
 import { useSettingsStore } from '../stores/settings'
+import type { ReportOut } from '../types/api'
+
+interface PillTextStyle {
+  fontFamily: string
+  fontSize: string
+  fontWeight: string
+  color: string
+  lineHeight: string
+}
+
+/** 焦点圈定用：按钮有 disabled，链接没有，按可选字段取 */
+interface FocusableElement extends HTMLElement {
+  disabled?: boolean
+}
 
 const props = defineProps({
-  report: { type: Object, default: null },
+  report: { type: Object as PropType<ReportOut>, default: null },
 })
 
 const settings = useSettingsStore()
@@ -17,14 +31,14 @@ const SCALE_OPTIONS = [
   { id: 'duolingo', label: '多邻国' },
   { id: 'cet', label: '四六级' },
 ]
-const scaleEls = []
-const ghostLayer = ref(null)
-const pillBoxEl = ref(null)
+const scaleEls: (HTMLElement | null)[] = []
+const ghostLayer = ref<HTMLElement | null>(null)
+const pillBoxEl = ref<HTMLElement | null>(null)
 const pillHidden = ref(false)
 const scaleInfoOpen = ref(false)
-const scaleInfoEl = ref(null)
-const scaleInfoTrigger = ref(null)
-const ghostEls = []
+const scaleInfoEl = ref<HTMLElement | null>(null)
+const scaleInfoTrigger = ref<HTMLElement | null>(null)
+const ghostEls: HTMLElement[] = []
 let switchToken = 0
 
 const scaleItems = computed(() => props.report?.scales?.items || null)
@@ -94,7 +108,7 @@ function clearGhosts() {
   ghostEls.splice(0).forEach((el) => el.remove())
 }
 
-function pillTextStyle() {
+function pillTextStyle(): PillTextStyle | null {
   const el = pillBoxEl.value?.querySelector('[data-pill-text]')
   if (!el) return null
   const cs = getComputedStyle(el)
@@ -108,7 +122,7 @@ function pillTextStyle() {
 }
 
 // 角标/飞行副本：固定层里按视口坐标摆，字体与药丸一致
-function makeGhost(text, style) {
+function makeGhost(text: string, style: PillTextStyle | null) {
   const layer = ghostLayer.value
   if (!layer || !style) return null
   const el = document.createElement('span')
@@ -122,13 +136,13 @@ function makeGhost(text, style) {
   return el
 }
 
-function placeGhost(el, centerX, centerY) {
+function placeGhost(el: HTMLElement, centerX: number, centerY: number) {
   const rect = el.getBoundingClientRect()
   el.style.left = `${centerX - rect.width / 2}px`
   el.style.top = `${centerY - rect.height / 2}px`
 }
 
-async function persistScale(id) {
+async function persistScale(id: string) {
   try {
     await api.patch('/me/settings', { report_scale: id })
   } catch {
@@ -136,14 +150,14 @@ async function persistScale(id) {
   }
 }
 
-async function pickScale(id, event) {
+async function pickScale(id: string, event?: MouseEvent) {
   if (id === activeScale.value || !hasScales.value) return
   const token = ++switchToken
   clearGhosts()
   const from = SCALE_OPTIONS.findIndex((s) => s.id === activeScale.value)
   const to = SCALE_OPTIONS.findIndex((s) => s.id === id)
   const dir = to > from ? 1 : -1
-  const chip = event?.currentTarget || scaleEls[to]
+  const chip = (event?.currentTarget as HTMLElement | null) || scaleEls[to]
   const chipRect = chip?.getBoundingClientRect()
   const oldText = pillFlatText.value
   const oldStyle = pillTextStyle()
@@ -221,7 +235,7 @@ async function pickScale(id, event) {
     )
 }
 
-function onScaleKeydown(event, i) {
+function onScaleKeydown(event: KeyboardEvent, i: number) {
   if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
   event.preventDefault()
   const delta = event.key === 'ArrowRight' ? 1 : -1
@@ -231,8 +245,8 @@ function onScaleKeydown(event, i) {
 }
 
 // 换算说明：桌面居中卡 / 窄屏底部 sheet
-async function openScaleInfo(event) {
-  scaleInfoTrigger.value = event?.currentTarget || document.activeElement
+async function openScaleInfo(event?: MouseEvent) {
+  scaleInfoTrigger.value = (event?.currentTarget as HTMLElement | null) || (document.activeElement as HTMLElement | null)
   scaleInfoOpen.value = true
   await nextTick()
   const el = scaleInfoEl.value
@@ -276,7 +290,7 @@ async function closeScaleInfo() {
   scaleInfoTrigger.value?.focus({ preventScroll: true })
 }
 
-function onScaleInfoKeydown(event) {
+function onScaleInfoKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && scaleInfoOpen.value) closeScaleInfo()
 }
 
@@ -290,11 +304,11 @@ onUnmounted(() => {
 })
 
 // aria-modal 只描述语义，Tab 仍会跑到背后的页签；这里把焦点循环限制在面板内
-function trapScaleInfoFocus(event) {
+function trapScaleInfoFocus(event: KeyboardEvent) {
   if (event.key !== 'Tab') return
   const el = scaleInfoEl.value
   if (!el) return
-  const focusables = [...el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+  const focusables = [...el.querySelectorAll<FocusableElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
     .filter((node) => !node.disabled && node.offsetParent !== null)
   if (!focusables.length) {
     event.preventDefault()
@@ -390,7 +404,7 @@ function trapScaleInfoFocus(event) {
           <button
             v-for="(s, si) in SCALE_OPTIONS"
             :key="s.id"
-            :ref="(el) => (scaleEls[si] = el)"
+            :ref="(el) => (scaleEls[si] = el as HTMLElement | null)"
             role="radio"
             :aria-checked="activeScale === s.id"
             :aria-disabled="!hasScales"

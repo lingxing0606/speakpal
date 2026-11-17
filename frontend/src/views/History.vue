@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -10,15 +10,26 @@ import TabBar from '../components/TabBar.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
 import { llmReady } from '../utils/llmGate'
+import type { HistoryItem } from '../types/api'
+
+interface Recommendation {
+  last_scene_id?: string
+  recommended_difficulty?: string
+}
+
+interface ApiError {
+  message?: string
+  response?: { data?: { detail?: string } }
+}
 
 const router = useRouter()
 const session = useSessionStore()
 const settings = useSettingsStore()
-const items = ref([])
+const items = ref<HistoryItem[]>([])
 const error = ref('')
-const rec = ref(null)
+const rec = ref<Recommendation | null>(null)
 const needKey = ref(false)
-const pendingItem = ref(null)
+const pendingItem = ref<HistoryItem | null>(null)
 // 列表还没回来时显示骨架，不能先闪一下「还没有练习记录」
 const loading = ref(true)
 
@@ -27,7 +38,8 @@ onMounted(async () => {
     const { data } = await api.get('/sessions')
     items.value = data
   } catch (e) {
-    error.value = '加载失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '加载失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     loading.value = false
   }
@@ -39,13 +51,13 @@ onMounted(async () => {
   }
 })
 
-function askKey(item) {
+function askKey(item: HistoryItem) {
   pendingItem.value = item
   needKey.value = true
 }
 
 // 继续练 / 再练一次都要先确认有密钥，别让人听完开场白、录完一句才被拒
-async function resume(item) {
+async function resume(item: HistoryItem) {
   const gate = await llmReady()
   if (!gate.ok) {
     askKey(item)
@@ -54,7 +66,7 @@ async function resume(item) {
   router.push(`/practice/${item.id}`)
 }
 
-async function replay(item) {
+async function replay(item: HistoryItem) {
   const gate = await llmReady()
   if (!gate.ok) {
     askKey(item)
@@ -77,7 +89,8 @@ async function replay(item) {
     )
     router.push(`/practice/${data.session_id}`)
   } catch (e) {
-    error.value = '开始失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '开始失败：' + (err?.response?.data?.detail || err.message)
   }
 }
 
@@ -91,10 +104,10 @@ const curveSessions = computed(() =>
       return v !== null && v !== undefined
     })
     .slice()
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 )
 
-const MODE_LABELS = { voice: '录音', typed: '打字', mixed: '混合' }
+const MODE_LABELS: Record<string, string> = { voice: '录音', typed: '打字', mixed: '混合' }
 
 // 纵轴固定成雅思全量程 3–9，不按数据动态缩放：
 // 动态量程会把 5.0→5.5 的 0.5 档画成贯穿全高的陡坡，看起来像“巨大进步”，这是误导。
@@ -109,7 +122,7 @@ const curve = computed(() => {
   const pad = 6
   const vals = rows.map((r) => Number(r.comparable_band ?? r.band))
   const span = BAND_HI - BAND_LO
-  const yOf = (v) => {
+  const yOf = (v: number) => {
     const band = Math.min(BAND_HI, Math.max(BAND_LO, v))
     return h - pad - ((band - BAND_LO) / span) * (h - pad * 2)
   }
@@ -142,7 +155,7 @@ const curve = computed(() => {
   }
 })
 
-function inputTag(it) {
+function inputTag(it: HistoryItem) {
   if (it.answer_mode) return MODE_LABELS[it.answer_mode] || ''
   if (!it.typed_turns && !it.voice_turns) return ''
   if (!it.typed_turns) return '录音'
@@ -151,22 +164,22 @@ function inputTag(it) {
 }
 
 // 行内等级与曲线同一口径（可比 band），否则同一次练习会出现两个不同等级
-function rowBand(it) {
+function rowBand(it: HistoryItem) {
   const v = it.comparable_band ?? it.band
   return v === null || v === undefined ? null : Number(v)
 }
 
 // 后端给的是不带时区的 UTC 串，先补 Z 再解析，否则会当成本地时间差 8 小时
-function when(iso) {
+function when(iso: string) {
   if (!iso) return ''
   const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso)
   const d = new Date(hasZone ? iso : `${iso}Z`)
   if (Number.isNaN(d.getTime())) return iso
-  const p = (n) => String(n).padStart(2, '0')
+  const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-function open(item) {
+function open(item: HistoryItem) {
   // 按后端列表字段直接分支，不做「先跳报告页、404 再退回」的试探
   if (item.report_id) return router.push(`/report/${item.id}`)
   if (item.status && item.status !== 'finished') return resume(item)
@@ -287,7 +300,7 @@ function open(item) {
             </div>
             <div class="mt-1 text-xs text-ink-mute">
               {{ when(it.created_at) }}
-              <span v-if="rowBand(it) !== null"> · 可比 雅思 {{ rowBand(it).toFixed(1) }}</span>
+              <span v-if="rowBand(it) !== null"> · 可比 雅思 {{ rowBand(it)?.toFixed(1) }}</span>
             </div>
           </div>
           <div class="flex shrink-0 items-center gap-3">

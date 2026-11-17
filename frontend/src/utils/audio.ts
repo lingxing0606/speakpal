@@ -1,8 +1,26 @@
 // 录音 + 音量包络分析：用于估算语速与停顿（不依赖任何模型）。
-// 同时用 MediaRecorder 把声音录下来，供回放（只存本地，见 utils/recordings.js）。
-export async function startAudioCapture() {
+// 同时用 MediaRecorder 把声音录下来，供回放（只存本地，见 utils/recordings.ts）。
+
+// 旧版 Safari 只在 webkitAudioContext 上提供 Web Audio
+type AudioWindow = Window & { webkitAudioContext?: typeof AudioContext }
+
+export interface AudioMetrics {
+  duration_sec: number
+  speech_time_sec: number
+  pauses: number[]
+}
+
+export interface AudioCapture {
+  stop(): AudioMetrics
+  /** 当前音量，0–1 左右（说话时常见 0.02–0.2） */
+  level(): number
+  /** stop() 之后调用：拿到这一句的录音 Blob（拿不到为 null） */
+  blob(): Promise<Blob | null>
+}
+
+export async function startAudioCapture(): Promise<AudioCapture> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-  const AudioCtx = window.AudioContext || window.webkitAudioContext
+  const AudioCtx: typeof AudioContext = window.AudioContext || (window as AudioWindow).webkitAudioContext!
   const ctx = new AudioCtx()
   const source = ctx.createMediaStreamSource(stream)
   const analyser = ctx.createAnalyser()
@@ -11,10 +29,10 @@ export async function startAudioCapture() {
   const buffer = new Uint8Array(analyser.fftSize)
 
   // 录音文件：浏览器不支持 MediaRecorder 时 blob() 返回 null，不影响指标采集
-  let recorder = null
-  const chunks = []
-  let resolveBlob
-  const blobPromise = new Promise((resolve) => {
+  let recorder: MediaRecorder | null = null
+  const chunks: Blob[] = []
+  let resolveBlob!: (blob: Blob | null) => void
+  const blobPromise = new Promise<Blob | null>((resolve) => {
     resolveBlob = resolve
   })
   try {
@@ -24,7 +42,7 @@ export async function startAudioCapture() {
         if (e.data && e.data.size) chunks.push(e.data)
       }
       recorder.onstop = () => {
-        resolveBlob(chunks.length ? new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }) : null)
+        resolveBlob(chunks.length ? new Blob(chunks, { type: recorder!.mimeType || 'audio/webm' }) : null)
       }
       recorder.onerror = () => resolveBlob(null)
       recorder.start()
@@ -40,9 +58,9 @@ export async function startAudioCapture() {
   let lastAt = startedAt
   let speechTime = 0
   let inSpeech = false
-  let silenceStart = null
+  let silenceStart: number | null = null
   let hadSpeech = false
-  const pauses = []
+  const pauses: number[] = []
   // 最近一次的音量（RMS），录音按钮的音量圈用
   let lastRms = 0
 

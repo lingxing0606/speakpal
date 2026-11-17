@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -14,36 +14,45 @@ import ReportScoreHeader from '../components/ReportScoreHeader.vue'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
 import { loadRecordings, stopRecording } from '../utils/recordings'
+import type { AnswerMode, DrillItem, ReportOut, SessionDetailOut, SessionPlan } from '../types/api'
+
+/** GET /api/sessions/{id} 的返回；finished_at / answer_mode 是老客户端兜底字段，服务端不一定给 */
+type ReportMeta = Partial<SessionDetailOut> & { finished_at?: string | null; answer_mode?: AnswerMode | null }
+
+interface ApiError {
+  message?: string
+  response?: { status?: number; data?: { detail?: string } }
+}
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const settings = useSettingsStore()
 
-const report = ref(null)
+const report = ref<ReportOut | null>(null)
 const error = ref('')
 const missing = ref(false)
-const meta = ref(null)
+const meta = ref<ReportMeta | null>(null)
 
-const MODE_LABELS = { typed: '打字', voice: '录音', mixed: '混合' }
+const MODE_LABELS: Record<string, string> = { typed: '打字', voice: '录音', mixed: '混合' }
 
-function when(iso) {
+function when(iso?: string | null) {
   if (!iso) return ''
   const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso)
   const d = new Date(hasZone ? iso : `${iso}Z`)
   if (Number.isNaN(d.getTime())) return iso
-  const p = (n) => String(n).padStart(2, '0')
+  const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 // 报告首屏要知道「这是哪次练习」：场景 · 作答方式 · 时间
 const metaLine = computed(() => {
-  const m = meta.value || {}
-  const mode = MODE_LABELS[m.answer_mode] || MODE_LABELS[report.value?.answer_mode] || ''
+  const m: ReportMeta = meta.value || {}
+  const mode = MODE_LABELS[m.answer_mode || ''] || MODE_LABELS[report.value?.answer_mode || ''] || ''
   return [m.scene_name, mode, when(m.created_at || m.finished_at)].filter(Boolean).join(' · ')
 })
 
-const featureLabels = {
+const featureLabels: Record<string, string> = {
   word_count: '词数',
   filler_count: '填充词数',
   filler_rate: '填充词占比',
@@ -106,14 +115,14 @@ const showMockSettingsLink = computed(
 )
 const hasScore = computed(() => report.value?.total_score !== null && report.value?.total_score !== undefined)
 // 本轮目标达成：老报告没有 plan 字段，整块不显示
-const reportPlan = computed(() => report.value?.plan || {})
+const reportPlan = computed<Partial<SessionPlan>>(() => report.value?.plan || {})
 const reportGoals = computed(() => reportPlan.value.goals || [])
 const reportAchieved = computed(() => reportPlan.value.achieved || [])
 
 const displayFeatures = computed(() => {
   const src = report.value?.features || {}
   const wordCount = Number(src.word_count ?? 0)
-  const out = {}
+  const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(src)) {
     if (v === null || v === undefined) continue
     // 没有中文标签的字段一律不渲染，后端以后新增字段也不会漏出英文键
@@ -138,8 +147,8 @@ const TABS = computed(() => [
 const tab = ref('overview')
 // 1 = 向后（索引变大），-1 = 向前；进出场位移方向用它
 const tabDir = ref(1)
-const tabEls = []
-const railEl = ref(null)
+const tabEls: (HTMLElement | null)[] = []
+const railEl = ref<HTMLElement | null>(null)
 const railNatural = ref(0)
 const tabInd = reactive({ x: 0, w: 0, show: false })
 const tabAnimating = ref(false)
@@ -148,14 +157,14 @@ function reducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-function measureTab(key) {
+function measureTab(key: string) {
   const i = TABS.value.findIndex((t) => t.key === key)
   const el = tabEls[i]
   if (!el || !el.offsetWidth) return null
   return { x: el.offsetLeft, w: el.offsetWidth }
 }
 
-function placeIndicator(key, withAnim) {
+function placeIndicator(key: string, withAnim: boolean) {
   const m = measureTab(key)
   if (!m) {
     tabInd.show = false
@@ -173,7 +182,7 @@ function alignRail() {
   if (window.scrollY > target) window.scrollTo({ top: target })
 }
 
-function setTab(next) {
+function setTab(next: string) {
   if (next === tab.value) return
   const from = TABS.value.findIndex((t) => t.key === tab.value)
   const to = TABS.value.findIndex((t) => t.key === next)
@@ -184,7 +193,7 @@ function setTab(next) {
   tab.value = next
 }
 
-function onTabKeydown(event, i) {
+function onTabKeydown(event: KeyboardEvent, i: number) {
   if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
   event.preventDefault()
   const delta = event.key === 'ArrowRight' ? 1 : -1
@@ -194,10 +203,10 @@ function onTabKeydown(event, i) {
 }
 
 // 教练建议「看这句」：切到逐句纠错，并把目标句滚到视口中间、闪一次
-const fixesRef = ref(null)
+const fixesRef = ref<InstanceType<typeof ReportFixes> | null>(null)
 const highlightFix = ref(-1)
 
-function openFix(index) {
+function openFix(index: number) {
   const target = Number(index)
   if (!Number.isInteger(target) || target < 0) return
   setTab('fixes')
@@ -219,7 +228,7 @@ function openFix(index) {
 }
 
 // mode="out-in"：旧页先退（160ms），新页再进（240ms，延迟 80ms）
-function tabEnter(el, done) {
+function tabEnter(el: Element, done: () => void) {
   if (reducedMotion()) {
     el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: 'ease-out' }).finished.then(done, done)
     return
@@ -233,7 +242,7 @@ function tabEnter(el, done) {
   ).finished.then(done, done)
 }
 
-function tabLeave(el, done) {
+function tabLeave(el: Element, done: () => void) {
   if (reducedMotion()) {
     el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: 'ease-out' }).finished.then(done, done)
     return
@@ -258,12 +267,13 @@ onMounted(async () => {
     report.value = data
     loadDrills()
   } catch (e) {
-    if (e?.response?.status === 404) {
+    const err = e as ApiError
+    if (err?.response?.status === 404) {
       // 从历史点进来的会话还没生成报告（中途退出/刷新丢态），别甩英文错误
       missing.value = true
       return
     }
-    error.value = '加载报告失败：' + (e?.response?.data?.detail || e.message)
+    error.value = '加载报告失败：' + (err?.response?.data?.detail || err.message)
   }
   // 量表偏好跟账号走；读不到就用 localStorage 里上次的（规格 B7）
   try {
@@ -286,7 +296,7 @@ onMounted(async () => {
     meta.value = null
   }
   const blobs = await loadRecordings(Number(route.params.id))
-  for (const k of Object.keys(blobs)) blobs[k] = markRaw(blobs[k])
+  for (const k of Object.keys(blobs)) blobs[Number(k)] = markRaw(blobs[Number(k)])
   recordings.value = blobs
 })
 
@@ -296,9 +306,9 @@ onUnmounted(() => {
 })
 
 // 本地录音（只在录这次练习的浏览器里有）：{ 第几句用户发言: Blob }
-const recordings = ref({})
+const recordings = ref<Record<number, Blob>>({})
 
-function normText(text) {
+function normText(text: string) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9']+/g, ' ').trim()
 }
 
@@ -342,12 +352,13 @@ async function nextPractice() {
     )
     router.push(`/practice/${data.session_id}`)
   } catch (e) {
-    error.value = '开始下一练失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '开始下一练失败：' + (err?.response?.data?.detail || err.message)
   }
 }
 
 // ---- 跟读重说：把报告的「改写句」做成练-错-立刻改的闭环 ----
-const drills = ref({ items: [], pass_threshold: 0.85 })
+const drills = ref<{ items: DrillItem[]; pass_threshold: number }>({ items: [], pass_threshold: 0.85 })
 
 async function loadDrills() {
   try {
@@ -426,7 +437,7 @@ function again() {
               <button
                 v-for="(t, i) in TABS"
                 :key="t.key"
-                :ref="(el) => (tabEls[i] = el)"
+                :ref="(el) => (tabEls[i] = el as HTMLElement | null)"
                 role="tab"
                 :aria-selected="tab === t.key"
                 :tabindex="tab === t.key ? 0 : -1"

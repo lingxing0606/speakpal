@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -12,23 +12,44 @@ import PhotoScenePanel from '../components/PhotoScenePanel.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
+import type { ImageSceneOut, SceneOut } from '../types/api'
+
+interface Recommendation {
+  recommended_difficulty?: string
+}
+
+interface DashboardDay {
+  date: string
+  count: number
+}
+
+interface Dashboard {
+  heatmap?: DashboardDay[]
+  practiced_today?: boolean
+  current_streak?: number
+}
+
+interface ApiError {
+  message?: string
+  response?: { data?: { detail?: string } }
+}
 
 const router = useRouter()
 const auth = useAuthStore()
 const session = useSessionStore()
 const settings = useSettingsStore()
 
-const scenes = ref([])
+const scenes = ref<SceneOut[]>([])
 const loading = ref(false)
 const error = ref('')
 const needKey = ref(false)
-const pendingScene = ref(null)
-const rec = ref(null)
+const pendingScene = ref<SceneOut | null>(null)
+const rec = ref<Recommendation | null>(null)
 const dueCount = ref(0)
 const notesCount = ref(0)
 const summaryError = ref(false)
 const scenesLoading = ref(true)
-const dash = ref(null)
+const dash = ref<Dashboard | null>(null)
 
 // 场景卡的色块轮换：同一套暖色系里取，不和品牌青抢
 const TINTS = [
@@ -61,7 +82,7 @@ const week = computed(() => {
   }))
 })
 
-const DIFF_LABELS = { easy: '简单', medium: '中等', hard: '困难' }
+const DIFF_LABELS: Record<string, string> = { easy: '简单', medium: '中等', hard: '困难' }
 // 本次会用的难度：设置里的偏好 > 上次成绩推荐 > 中等
 const usedDifficulty = computed(() => settings.prefDifficulty || rec.value?.recommended_difficulty || 'medium')
 
@@ -70,7 +91,8 @@ onMounted(async () => {
     const { data } = await api.get('/scenes')
     scenes.value = data
   } catch (e) {
-    error.value = '加载场景失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '加载场景失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     scenesLoading.value = false
   }
@@ -100,7 +122,7 @@ onMounted(async () => {
   }
 })
 
-async function begin(scene, extra = {}) {
+async function begin(scene: SceneOut, extra: Record<string, unknown> = {}) {
   loading.value = true
   error.value = ''
   try {
@@ -118,13 +140,14 @@ async function begin(scene, extra = {}) {
     session.start(data.session_id, scene, diff, data.opening_question, plan)
     router.push(`/practice/${data.session_id}`)
   } catch (e) {
-    error.value = '开始失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '开始失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     loading.value = false
   }
 }
 
-function start(scene) {
+function start(scene: SceneOut) {
   // 点场景开练必须先有密钥：服务端不提供，本浏览器没填就只给「去设置填密钥」这一条路
   if (!settings.configured) {
     pendingScene.value = scene
@@ -134,7 +157,7 @@ function start(scene) {
   begin(scene)
 }
 
-function startFromPhoto(photo) {
+function startFromPhoto(photo: ImageSceneOut) {
   if (!settings.configured) {
     needKey.value = true
     return

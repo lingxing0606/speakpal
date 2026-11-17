@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -8,22 +8,89 @@ import EmptyState from '../components/EmptyState.vue'
 import MnemonicCard from '../components/MnemonicCard.vue'
 import TabBar from '../components/TabBar.vue'
 
+type TabId = 'new' | 'grammar' | 'spoken'
+
+interface Word {
+  term: string
+  meaning_zh?: string
+  example?: string
+  example_zh?: string
+  phonetic?: string
+  pos?: string
+  related?: Record<string, unknown>
+}
+
+interface VocabBank {
+  scope: string
+  name: string
+  learned: number
+  total: number
+  items: Word[]
+}
+
+interface ImportRow {
+  term: string
+  meaning_zh: string
+  status: string
+  item: Word | null
+}
+
+interface GrammarItem {
+  id: number
+  point: string
+  learned: boolean
+}
+
+interface GrammarGroup {
+  id: string
+  name: string
+  desc: string
+  learned: number
+  total: number
+  items: GrammarItem[]
+}
+
+interface GrammarLib {
+  total: number
+  learned: number
+  groups: GrammarGroup[]
+}
+
+interface SpokenCard {
+  id: number
+  formal: string
+  natural: string
+  why: string
+  learned: boolean
+}
+
+interface SpokenLib {
+  total: number
+  learned: number
+  items: SpokenCard[]
+}
+
+interface ApiError {
+  message?: string
+  response?: { status?: number; data?: { detail?: string } }
+}
+
 const route = useRoute()
 const router = useRouter()
 
 // 三个菜单：新词（随范围变）、语法 / 口语（通用内容，不随范围变）
-const TABS = [
+const TABS: { id: TabId; label: string }[] = [
   { id: 'new', label: '新词' },
   { id: 'grammar', label: '语法' },
   { id: 'spoken', label: '口语' },
 ]
 
-function tabFromQuery(v) {
+function tabFromQuery(v: unknown): TabId | '' {
   if (v === 'phrase') return 'spoken'
-  return TABS.some((t) => t.id === v) ? v : ''
+  return TABS.some((t) => t.id === v) ? (v as TabId) : ''
 }
 
-const tab = ref(tabFromQuery(route.query.tab) || 'new')
+const tab = ref<TabId>(tabFromQuery(route.query.tab) || 'new')
 const scopeId = computed(() => String(route.params.scope || '').toLowerCase())
 
 // 顶部页签条：滚动超过 8px 才出下沿线
@@ -34,7 +101,7 @@ function onScroll() {
 
 // ---- 到期数（语法 / 口语 tab 上的药丸） ----
 const dueCounts = ref({ grammar: 0, spoken: 0 })
-const counts = computed(() => ({
+const counts = computed<Record<string, number>>(() => ({
   grammar: dueCounts.value.grammar || 0,
   spoken: dueCounts.value.spoken || 0,
 }))
@@ -53,7 +120,7 @@ async function loadCounts() {
 
 // ---- 学新单词（范围由路由决定） ----
 const bankLoading = ref(false)
-const bankData = ref(null)
+const bankData = ref<VocabBank | null>(null)
 const bankBusy = ref(false)
 const bankTip = ref('')
 const bankTipBad = ref(false)
@@ -69,7 +136,7 @@ const scopeSubtitle = computed(() => {
   return bankData.value ? `${bankData.value.name} · 已学 ${bankData.value.learned} / ${bankData.value.total}` : ''
 })
 
-async function fetchVocab(scope) {
+async function fetchVocab(scope?: string | string[]) {
   const wanted = String(scope || scopeId.value || '').trim().toLowerCase()
   if (wanted === 'custom') {
     // 自由扩充没有静态词库，新词 tab 用导入卡
@@ -86,19 +153,20 @@ async function fetchVocab(scope) {
     })
     bankData.value = data
   } catch (e) {
-    if (e?.response?.status === 400) {
+    const err = e as ApiError
+    if (err?.response?.status === 400) {
       // 不存在的范围（比如旧的自由扩充链接）回范围选择页
       router.replace('/study')
       return
     }
-    bankTip.value = '暂时取不到词库：' + (e?.response?.data?.detail || e.message)
+    bankTip.value = '暂时取不到词库：' + (err?.response?.data?.detail || err.message)
     bankTipBad.value = true
   } finally {
     bankLoading.value = false
   }
 }
 
-async function setPullCount(n) {
+async function setPullCount(n: number) {
   if (isCustom.value || pullCount.value === n) return
   pullCount.value = n
   await fetchVocab(scopeId.value)
@@ -125,7 +193,8 @@ async function addBankWords() {
     await Promise.all([fetchVocab(scopeId.value), loadCounts()])
     bankTip.value = text
   } catch (e) {
-    bankTip.value = '加入失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    bankTip.value = '加入失败：' + (err?.response?.data?.detail || err.message)
     bankTipBad.value = true
   } finally {
     bankBusy.value = false
@@ -135,7 +204,7 @@ async function addBankWords() {
 // ---- 三步学习入口：把当前批次交给学词页 ----
 const BATCH_KEY = 'speakpal.studyBatch'
 
-function startLearning(words) {
+function startLearning(words?: Word[] | null) {
   const list = (words || [])
     .slice(0, 50)
     .map((w) => ({
@@ -162,19 +231,19 @@ function startLearning(words) {
 
 // ---- 自由扩充：粘贴导入 ----
 const importText = ref('')
-const importRows = ref([])
+const importRows = ref<ImportRow[]>([])
 const importSummary = ref('')
 const importError = ref('')
 const importing = ref(false)
-const importBatch = ref([])
-const expandedImport = ref(new Set())
-const knownTerms = ref(new Set())
+const importBatch = ref<Word[]>([])
+const expandedImport = ref(new Set<string>())
+const knownTerms = ref(new Set<string>())
 const knownLoaded = ref(false)
-let importTimer = null
+let importTimer: ReturnType<typeof setInterval> | undefined
 
-function parseImportText(raw) {
-  const seen = new Set()
-  const rows = []
+function parseImportText(raw?: string) {
+  const seen = new Set<string>()
+  const rows: { term: string; meaning_zh: string }[] = []
   let total = 0
   for (const chunk of String(raw || '').split(/\n+/)) {
     let line = chunk.trim()
@@ -208,7 +277,7 @@ async function loadKnownTerms() {
   const results = await Promise.all(
     scopes.map((scope) => api.get('/study/vocab', { params: { scope, limit: 200 } }).catch(() => null))
   )
-  const set = new Set()
+  const set = new Set<string>()
   for (const result of results) {
     for (const word of result?.data?.items || []) {
       set.add(String(word.term || '').toLowerCase())
@@ -218,7 +287,7 @@ async function loadKnownTerms() {
   knownLoaded.value = true
 }
 
-function isKnownItem(item) {
+function isKnownItem(item?: Word | null) {
   const key = String(item?.term || '').toLowerCase()
   if (knownTerms.value.has(key)) return true
   if (!knownLoaded.value) {
@@ -253,8 +322,10 @@ async function doImport() {
     await loadKnownTerms()
     const text = rows.map((row) => (row.meaning_zh ? `${row.term} ${row.meaning_zh}` : row.term)).join('\n')
     const { data } = await api.post('/study/words/import', { text, use_ai: true })
-    const items = data?.items || []
-    const byTerm = new Map(items.map((item) => [String(item.term || '').toLowerCase(), item]))
+    const items: Word[] = data?.items || []
+    const byTerm = new Map<string, Word>(
+      items.map((item: Word) => [String(item.term || '').toLowerCase(), item] as [string, Word])
+    )
     let missing = 0
     let duplicate = 0
     importRows.value = rows.map((row) => {
@@ -280,15 +351,16 @@ async function doImport() {
       if (duplicate) importSummary.value += `，${duplicate} 个之前学过`
     }
   } catch (e) {
-    importError.value = '导入失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    importError.value = '导入失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     clearInterval(importTimer)
-    importTimer = null
+    importTimer = undefined
     importing.value = false
   }
 }
 
-function toggleImportExpand(term) {
+function toggleImportExpand(term: string) {
   const next = new Set(expandedImport.value)
   if (next.has(term)) next.delete(term)
   else next.add(term)
@@ -308,7 +380,7 @@ watch(importText, () => {
 
 
 // ---- 语法卡库：四组各 15 张，整组加入后进「复习」 ----
-const grammarLib = ref(null)
+const grammarLib = ref<GrammarLib | null>(null)
 const grammarLoading = ref(false)
 const grammarBusy = ref('')
 const grammarTip = ref('')
@@ -320,13 +392,14 @@ async function loadGrammar() {
     const { data } = await api.get('/study/grammar')
     grammarLib.value = data
   } catch (e) {
-    grammarTip.value = '暂时取不到语法卡：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    grammarTip.value = '暂时取不到语法卡：' + (err?.response?.data?.detail || err.message)
   } finally {
     grammarLoading.value = false
   }
 }
 
-async function addGrammarGroup(group) {
+async function addGrammarGroup(group: string) {
   if (grammarBusy.value) return
   grammarBusy.value = group
   grammarTip.value = ''
@@ -335,14 +408,15 @@ async function addGrammarGroup(group) {
     grammarTip.value = data.added ? `加入了 ${data.added} 张，去「复习」里做` : '这一组已经都在清单里了'
     await Promise.all([loadGrammar(), loadCounts()])
   } catch (e) {
-    grammarTip.value = '加入失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    grammarTip.value = '加入失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     grammarBusy.value = ''
   }
 }
 
 // ---- 口语卡库：60 张，一次加 10 张 ----
-const spokenLib = ref(null)
+const spokenLib = ref<SpokenLib | null>(null)
 const spokenLoading = ref(false)
 const spokenBusy = ref(false)
 const spokenTip = ref('')
@@ -354,7 +428,8 @@ async function loadSpoken() {
     const { data } = await api.get('/study/spoken')
     spokenLib.value = data
   } catch (e) {
-    spokenTip.value = '暂时取不到口语卡：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    spokenTip.value = '暂时取不到口语卡：' + (err?.response?.data?.detail || err.message)
   } finally {
     spokenLoading.value = false
   }
@@ -371,7 +446,8 @@ async function addSpoken() {
     spokenTip.value = data.added ? `加入了 ${data.added} 张，去「复习」里做` : '这些卡已经都在清单里了'
     await Promise.all([loadSpoken(), loadCounts()])
   } catch (e) {
-    spokenTip.value = '加入失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    spokenTip.value = '加入失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     spokenBusy.value = false
   }
@@ -413,7 +489,7 @@ watch(tab, (id) => {
   if (id === 'spoken' && !spokenLib.value && !spokenLoading.value) loadSpoken()
 })
 
-function switchTab(id) {
+function switchTab(id: TabId) {
   // tab 之间切换用 replace，别把每个 tab 都塞进浏览器历史栈
   if (id === tab.value) return
   tab.value = id
@@ -487,9 +563,9 @@ function switchTab(id) {
                     <MnemonicCard
                       v-if="row.status === 'ai' && expandedImport.has(row.term)"
                       :key="row.term"
-                      :term="row.item.term"
-                      :meaning-zh="row.item.meaning_zh"
-                      :related="row.item.related"
+                      :term="row.item?.term || ''"
+                      :meaning-zh="row.item?.meaning_zh"
+                      :related="row.item?.related"
                     />
                   </div>
                 </div>

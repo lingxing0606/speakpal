@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 
 const props = defineProps({
@@ -7,7 +7,7 @@ const props = defineProps({
   surface: { type: String, default: 'bubble' },
 })
 
-const LABELS = {
+const LABELS: Record<string, string> = {
   ok: '未触发',
   degraded: '降级',
   replaced: '已替换',
@@ -19,7 +19,7 @@ const LABELS = {
   mock: '示例报告',
 }
 
-const BUBBLE = {
+const BUBBLE: Record<string, string> = {
   ok: 'bg-white/15 text-white/90',
   degraded: 'bg-white/15 text-white/90',
   replaced: 'bg-white/15 text-white/90',
@@ -31,7 +31,7 @@ const BUBBLE = {
   mock: 'bg-white/15 text-white/90',
 }
 
-const PAGE = {
+const PAGE: Record<string, string> = {
   ok: 'bg-brand-50 text-brand-700',
   degraded: 'bg-amber-50 text-amber-800 ring-1 ring-amber-100',
   replaced: 'bg-amber-50 text-amber-800 ring-1 ring-amber-100',

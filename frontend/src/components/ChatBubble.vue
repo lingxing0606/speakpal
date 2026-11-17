@@ -1,12 +1,13 @@
-<script setup>
-import { computed } from 'vue'
+<script setup lang="ts">
+import { computed, type PropType } from 'vue'
 
 import AiStatusBadge from './AiStatusBadge.vue'
 import BrandLogo from './BrandLogo.vue'
 import ThinkingDots from './ThinkingDots.vue'
+import type { ChatTurn } from '../stores/session'
 
 const props = defineProps({
-  turn: { type: Object, required: true },
+  turn: { type: Object as PropType<ChatTurn>, required: true },
   index: { type: Number, required: true },
   // 正在回放的那条用户发言（同一时间只放一句）
   playingIndex: { type: Number, default: -1 },

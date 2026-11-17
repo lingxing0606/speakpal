@@ -1,8 +1,9 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 
 import api from '../api/client'
 import { useSettingsStore } from '../stores/settings'
+import type { ImageSceneOut } from '../types/api'
 
 const emit = defineEmits(['start'])
 const settings = useSettingsStore()
@@ -10,18 +11,29 @@ const settings = useSettingsStore()
 const MAX_BYTES = 4 * 1024 * 1024
 const LONG_EDGE = 1280
 
+interface FileMeta {
+  name: string
+  size: number
+  width: number
+  height: number
+}
+
+interface ApiError {
+  response?: { status?: number; data?: { detail?: string } }
+}
+
 const open = ref(false)
 const dragOver = ref(false)
-const fileEl = ref(null)
+const fileEl = ref<HTMLInputElement | null>(null)
 const preview = ref('')
-const sourceBlob = ref(null)
-const fileMeta = ref(null)
+const sourceBlob = ref<Blob | null>(null)
+const fileMeta = ref<FileMeta | null>(null)
 // idle | compressing | selected | uploading | success
 const stage = ref('idle')
 const fileError = ref('')
 const errorText = ref('')
 const unsupported = ref(false)
-const result = ref(null)
+const result = ref<ImageSceneOut | null>(null)
 
 const dimsText = computed(() =>
   fileMeta.value ? `${fileMeta.value.width}×${fileMeta.value.height}` : ''
@@ -59,19 +71,20 @@ function closePanel() {
   open.value = false
 }
 
-function onPick(event) {
-  const picked = event.target.files?.[0]
-  event.target.value = ''
+function onPick(event: Event) {
+  const input = event.target as HTMLInputElement
+  const picked = input.files?.[0]
+  input.value = ''
   if (picked) handleFile(picked)
 }
 
-function onDrop(event) {
+function onDrop(event: DragEvent) {
   dragOver.value = false
   const dropped = event.dataTransfer?.files?.[0]
   if (dropped) handleFile(dropped)
 }
 
-async function handleFile(picked) {
+async function handleFile(picked: File) {
   fileError.value = ''
   errorText.value = ''
   unsupported.value = false
@@ -107,10 +120,10 @@ async function handleFile(picked) {
   }
 }
 
-async function compressImage(picked) {
+async function compressImage(picked: File) {
   const url = URL.createObjectURL(picked)
   try {
-    const img = await new Promise((resolve, reject) => {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const el = new Image()
       el.onload = () => resolve(el)
       el.onerror = () => reject(new Error('decode'))
@@ -125,7 +138,7 @@ async function compressImage(picked) {
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('canvas')
     ctx.drawImage(img, 0, 0, width, height)
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8))
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8))
     if (!blob) throw new Error('encode')
     return { blob, width, height }
   } finally {
@@ -149,9 +162,10 @@ async function generate() {
     result.value = data
     stage.value = 'success'
   } catch (e) {
+    const err = e as ApiError
     stage.value = 'selected'
-    const status = e?.response?.status
-    const detail = String(e?.response?.data?.detail || '')
+    const status = err?.response?.status
+    const detail = String(err?.response?.data?.detail || '')
     if (status === 400 && detail.includes('不支持图片')) {
       unsupported.value = true
     } else if (status === 409) {
@@ -288,7 +302,7 @@ onBeforeUnmount(() => {
         <div v-else class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start">
           <img :src="preview" alt="待识别的图片预览" class="max-h-56 w-full max-w-[280px] rounded-xl object-cover ring-1 ring-line max-sm:max-h-40" />
           <div class="min-w-0 flex-1">
-            <div class="truncate text-xs text-ink-soft">{{ fileMeta.name }}</div>
+            <div class="truncate text-xs text-ink-soft">{{ fileMeta?.name }}</div>
             <div class="mt-0.5 text-[11px] text-ink-mute">{{ dimsText }} · {{ sizeText }}</div>
             <div class="mt-3 flex flex-wrap gap-2">
               <button class="sp-btn-ghost !px-2 !py-1 text-[11px]" @click="pickAnother">换一张</button>

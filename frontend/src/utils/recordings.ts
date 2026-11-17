@@ -7,11 +7,20 @@ const STORE = 'clips'
 // 只留最近这么多次练习的录音，免得浏览器存储越攒越大
 const KEEP_SESSIONS = 30
 
-let dbPromise = null
+interface ClipRow {
+  key: string
+  sessionId: number
+  turnIndex: number
+  user: string
+  blob: Blob
+  createdAt: number
+}
 
-function openDb() {
+let dbPromise: Promise<IDBDatabase> | null = null
+
+function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
-  dbPromise = new Promise((resolve, reject) => {
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (!('indexedDB' in window)) {
       reject(new Error('indexedDB unavailable'))
       return
@@ -30,7 +39,7 @@ function openDb() {
   return dbPromise
 }
 
-function done(tx) {
+function done(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
@@ -38,7 +47,7 @@ function done(tx) {
   })
 }
 
-function currentUser() {
+function currentUser(): string {
   try {
     return JSON.parse(localStorage.getItem('sp_user') || 'null')?.username || ''
   } catch {
@@ -47,7 +56,7 @@ function currentUser() {
 }
 
 /** 存一句录音。失败（隐私模式、存储满）静默忽略：回放只是锦上添花，不能影响练习。 */
-export async function saveRecording(sessionId, turnIndex, blob) {
+export async function saveRecording(sessionId: number | string | null | undefined, turnIndex: number, blob: Blob | null | undefined) {
   if (!sessionId || !turnIndex || !blob || !blob.size) return
   try {
     const db = await openDb()
@@ -68,14 +77,14 @@ export async function saveRecording(sessionId, turnIndex, blob) {
 }
 
 /** 取某次练习的全部录音：{ [turnIndex]: Blob } */
-export async function loadRecordings(sessionId) {
-  const out = {}
+export async function loadRecordings(sessionId: number | string | null | undefined) {
+  const out: Record<number, Blob> = {}
   if (!sessionId) return out
   try {
     const db = await openDb()
     const tx = db.transaction(STORE, 'readonly')
     const req = tx.objectStore(STORE).index('sessionId').getAll(Number(sessionId))
-    const rows = await new Promise((resolve, reject) => {
+    const rows = await new Promise<ClipRow[]>((resolve, reject) => {
       req.onsuccess = () => resolve(req.result || [])
       req.onerror = () => reject(req.error)
     })
@@ -96,8 +105,8 @@ async function prune() {
   const store = tx.objectStore(STORE)
   const req = store.getAll()
   req.onsuccess = () => {
-    const rows = req.result || []
-    const latest = new Map()
+    const rows: ClipRow[] = req.result || []
+    const latest = new Map<number, number>()
     for (const row of rows) {
       latest.set(row.sessionId, Math.max(latest.get(row.sessionId) || 0, row.createdAt || 0))
     }
@@ -127,7 +136,7 @@ export async function clearRecordings() {
 }
 
 // ---------------------------------------------------------------- 播放
-let player = null
+let player: HTMLAudioElement | null = null
 let playerUrl = ''
 
 export function stopRecording() {
@@ -142,7 +151,7 @@ export function stopRecording() {
 }
 
 /** 播放一句录音；同一时间只放一句。返回 false 表示放不出来。 */
-export async function playRecording(blob, onEnd) {
+export async function playRecording(blob: Blob | null | undefined, onEnd?: () => void) {
   stopRecording()
   if (!blob) return false
   playerUrl = URL.createObjectURL(blob)

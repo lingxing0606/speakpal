@@ -1,7 +1,9 @@
 import { useSettingsStore } from '../stores/settings'
 
+export type LlmGateResult = { ok: true } | { ok: false; reason: 'no_key' }
+
 /** 只认本浏览器里填的密钥：服务端不再提供兜底，没有就必须先配置 */
-export async function llmReady() {
+export async function llmReady(): Promise<LlmGateResult> {
   const settings = useSettingsStore()
   return settings.configured ? { ok: true } : { ok: false, reason: 'no_key' }
 }

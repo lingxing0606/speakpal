@@ -1,15 +1,17 @@
-<script setup>
-import { ref } from 'vue'
+<script setup lang="ts">
+import { ref, type PropType } from 'vue'
+
+import type { AgentTraceStep } from '../types/api'
 
 defineProps({
-  trace: { type: Array, default: () => [] },
+  trace: { type: Array as PropType<AgentTraceStep[]>, default: () => [] },
   open: { type: Boolean, default: false },
 })
 
-const argsOpen = ref({})
-const resultOpen = ref({})
+const argsOpen = ref<Record<number, boolean>>({})
+const resultOpen = ref<Record<number, boolean>>({})
 
-function argsText(entry) {
+function argsText(entry: AgentTraceStep) {
   try {
     return JSON.stringify(entry.args || {})
   } catch {
@@ -17,7 +19,7 @@ function argsText(entry) {
   }
 }
 
-function prettyArgs(entry) {
+function prettyArgs(entry: AgentTraceStep) {
   try {
     return JSON.stringify(entry.args || {}, null, 2)
   } catch {
@@ -25,11 +27,11 @@ function prettyArgs(entry) {
   }
 }
 
-function toggleArgs(index) {
+function toggleArgs(index: number) {
   argsOpen.value = { ...argsOpen.value, [index]: !argsOpen.value[index] }
 }
 
-function toggleResult(index) {
+function toggleResult(index: number) {
   resultOpen.value = { ...resultOpen.value, [index]: !resultOpen.value[index] }
 }
 </script>

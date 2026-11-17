@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -7,16 +7,28 @@ import AppHeader from '../components/AppHeader.vue'
 import TabBar from '../components/TabBar.vue'
 import { useSettingsStore } from '../stores/settings'
 
+interface ScopeItem {
+  id: string
+  name: string
+  total: number
+  learned?: number | null
+}
+
+interface ApiError {
+  message?: string
+  response?: { data?: { detail?: string } }
+}
+
 const router = useRouter()
 const settings = useSettingsStore()
 
-const scopes = ref([])
+const scopes = ref<ScopeItem[]>([])
 const lastScope = ref('')
 const loading = ref(true)
 const error = ref('')
 const dueCount = ref(0)
 const picking = ref('')
-let pickTimer = null
+let pickTimer: ReturnType<typeof setTimeout> | null = null
 
 async function loadScopes() {
   loading.value = true
@@ -28,7 +40,8 @@ async function loadScopes() {
     // 上次范围记在服务端；本地也存一份，旧链接重定向时直接用
     if (data?.scope) settings.setWordScope(data.scope)
   } catch (e) {
-    error.value = '加载学习范围失败：' + (e?.response?.data?.detail || e.message)
+    const err = e as ApiError
+    error.value = '加载学习范围失败：' + (err?.response?.data?.detail || err.message)
   } finally {
     loading.value = false
   }
@@ -49,9 +62,11 @@ onMounted(() => {
   loadDue()
 })
 
-onBeforeUnmount(() => clearTimeout(pickTimer))
+onBeforeUnmount(() => {
+  if (pickTimer) clearTimeout(pickTimer)
+})
 
-function cardClass(sc) {
+function cardClass(sc: ScopeItem) {
   if (picking.value) {
     if (picking.value === sc.id) return 'ring-brand-300 bg-brand-50/40 scale-[0.99]'
     return 'opacity-[0.55] scale-[0.98]'
@@ -59,7 +74,7 @@ function cardClass(sc) {
   return lastScope.value === sc.id ? 'ring-brand-300 bg-brand-50/40' : ''
 }
 
-function openScope(sc) {
+function openScope(sc: ScopeItem) {
   if (picking.value) return
   picking.value = sc.id
   lastScope.value = sc.id

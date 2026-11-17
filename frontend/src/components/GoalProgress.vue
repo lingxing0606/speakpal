@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import { useSessionStore } from '../stores/session'
@@ -12,13 +12,13 @@ const planAchieved = computed(() => session.plan?.achieved || [])
 // ---- 目标条：吸顶描边、首次展开、达成飞行（规格 1.3）----
 const stripScrolled = ref(false)
 // chip 的展示态：比服务端数据晚 340ms 翻转，等飞行副本快落地再变形
-const shapeAchieved = ref([])
-const poppingGoals = ref([])
+const shapeAchieved = ref<string[]>([])
+const poppingGoals = ref<string[]>([])
 const countPulsing = ref(false)
-const stripInlineHeight = ref(null)
+const stripInlineHeight = ref<string | null>(null)
 const stripContentShown = ref(true)
-const stripEl = ref(null)
-const flightLayer = ref(null)
+const stripEl = ref<HTMLElement | null>(null)
+const flightLayer = ref<HTMLElement | null>(null)
 const allGoalsDone = computed(() => planGoals.value.length > 0 && planAchieved.value.length >= planGoals.value.length)
 const stripBorder = computed(() => {
   if (allGoalsDone.value) return 'border-brand-100'
@@ -26,7 +26,7 @@ const stripBorder = computed(() => {
 })
 
 // 副本与脉冲的定时器，离开页面时统一清
-const goalTimers = []
+const goalTimers: ReturnType<typeof setTimeout>[] = []
 
 function reducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -63,13 +63,13 @@ function finishStripEnter() {
   )
 }
 
-function measureChip(index) {
+function measureChip(index: number) {
   const el = stripEl.value?.querySelector(`[data-goal="${index}"]`)
   return el ? el.getBoundingClientRect() : null
 }
 
 // 飞行起点：刚到达的 AI 气泡顶部中点；气泡在视口外时退到对话区可视底边上方 24px
-function flightSource(anchorEl) {
+function flightSource(anchorEl: HTMLElement | null) {
   const nodes = document.querySelectorAll('[data-role="ai"]')
   const bubble = nodes.length ? nodes[nodes.length - 1].getBoundingClientRect() : null
   if (bubble && bubble.bottom > 0 && bubble.top < window.innerHeight) {
@@ -82,7 +82,7 @@ function flightSource(anchorEl) {
 }
 
 // 与目标 chip 同尺寸的副本：直线插值 + 中途右弧，420ms 落到 chip 上再淡出
-function spawnFlight(goal, from, to) {
+function spawnFlight(goal: string, from: { left: number; top: number }, to: DOMRect | null) {
   const layer = flightLayer.value
   if (!layer || !to) return
   const width = to.width || 88
@@ -126,7 +126,7 @@ function spawnFlight(goal, from, to) {
 }
 
 // 达成飞行：同屏最多 3 个副本，其余只做 chip 变形；间隔 70ms
-function animateAchieved(added, anchorEl = null) {
+function animateAchieved(added: string[], anchorEl: HTMLElement | null = null) {
   const goals = planGoals.value
   if (reducedMotion()) {
     shapeAchieved.value = [...new Set([...shapeAchieved.value, ...added])]
@@ -166,12 +166,12 @@ function animateAchieved(added, anchorEl = null) {
 }
 
 /** 直接跟服务端对齐（进页面 / 回填）：chip 立刻就是已达成的样子，不做飞行 */
-function syncAchieved(list) {
+function syncAchieved(list: string[] | null | undefined) {
   shapeAchieved.value = [...(list || [])]
 }
 
 /** 新达成的目标做飞行；没新增就什么都不做（返回新增条数，便于判断） */
-function animateNew(achieved, anchorEl = null) {
+function animateNew(achieved: string[] | null | undefined, anchorEl: HTMLElement | null = null) {
   const added = (achieved || []).filter((g) => !shapeAchieved.value.includes(g))
   if (added.length) animateAchieved(added, anchorEl)
   return added.length
