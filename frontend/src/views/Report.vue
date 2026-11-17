@@ -695,6 +695,47 @@ const addedMap = ref({})
 const addBusy = ref(null)
 const addError = ref({})
 
+// RAG 依据卡（阶段 2）：展开卡片原文 / 加入复习
+const ruleOpen = ref({})
+const ruleAdded = ref({})
+const ruleBusy = ref(null)
+const ruleError = ref({})
+
+function toggleRule(i) {
+  ruleOpen.value = { ...ruleOpen.value, [i]: !ruleOpen.value[i] }
+}
+
+function ruleKindLabel(kind) {
+  if (kind === 'spoken') return '口语卡'
+  if (kind === 'grammar') return '语法卡'
+  return '依据卡'
+}
+
+async function addRuleToStudy(fix, i) {
+  if (!fix.rule || ruleAdded.value[i] || ruleBusy.value === i) return
+  ruleBusy.value = i
+  ruleError.value = { ...ruleError.value, [i]: '' }
+  try {
+    await api.post('/study/items', {
+      kind: 'phrase',
+      term: fix.rule.title,
+      context: fix.rule.text,
+      meaning_zh: fix.rule.kind === 'spoken' ? '口语卡依据' : '语法卡依据',
+      example: '',
+      related: {},
+      source_session_id: Number(route.params.id) || null,
+    })
+    ruleAdded.value = { ...ruleAdded.value, [i]: true }
+  } catch (e) {
+    ruleError.value = {
+      ...ruleError.value,
+      [i]: '加入失败：' + (e?.response?.data?.detail || e.message),
+    }
+  } finally {
+    ruleBusy.value = null
+  }
+}
+
 function errorLabel(type) {
   return ERROR_LABELS[type] || '表达'
 }
@@ -1155,6 +1196,29 @@ function again() {
                   {{ addedMap[i] ? '已加入清单' : '加入学习清单' }}
                 </button>
               </div>
+            </div>
+
+            <div v-if="f.rule_ref" class="mt-2 rounded-xl bg-white p-3 ring-1 ring-line/70">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  class="min-w-0 text-left text-[12px] font-medium text-brand-700 underline-offset-2 hover:underline"
+                  :aria-expanded="!!ruleOpen[i]"
+                  @click="toggleRule(i)"
+                >
+                  依据：{{ ruleKindLabel(f.rule?.kind) }} · {{ f.rule?.title || f.rule_ref }}
+                </button>
+                <button
+                  class="sp-btn-ghost shrink-0 !px-2 !py-1 text-[11px]"
+                  :disabled="!f.rule || ruleAdded[i] || ruleBusy === i"
+                  @click="addRuleToStudy(f, i)"
+                >
+                  {{ ruleAdded[i] ? '已加入复习' : ruleBusy === i ? '加入中…' : '加入复习' }}
+                </button>
+              </div>
+              <p v-if="ruleOpen[i]" class="mt-2 text-[12px] leading-5 text-ink-soft">
+                {{ f.rule?.text || '这张卡没有可展示的原文。' }}
+              </p>
+              <p v-if="ruleError[i]" class="mt-1 text-[11px] leading-5 text-danger">{{ ruleError[i] }}</p>
             </div>
             <p v-if="addError[i]" class="mt-1 text-[11px] leading-5 text-danger">{{ addError[i] }}</p>
 

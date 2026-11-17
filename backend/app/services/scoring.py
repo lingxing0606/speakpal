@@ -7,6 +7,7 @@ from evaluation.bands import DIMENSIONS, report_bands, round_band
 from .llm import chat_json
 from .llm_config import LLMConfig, UserKeyInvalid, build_llm_config
 from .outbound import UnsafeBaseURL, check_base_url
+from .rag import search
 from .study import normalize_related
 
 ERROR_TYPES = ("spelling", "grammar", "stiffness", "wordiness")
@@ -39,8 +40,27 @@ def _user_corpus(history) -> str:
     return " " + " ".join(parts) + " "
 
 
-def _sanitize_fixes(raw, history):
-    """只保留用户真的说过的话。
+def _reference_cards(history, limit: int = 8) -> list[dict]:
+    """对每句用户发言检索语法/口语卡，按 ref 去重，最多 limit 张（方案 §2.3）。"""
+    seen: dict[str, dict] = {}
+    for turn in history:
+        if turn.get("role") != "user":
+            continue
+        for sentence in re.split(r"[.!?\n]+", turn.get("content") or ""):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            for hit in search(sentence, k=2, kinds=["grammar", "spoken"]):
+                if hit["ref"] in seen:
+                    continue
+                seen[hit["ref"]] = hit
+                if len(seen) >= limit:
+                    return list(seen.values())
+    return list(seen.values())
+
+
+def _sanitize_fixes(raw, history, references=None):
+    """只保留用户真的说过的话；rule_ref 必须来自本次注入的卡片。
 
     `original` 必须能在用户发言里找到（忽略大小写/标点），否则丢弃——
     报告不能虚构用户没说过的话。
@@ -48,6 +68,7 @@ def _sanitize_fixes(raw, history):
     if not isinstance(raw, list):
         return []
     corpus = _user_corpus(history)
+    ref_map = {str(item.get("ref") or ""): item for item in (references or [])}
     out = []
     for item in raw:
         if not isinstance(item, dict):
@@ -63,13 +84,26 @@ def _sanitize_fixes(raw, history):
         error_type = str(item.get("error_type") or "").strip().lower()
         if error_type not in ERROR_TYPES:
             error_type = "grammar"
+        rule_ref = str(item.get("rule_ref") or "").strip()
+        rule = ref_map.get(rule_ref)
+        if rule_ref and rule is None:
+            # 模型编了一个本次没注入的 id：直接清掉，不报错
+            rule_ref = ""
         fix = {
             "original": original,
             "better": better,
             "reason": reason,
             "error_type": error_type,
             "natural": str(item.get("natural") or "").strip(),
+            "rule_ref": rule_ref,
         }
+        if rule is not None:
+            fix["rule"] = {
+                "ref": rule["ref"],
+                "kind": rule["kind"],
+                "title": rule["title"],
+                "text": rule["text"],
+            }
         if error_type == "spelling":
             fix["word"] = str(item.get("word") or "").strip()
             fix["related"] = normalize_related(item.get("related"))
@@ -106,7 +140,7 @@ def _parse_bands(raw):
     return out or None
 
 
-def parse_llm_report(data, history):
+def parse_llm_report(data, history, references=None):
     """把模型返回的 JSON 转成报告 dict；不可用返回 None（交给降级路径）。"""
     if not isinstance(data, dict):
         return None
@@ -117,7 +151,7 @@ def parse_llm_report(data, history):
         return None
 
     scored = report_bands(parsed)
-    fixes = _sanitize_fixes(data.get("sentence_fixes"), history)
+    fixes = _sanitize_fixes(data.get("sentence_fixes"), history, references)
     return {
         "total_score": scored["total_score"],
         "dimensions": scored["dimensions"],
@@ -169,7 +203,7 @@ def _fallback_report(history, mock_reason: str, detail: str = ""):
     }
 
 
-def _prompt(scene: dict, difficulty: str, history) -> str:
+def _prompt(scene: dict, difficulty: str, history, references=None) -> str:
     lines = []
     for t in history:
         if t.get("role") == "ai":
@@ -182,6 +216,15 @@ def _prompt(scene: dict, difficulty: str, history) -> str:
         "voice": sum(1 for t in history if t.get("role") == "user" and (t.get("input_mode") or "voice") == "voice"),
         "typed": sum(1 for t in history if t.get("role") == "user" and (t.get("input_mode") or "voice") == "typed"),
     }
+    ref_lines = ""
+    if references:
+        ref_lines = (
+            "\n\nReference cards (cite a card by its id in `rule_ref`; never invent an id):\n"
+            + "\n".join(
+                f"[{ref['ref']}] {ref['kind']}: {ref['title']} — {ref['text']}"
+                for ref in references
+            )
+        )
     return (
         "You are an English assessor. Rate the learner using IELTS band descriptors, "
         "then explain the reasons.\n"
@@ -190,6 +233,7 @@ def _prompt(scene: dict, difficulty: str, history) -> str:
         '"grammar_vocab":3.0-9.0,"task_completion":3.0-9.0,"written_expression":3.0-9.0},'
         '"sentence_fixes":[{"original":"","better":"","reason":"",'
         '"error_type":"spelling|grammar|stiffness|wordiness","natural":"",'
+        '"rule_ref":"",'
         '"word":"","related":{"synonyms":[],"antonyms":[],"similar":[]}}],'
         '"comment":"","note":"分数由 AI 估算，仅供参考。"}\n'
         "Which dimensions to return (IMPORTANT):\n"
@@ -213,6 +257,8 @@ def _prompt(scene: dict, difficulty: str, history) -> str:
         "  a coherent answer with some errors belongs to band 6; accurate, flexible language is band 7+.\n"
         "- sentence_fixes: 1-3 items. `original` MUST be copied verbatim from the learner's turn;\n"
         "  never invent a sentence the learner did not say.\n"
+        "- If a sentence fix matches one of the reference cards below, set `rule_ref` to that\n"
+        "  card id exactly; otherwise leave `rule_ref` empty. Never invent an id.\n"
         "- Each fix carries `error_type`, one of exactly: spelling / grammar / stiffness / wordiness.\n"
         "  * spelling: the learner wrote a wrong word. Also fill `word` (the correct word) and\n"
         "    `related` with synonyms/antonyms/similar words (English words only, 2-4 total).\n"
@@ -222,7 +268,7 @@ def _prompt(scene: dict, difficulty: str, history) -> str:
         "  `reason` explains the issue in Simplified Chinese for all types.\n"
         "- Write `comment` and every `reason` in Simplified Chinese (简体中文).\n"
         "- Keep `original` and `better` in English: the learner's sentence and the improved version.\n\n"
-        f"Scene: {scene['name']}\nDifficulty: {difficulty}\nConversation:\n{convo}"
+        f"Scene: {scene['name']}\nDifficulty: {difficulty}\nConversation:\n{convo}{ref_lines}"
     )
 
 
@@ -251,10 +297,12 @@ def _validate_report(data: dict):
                 raise ValueError(f"every fix needs a non-empty `{key}`")
 
 
-def _request_report(llm: LLMConfig, scene: dict, difficulty: str, history) -> dict | None:
+def _request_report(
+    llm: LLMConfig, scene: dict, difficulty: str, history, references=None
+) -> dict | None:
     return chat_json(
         llm,
-        [{"role": "user", "content": _prompt(scene, difficulty, history)}],
+        [{"role": "user", "content": _prompt(scene, difficulty, history, references)}],
         validate=_validate_report,
         temperature=0.2,
         timeout=60.0,
@@ -276,8 +324,10 @@ def generate_report(scene: dict, difficulty: str, history, llm: LLMConfig | None
     except UnsafeBaseURL as exc:
         return _fallback_report(history, MOCK_UNAVAILABLE, exc.message)
 
+    # RAG：先检索本次对话能对上的语法/口语卡，再喂给评分模型（失败时为空，不影响出报告）
+    references = _reference_cards(history)
     try:
-        raw = _request_report(llm, scene, difficulty, history)
+        raw = _request_report(llm, scene, difficulty, history, references)
     except httpx.HTTPStatusError as exc:
         code = exc.response.status_code
         if code in (401, 403):
@@ -292,7 +342,7 @@ def generate_report(scene: dict, difficulty: str, history, llm: LLMConfig | None
     except Exception as exc:  # noqa: BLE001 - 任何网络/协议错误都降级，不冒泡成 500
         return _fallback_report(history, MOCK_UNAVAILABLE, f"{type(exc).__name__}: {exc}")
 
-    data = parse_llm_report(raw, history)
+    data = parse_llm_report(raw, history, references)
     if not data:
         return _fallback_report(history, MOCK_UNAVAILABLE, "模型返回无法解析")
     return data

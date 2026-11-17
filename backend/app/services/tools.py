@@ -14,7 +14,7 @@ import json
 import time
 
 from ..models import PracticeSession, Report
-from . import library, wordbank
+from . import library, rag, wordbank
 from .rules import TASK_CHECKS
 from .scenes import get_frames
 
@@ -77,6 +77,17 @@ def _grammar_card(query: str) -> dict | None:
         if needle in f"{card['rule']} {card['wrong']} {card['right']}".lower():
             return card
     return None
+
+
+def _search_knowledge(query: str, k: int = 4, db=None, user_id=None) -> dict:
+    """知识库检索 + 该用户自己的学习历史（身份由服务端注入）。"""
+    size = max(1, min(int(k or 4), 10))
+    return {
+        "knowledge": rag.search(query, k=size),
+        "history": (
+            rag.search_user_history(db, user_id, query, k=3) if db is not None else []
+        ),
+    }
 
 
 TOOLS = {
@@ -153,6 +164,29 @@ TOOLS = {
             "required": ["query"],
         },
     },
+    "search_knowledge": {
+        "func": _search_knowledge,
+        "schema": {"query": str, "db": object, "user_id": int},
+        "optional": {"k": int},
+        "description": (
+            "Search grammar cards, spoken cards, the vocabulary bank, and this "
+            "learner's own study history. Identity is injected by the server."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to look up, for example present perfect.",
+                },
+                "k": {
+                    "type": "integer",
+                    "description": "How many knowledge cards to return (1-10, default 4).",
+                },
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 
@@ -187,7 +221,8 @@ def call(name: str, **kwargs):
         return {"error": f"未知工具：{name}"}
     args = {}
     invalid = []
-    for key, expected in tool["schema"].items():
+    schema = {**tool["schema"], **tool.get("optional", {})}
+    for key, expected in schema.items():
         if key not in kwargs:
             continue
         value = kwargs[key]

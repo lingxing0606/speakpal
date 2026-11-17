@@ -1,0 +1,464 @@
+{
+  "generated_at": "2026-11-17T11:33:32+00:00",
+  "corpus": {
+    "grammar_cards": 60,
+    "spoken_cards": 60,
+    "word_entries": 600
+  },
+  "top_k": 3,
+  "bm25": {
+    "cases": 40,
+    "recall@1": 0.85,
+    "recall@3": 1.0,
+    "mrr": 0.9125
+  },
+  "random_baseline": {
+    "cases": 40,
+    "trials": 200,
+    "recall@1": 0.0519,
+    "recall@3": 0.162,
+    "mrr": 0.0975
+  },
+  "cases": [
+    {
+      "id": "g01",
+      "query": "Can you tell me where is the hotel?",
+      "expected": "clauses-01",
+      "hits": [
+        "clauses-01",
+        "spoken-14",
+        "clauses-06"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g02",
+      "query": "He doesn't wants any tea.",
+      "expected": "tenses-02",
+      "hits": [
+        "tenses-02",
+        "spoken-46",
+        "clauses-12"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g03",
+      "query": "I call my sister yesterday.",
+      "expected": "tenses-03",
+      "hits": [
+        "spoken-15",
+        "spoken-48",
+        "tenses-03"
+      ],
+      "rank": 3
+    },
+    {
+      "id": "g04",
+      "query": "They was late last night.",
+      "expected": "tenses-04",
+      "hits": [
+        "tenses-04",
+        "spoken-31",
+        "spoken-11"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g05",
+      "query": "She is cook dinner now.",
+      "expected": "tenses-05",
+      "hits": [
+        "tenses-05",
+        "spoken-21",
+        "spoken-06"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g06",
+      "query": "I was take a shower when you called.",
+      "expected": "tenses-06",
+      "hits": [
+        "tenses-06",
+        "clauses-08",
+        "spoken-07"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g07",
+      "query": "They have eat all the cake.",
+      "expected": "tenses-07",
+      "hits": [
+        "spoken-06",
+        "spoken-39",
+        "tenses-07"
+      ],
+      "rank": 3
+    },
+    {
+      "id": "g08",
+      "query": "He had leave before I got there.",
+      "expected": "tenses-09",
+      "hits": [
+        "tenses-09",
+        "spoken-37",
+        "spoken-51"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g09",
+      "query": "I will bought a new laptop tomorrow.",
+      "expected": "tenses-10",
+      "hits": [
+        "tenses-10",
+        "articles-02",
+        "spoken-15"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g10",
+      "query": "She is going to cooked dinner tonight.",
+      "expected": "tenses-11",
+      "hits": [
+        "tenses-11",
+        "spoken-54",
+        "prep-13"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g11",
+      "query": "They have been wait for two hours.",
+      "expected": "tenses-12",
+      "hits": [
+        "tenses-12",
+        "prep-06",
+        "tenses-08"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g12",
+      "query": "Many cars is make in Japan.",
+      "expected": "tenses-13",
+      "hits": [
+        "tenses-13",
+        "prep-13",
+        "articles-11"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g13",
+      "query": "The bridge was build ten years ago.",
+      "expected": "tenses-14",
+      "hits": [
+        "tenses-14",
+        "prep-06",
+        "tenses-08"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g14",
+      "query": "If it will rain tomorrow, we will cancel the trip.",
+      "expected": "tenses-15",
+      "hits": [
+        "tenses-15",
+        "tenses-10",
+        "clauses-09"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g15",
+      "query": "She bought a apple this morning.",
+      "expected": "articles-01",
+      "hits": [
+        "articles-14",
+        "articles-01",
+        "prep-02"
+      ],
+      "rank": 2
+    },
+    {
+      "id": "g16",
+      "query": "Please close window.",
+      "expected": "articles-03",
+      "hits": [
+        "articles-03",
+        "spoken-44",
+        "spoken-20"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g17",
+      "query": "I like the cats.",
+      "expected": "articles-05",
+      "hits": [
+        "spoken-03",
+        "articles-05",
+        "articles-14"
+      ],
+      "rank": 2
+    },
+    {
+      "id": "g18",
+      "query": "He plays violin very well.",
+      "expected": "articles-09",
+      "hits": [
+        "articles-10",
+        "spoken-28",
+        "articles-09"
+      ],
+      "rank": 3
+    },
+    {
+      "id": "g19",
+      "query": "This is first time I have tried sushi.",
+      "expected": "articles-12",
+      "hits": [
+        "articles-12",
+        "spoken-42",
+        "clauses-14"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g20",
+      "query": "She walks to home every evening.",
+      "expected": "prep-04",
+      "hits": [
+        "prep-04",
+        "clauses-10",
+        "articles-14"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g21",
+      "query": "I go to work by my car.",
+      "expected": "prep-05",
+      "hits": [
+        "prep-05",
+        "spoken-06",
+        "prep-04"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g22",
+      "query": "The game was cancelled because the rain.",
+      "expected": "prep-08",
+      "hits": [
+        "prep-08",
+        "spoken-31",
+        "clauses-14"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g23",
+      "query": "There is a clock in the wall.",
+      "expected": "prep-10",
+      "hits": [
+        "prep-10",
+        "spoken-37",
+        "articles-11"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g24",
+      "query": "She is interested on art.",
+      "expected": "prep-13",
+      "hits": [
+        "prep-13",
+        "spoken-43",
+        "prep-10"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g25",
+      "query": "The woman which called me is my aunt.",
+      "expected": "clauses-04",
+      "hits": [
+        "clauses-04",
+        "clauses-05",
+        "clauses-07"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g26",
+      "query": "The film who I watched was great.",
+      "expected": "clauses-05",
+      "hits": [
+        "clauses-04",
+        "clauses-05",
+        "tenses-04"
+      ],
+      "rank": 2
+    },
+    {
+      "id": "g27",
+      "query": "When she will arrive, we will eat.",
+      "expected": "clauses-08",
+      "hits": [
+        "clauses-08",
+        "tenses-10",
+        "tenses-15"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g28",
+      "query": "Unless you don't study, you will fail.",
+      "expected": "clauses-09",
+      "hits": [
+        "clauses-09",
+        "spoken-15",
+        "clauses-08"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g29",
+      "query": "Because the weather was bad, so we stayed home.",
+      "expected": "clauses-10",
+      "hits": [
+        "clauses-10",
+        "prep-08",
+        "clauses-13"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "g30",
+      "query": "Is important that we finish today.",
+      "expected": "clauses-11",
+      "hits": [
+        "clauses-11",
+        "spoken-33",
+        "spoken-41"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s01",
+      "query": "Please wait a second.",
+      "expected": "spoken-02",
+      "hits": [
+        "spoken-02",
+        "spoken-52",
+        "spoken-20"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s02",
+      "query": "I would like to order a latte.",
+      "expected": "spoken-03",
+      "hits": [
+        "spoken-03",
+        "articles-05",
+        "spoken-06"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s03",
+      "query": "I am very hungry after work.",
+      "expected": "spoken-04",
+      "hits": [
+        "spoken-04",
+        "spoken-47",
+        "spoken-34"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s04",
+      "query": "That is expensive for a simple meal.",
+      "expected": "spoken-05",
+      "hits": [
+        "spoken-05",
+        "spoken-23",
+        "spoken-09"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s05",
+      "query": "I have to go now, sorry.",
+      "expected": "spoken-06",
+      "hits": [
+        "spoken-06",
+        "prep-04",
+        "spoken-59"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s06",
+      "query": "What do you think about it?",
+      "expected": "spoken-07",
+      "hits": [
+        "spoken-07",
+        "spoken-22",
+        "spoken-09"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s07",
+      "query": "I agree with you on this point.",
+      "expected": "spoken-08",
+      "hits": [
+        "spoken-08",
+        "spoken-32",
+        "spoken-01"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s08",
+      "query": "Please repeat that question.",
+      "expected": "spoken-10",
+      "hits": [
+        "spoken-10",
+        "spoken-23",
+        "spoken-20"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s09",
+      "query": "I am sorry for being late today.",
+      "expected": "spoken-11",
+      "hits": [
+        "spoken-11",
+        "spoken-59",
+        "spoken-31"
+      ],
+      "rank": 1
+    },
+    {
+      "id": "s10",
+      "query": "Can you help me move this table?",
+      "expected": "spoken-14",
+      "hits": [
+        "spoken-14",
+        "spoken-12",
+        "clauses-01"
+      ],
+      "rank": 1
+    }
+  ]
+}

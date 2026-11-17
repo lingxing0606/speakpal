@@ -118,6 +118,9 @@ class SentenceFix(BaseModel):
     # 拼写类才有的字段（报告页展示单词讲解和近义/反义/同类词）
     word: str = ""
     related: Dict[str, Any] = {}
+    # RAG 依据卡（阶段 2）：只保存本次注入过的卡 id；rule 是解析后的卡片原文
+    rule_ref: str = ""
+    rule: Dict[str, Any] | None = None
 
 
 class StudyItemOut(BaseModel):

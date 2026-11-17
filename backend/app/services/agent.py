@@ -28,7 +28,13 @@ PLAN_TIMEOUT = 12.0
 CRITIC_TIMEOUT = 20.0
 
 # 诊断教练：最多 4 步、每步最多 3 个工具调用，最终只留 3 条建议
-COACH_TOOLS = ("lookup_word", "grammar_card", "recent_weakness", "get_frames")
+COACH_TOOLS = (
+    "lookup_word",
+    "grammar_card",
+    "recent_weakness",
+    "get_frames",
+    "search_knowledge",
+)
 COACH_MAX_STEPS = 4
 COACH_MAX_TOOL_CALLS = 3
 COACH_MAX_PRIORITIES = 3
@@ -303,7 +309,7 @@ def _run_coach_tool(step: int, tool_call: dict, db, user_id: int, messages: list
     if not isinstance(model_args, dict):
         model_args = {}
     call_args = dict(model_args)
-    if name == "recent_weakness":
+    if name in ("recent_weakness", "search_knowledge"):
         # 身份只由服务端注入：模型传的 db / user_id 一律忽略
         call_args.pop("db", None)
         call_args.pop("user_id", None)

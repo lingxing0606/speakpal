@@ -42,6 +42,8 @@ from app.services import hints as hints_service  # noqa: E402
 from app.services import agent as agent_service  # noqa: E402
 from app.services import llm as llm_service  # noqa: E402
 from app.services import llm_config, outbound  # noqa: E402
+from app.services import rag as rag_service  # noqa: E402
+from app.services import scoring as scoring_service  # noqa: E402
 from app.services.rules import TASK_CHECKS  # noqa: E402
 from evaluation import bands  # noqa: E402
 from evaluation.scales import scales_for_band  # noqa: E402
@@ -1904,6 +1906,21 @@ class ToolSchemaTests(unittest.TestCase):
         self.assertIn("error", call("no_such_tool"))
         self.assertIn("error", call("recent_weakness"))
 
+    def test_search_knowledge_returns_knowledge_and_history(self):
+        from app.db import SessionLocal
+        from app.services.tools import call
+
+        db = SessionLocal()
+        try:
+            result = call(
+                "search_knowledge", query="present perfect", k=2, db=db, user_id=999
+            )
+        finally:
+            db.close()
+        self.assertIn("knowledge", result)
+        self.assertLessEqual(len(result["knowledge"]), 2)
+        self.assertIsInstance(result["history"], list)
+
 
 class CoachAgentTests(unittest.TestCase):
     """阶段 1：诊断教练的工具循环、证据校验与降级。"""
@@ -2158,6 +2175,151 @@ class FinishStreamTests(SessionTests):
             self.client.get(f"/api/sessions/{sid}/report", headers=self.headers).status_code,
             200,
         )
+
+
+class RagTests(unittest.TestCase):
+    """阶段 2：中英混合分词、缺依赖降级、检索能命中语法卡。"""
+
+    def test_tokenize_mixes_english_and_chinese_bigrams(self):
+        tokens = rag_service.tokenize("I said 时态错了")
+        self.assertIn("said", tokens)
+        self.assertIn("时态", tokens)
+        self.assertIn("态错", tokens)
+        self.assertIn("错了", tokens)
+
+    def test_search_returns_empty_when_bm25s_missing(self):
+        with mock.patch.object(rag_service, "bm25s", None):
+            self.assertEqual(rag_service.search("present perfect"), [])
+
+    def test_search_finds_grammar_card(self):
+        hits = rag_service.search("He go to school by bus", k=3, kinds=["grammar"])
+        self.assertIn("tenses-01", [hit["ref"] for hit in hits])
+
+
+class RagScoringTests(unittest.TestCase):
+    """阶段 2：rule_ref 只认本次注入的卡；没有 bm25s 报告也照常生成。"""
+
+    def test_hallucinated_rule_ref_is_cleared(self):
+        history = [{"role": "user", "content": "I walk to the park yesterday."}]
+        references = [
+            {
+                "ref": "tenses-03",
+                "kind": "grammar",
+                "title": "一般过去时：规则动词",
+                "text": "过去发生的事用动词过去式。",
+            }
+        ]
+        fix = {
+            "original": "I walk to the park yesterday.",
+            "better": "I walked to the park yesterday.",
+            "reason": "过去的事要用过去式。",
+        }
+        fixes = scoring_service._sanitize_fixes(
+            [{**fix, "rule_ref": "tenses-99"}, {**fix, "rule_ref": "tenses-03"}],
+            history,
+            references,
+        )
+        self.assertEqual(fixes[0]["rule_ref"], "")
+        self.assertNotIn("rule", fixes[0])
+        self.assertEqual(fixes[1]["rule_ref"], "tenses-03")
+        self.assertEqual(fixes[1]["rule"]["title"], "一般过去时：规则动词")
+
+    def test_reference_cards_hit_tenses_card(self):
+        refs = scoring_service._reference_cards(
+            [{"role": "user", "content": "I walk to the park yesterday."}]
+        )
+        self.assertIn("tenses-03", [ref["ref"] for ref in refs])
+
+    def test_report_generates_when_bm25s_missing(self):
+        report = {
+            "bands": {"grammar_vocab": 5.0, "task_completion": 6.0},
+            "sentence_fixes": [
+                {
+                    "original": "I go to school yesterday.",
+                    "better": "I went to school yesterday.",
+                    "reason": "过去式",
+                    "rule_ref": "tenses-99",
+                }
+            ],
+            "comment": "",
+            "note": "",
+        }
+        cfg = llm_config.LLMConfig(
+            api_key="sk-test",
+            base_url="https://api.example.com/v1",
+            model="deepseek-flash",
+            key_source="user",
+        )
+        with mock.patch.object(outbound.socket, "getaddrinfo", _public_dns), mock.patch.object(
+            rag_service, "bm25s", None
+        ), mock.patch("app.services.scoring.chat_json", return_value=report):
+            data = scoring_service.generate_report(
+                {"name": "cafe_order"},
+                "medium",
+                [{"role": "user", "content": "I go to school yesterday."}],
+                cfg,
+            )
+        self.assertEqual(data["source"], "llm")
+        self.assertEqual(data["sentence_fixes"][0]["rule_ref"], "")
+
+
+class RagHistoryTests(ApiTestCase):
+    """阶段 2：search_user_history 只返回自己的学习卡与历史纠错。"""
+
+    def test_user_history_does_not_leak_other_users(self):
+        import json as _json2
+
+        from app.db import SessionLocal
+        from app.models import PracticeSession, Report, StudyItem
+
+        _, headers_a = self.register()
+        _, headers_b = self.register()
+        me_a = self.client.get("/api/auth/me", headers=headers_a).json()
+        me_b = self.client.get("/api/auth/me", headers=headers_b).json()
+        db = SessionLocal()
+        try:
+            mine = StudyItem(user_id=me_a["id"], kind="word", term="alphaunique", meaning_zh="甲")
+            other = StudyItem(user_id=me_b["id"], kind="word", term="betaunique", meaning_zh="乙")
+            db.add_all([mine, other])
+            db.flush()
+            other_session = PracticeSession(
+                user_id=me_b["id"], scene_id="cafe_order", difficulty="medium"
+            )
+            db.add(other_session)
+            db.flush()
+            db.add(
+                Report(
+                    session_id=other_session.id,
+                    source="llm",
+                    fixes_json=_json2.dumps(
+                        [
+                            {
+                                "original": "I gammaunique here.",
+                                "better": "I am here.",
+                                "reason": "虚构的他人历史",
+                            }
+                        ],
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            db.commit()
+            db.refresh(mine)
+            db.refresh(other)
+
+            refs = [
+                hit["ref"]
+                for hit in rag_service.search_user_history(db, me_a["id"], "alphaunique", k=5)
+            ]
+            leaked = [
+                hit["ref"]
+                for hit in rag_service.search_user_history(db, me_a["id"], "gammaunique", k=5)
+            ]
+        finally:
+            db.close()
+        self.assertIn(f"item:{mine.id}", refs)
+        self.assertNotIn(f"item:{other.id}", refs)
+        self.assertEqual(leaked, [])
 
 
 class LlmUnifiedCallTests(unittest.TestCase):

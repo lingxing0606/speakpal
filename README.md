@@ -247,6 +247,20 @@ python tools/generate_pdf.py
 > 输出 `SpeakPal_技术文档.pdf`（根目录交付版，入库）与 `docs/技术文档.pdf`（同源副本，本地生成、不入库）。
 > 依赖 `reportlab`，属工具链依赖而非后端运行时依赖，单独安装：`pip install -r tools/requirements-pdf.txt`（已锁 `reportlab==5.1.0`）。
 
+### 7.5 RAG 检索离线评测（`evaluation/rag_eval.py`）
+
+```powershell
+backend\.venv\Scripts\python.exe -m evaluation.rag_eval
+```
+
+> 40 条人工写的学习者错句（`evaluation/rag_cases.json`，换场景与词汇，不照抄卡片 `wrong` 字段），对照「按语法组随机取卡」基线；索引只在首次检索时建在内存里，不落盘。结果写入 `evaluation/rag_report.json`（语料：60 张语法卡 + 60 张口语卡 + 600 条词库）。
+
+| 指标 | BM25（语法卡 + 口语卡） | 随机基线 |
+|---|---|---|
+| Recall@1 | 0.85 | 0.0519 |
+| Recall@3 | 1.00 | 0.162 |
+| MRR | 0.9125 | 0.0975 |
+
 ---
 
 ## 8. 评分口径速查
