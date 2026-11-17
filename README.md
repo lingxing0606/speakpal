@@ -2,7 +2,7 @@
 
 > **传智杯 AI-Web 网页开发挑战赛参赛作品**
 > 代码版本：`v0.2.0`（后端 `FastAPI(title="SpeakPal API", version="0.2.0")` / 前端 `speakpal-frontend@0.2.0`）
-> 文档版本：`v2.2` · 更新日期：`2026-11-14`
+> 文档版本：`v2.3` · 更新日期：`2026-11-17`
 > 核心定位：**真实场景多轮口语对练 + 模型与可测规则融合诊断 + 离线统计可验证闭环 + SM-2 间隔重复学习闭环**
 
 ---
@@ -35,6 +35,8 @@
 | **双模态输入与音频分析** | Web Speech API 语音识别 + 服务端 ASR（失败回落浏览器）+ Web Audio API 50ms RMS 包络采样 + 浏览器本地录音回放 | 实时提取说话时长、有效发音时长、停顿次数与停顿序列；服务端 ASR 只在内存转发、处理完立即丢弃，**不落盘、不入库**；原始录音仍只存于浏览器 IndexedDB/ObjectURL |
 | **拍照生成练习与 AI 安全** | 图片 → 场景/场景细节/目标词/开场白（DeepSeek Vision，前端压到长边 1280）；平台 `safety_check: high`、注入标记、出戏/中文占比/超长/提示词泄露检查 | 图片只在内存里转发；注入只标记不拦截；不合格回复换成预设追问并在 `done.replaced` 标注；报告页「AI 透明度」展示模型、安全标记、分数构成与教练证据覆盖 |
 | **模型 + 规则融合评分** | 动态维度（纯录音 4 维 / 纯打字 3 维 / 混合 5 维）+ 单一换算锚 `S = 10B + 10` | 规则分对模型分执行"高出 20 分即压回规则分 +10"的防虚高约束；完整融合明细落库 `scoring_json`，前端可展开验算 |
+| **Agent 诊断教练 + RAG 依据** | Planner 定 3 个目标 / Critic 收紧达成 / Coach 查只读工具；BM25 检索语法卡、口语卡与词库 | 教练最多 4 步、每步 ≤3 次工具调用，证据必须来自本次工具结果（否则 `grounded=false`）；评分注入最多 8 张参考卡，纠错可回链 `rule_ref` |
+| **MCP 与外部集成** | 标准 MCP server（8 工具 + 2 资源），stdio / streamable-http | 只经 HTTP 调后端 API，复用登录令牌与用户隔离；Claude Desktop / Inspector 可直接问「今天该复习什么」 |
 | **跨模式可比与降级保护** | 共享维度可比档（`comparable_band`）+ 诚实降级策略 | 成长曲线基于 `grammar_vocab` 与 `task_completion` 计算跨模式可比档；无密钥或断网降级报告（`source=mock`）显式标注「示例报告（模型不可用）· 本次不计分」，严禁伪造分数与假造原句 |
 | **SM-2 学习闭环** | 今日待复习队列 + 四大板块（复习 / 新词 / 语法 / 口语）+ 随堂笔记（`notes`） | 报告错句自动建卡 + 离线 JSON 题库（高考/四级/六级词库、时态/冠词/介词/从句语法卡、书面转口语卡），支持拼写、选句、造句客观判分驱动 SM-2 调度 |
 | **针对性专项训练** | 错句跟读重说（Drills）+ 最小对立对发音训练（Minimal Pairs） | 报告错句支持语音跟读与词级相似度实时比对（≥0.85 达标）；内置 `/iː/ vs /ɪ/`、`/θ/ vs /s/` 等高频易混音素对立训练 |
@@ -53,15 +55,16 @@
 - **样式体系**：Tailwind CSS 3 + 自定义语义化设计令牌（`style.css`）
 - **网络与流式通信**：Axios（统一 JWT 注入、`X-Auth-Reason` 401 分流拦截、`X-LLM-Key` 透传）+ 原生 `fetch` + `ReadableStream`（SSE 流式解析）
 - **浏览器原生能力**：Web Speech API（`SpeechRecognition` / `speechSynthesis`）、Web Audio API（`AudioContext` + `AnalyserNode` 时域 RMS 包络检测）、MediaRecorder + IndexedDB（本地录音持久化回放）
-- **工程化**：路由懒加载（`Login` / `Home` 静态，其余页面按页拆 chunk）+ `manualChunks` 抽离 vendor；TypeScript 渐进迁移（`vue-tsc --noEmit` 已接入构建，`npm run typecheck` / `npm run lint`）；生产构建入口 JS gzip 从 **145.49 kB 降到 17.83 kB**（vendor 60.96 kB 单独分包，首页 JS 合计 78.79 kB）
+- **工程化**：路由懒加载（`Login` / `Home` 静态，其余 11 条按页拆 chunk）+ `manualChunks` 抽离 vendor；TypeScript 全量迁移（`vue-tsc --noEmit` 已接入 `build`，`npm run typecheck` / `npm run lint` 可单独跑；ESLint flat config，`vue/multi-word-component-names` 只对 `src/views/**` 关闭）；生产构建入口 JS gzip 从 **145.49 kB 降到 18.69 kB**（vendor 60.97 kB 单独分包，首屏 JS 合计 **79.66 kB**，含 CSS 为 91.80 kB）
 - **AI 交互体验**：发送瞬间插入三点思考气泡（首个 delta 同一行盒原地换字，高度不跳）→ 流式可「停止」并保留已收文字 → 断连给「已中断 + 重试」（替换原气泡、不新增用户气泡）→ `onErrorCaptured` 兜底页 + 旧 chunk 失效自动重载一次；徽标统一由 `AiStatusBadge` 渲染（`已替换 / 已中断 / 降级 / 已停止 / 已标记 / 云端转写 / 浏览器识别`，`ok` 不占位）
 
 ### 3.2 后端（`backend/`）
 
 - **Web 框架**：FastAPI（自动 OpenAPI Schema + 本地化离线 Swagger UI `/docs`）
 - **数据持久化**：SQLite + SQLAlchemy 2.x ORM + 启动期幂等 Schema 自动演进（`_ensure_schema()`）
-- **安全与认证**：PBKDF2-HMAC-SHA256（120,000 次迭代 + 16 字节随机盐）+ PyJWT（HS256 + `token_version` 会话代次校验）+ 滑动窗口登录防暴破 + SSRF 私网 IP 校验
-- **大模型与语音接入**：`httpx` 调用任意 OpenAI 兼容 REST 接口（默认适配 DeepSeek `deepseek-flash`，支持流式 SSE 与 `/audio/speech` TTS 语音合成）
+- **安全与认证**：PBKDF2-HMAC-SHA256（120,000 次迭代 + 16 字节随机盐）+ PyJWT（HS256 + `token_version` 会话代次校验）+ 滑动窗口登录防暴破 + SSRF 私网 IP 校验 + 内容安全（注入标记 / 输出替换 / 图片校验）
+- **大模型与语音接入**：`httpx` 调用任意 OpenAI 兼容 REST 接口（默认 `deepseek-flash`）；统一调用层 `llm.chat()` / `chat_json()`（JSON 校验失败重试一次、官方主机关思考模式）；服务端 ASR 支持 DeepSeek `/tools/asr` 与 OpenAI 兼容 `/audio/transcriptions`
+- **检索与外部集成**：`bm25s` 知识检索（60 语法卡 + 60 口语卡 + 600 词，评分注入最多 8 张）；`mcp>=2.3,<3` 暴露 8 工具 2 资源；`python-multipart` 接收 `/api/asr`、`/api/scenes/from-image` 上传
 
 ### 3.3 离线验证与工具链（`evaluation/` & `tools/`）
 
@@ -113,14 +116,15 @@
 │       ├── main.js / App.vue / style.css
 │       ├── router/index.js         # 13 条业务路由（除 Login/Home 外按页懒加载）+ catch-all 兜底与认证守卫
 │       ├── api/                    # Axios 实例封装（client.ts）与 SSE 流式客户端（stream.ts）
-│       ├── types/api.ts            # 后端 schemas.py 对应的接口类型（手写，只含前端用到的字段）
+│       ├── types/api.ts            # 后端 schemas.py 对应的接口类型（39 个，手写，只含前端用到的字段）
 │       ├── stores/                 # Pinia 状态仓库（auth / session / settings）
-│       ├── components/             # AppHeader / HintCard / StudyDashboard / TabBar / BrandLogo /
-│       │                           #   SceneIcon / CountUp / EmptyState / BackLink / MnemonicCard /
-│       │                           #   CoachPanel / AgentTrace / FinishProgress / McpConnect /
-│       │                           #   AiStatusBadge / PhotoScenePanel / AiTransparency
-│       ├── utils/                  # 语音转写（speech.js）、音频包络（audio.js）、
-│       │                           #   WAV 重采样编码（wav.js）、录音存储（recordings.js）、密钥门禁（llmGate.js）
+│       ├── composables/            # useRecorder.ts（录音/ASR）、useTurnStream.ts（流式/停止/重试/思考态）
+│       ├── components/             # 26 个组件文件（25 个 .vue + appHeaderIndicator.ts）：
+│       │                           #   AppHeader / ChatBubble / GoalProgress / HintCard / FinishProgress /
+│       │                           #   CoachPanel / AgentTrace / AiTransparency / PhotoScenePanel /
+│       │                           #   AiStatusBadge / ThinkingDots / Report* / StudyDashboard / McpConnect …
+│       ├── utils/                  # speech.ts / audio.ts / wav.ts（16 kHz WAV 重采样）/
+│       │                           #   recordings.ts / llmGate.ts
 │       └── views/                  # 12 个页面视图（Login / Home / Practice / Report /
 │                                   #   History / Review / StudyHome / StudyScope / StudyLearn /
 │                                   #   Notes / Pronunciation / Settings）
@@ -130,6 +134,9 @@
 │   ├── scales.py                   # 多量表换算（雅思 / CEFR / 托福 / 多邻国 / 四六级）
 │   ├── features.py                 # 文本流利度与词汇多样性（TTR / MTLD）及音频停顿特征提取
 │   ├── validate.py                 # CLI 验证报告生成器
+│   ├── rag_eval.py                 # BM25 检索评测 CLI（40 条错句 vs 随机基线）
+│   ├── rag_cases.json              # 评测查询与期望卡 id
+│   ├── rag_report.json             # 检索评测输出样本
 │   ├── make_demo.py                # 固定随机种子合成演示数据生成脚本
 │   ├── demo_data.csv               # 20 条合成评估样本数据
 │   └── demo_report.json            # 验证结果输出样本
@@ -220,7 +227,10 @@ SpeakPal 同时是一个标准 MCP server：把「今天该复习什么」「最
 ```
 
 3. 重启 Claude Desktop，直接问：「我今天该复习什么？」「我最近总犯什么错？」「帮我把 negotiate 加进生词本」「查一下 present perfect 相关的语法卡」。
-4. 两个写工具（`add_word_to_review`、`add_note`）在 tool annotations 里标了 `readOnlyHint=false`、`destructiveHint=false`，客户端调用前会先向你确认。
+4. 两个写工具（`add_word_to_review`、`add_note`）标了 `read_only_hint=False`（线上协议里的 `readOnlyHint`）；客户端调用前应向你确认。
+5. 调试用 `mcp dev` 需额外安装 `pip install "mcp[cli]"`——`requirements.txt` 只装运行时的 `mcp>=2.3,<3`，不含 cli extra；不想装 extra 就用下面的 `--transport streamable-http` 直接用 Inspector 连。
+
+> 写法说明：mcp 2.x 把 `FastMCP` 改名为 `MCPServer`，本项目注解用 snake_case（`read_only_hint`），pydantic 同时接受 snake_case 与官方示例的 camelCase，线上协议不变。完整偏差表见 `docs/技术文档.md` §10.6。
 
 令牌等同登录态（JWT，默认 7 天有效，修改密码后立即失效）。换人或令牌泄露时，在设置页改一次密码即可让旧令牌全部作废。
 
@@ -302,6 +312,20 @@ backend\.venv\Scripts\python.exe -m evaluation.rag_eval
 | Recall@3 | 1.00 | 0.162 |
 | MRR | 0.9125 | 0.0975 |
 
+### 7.6 运行自动化测试
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v   # 269 条，2026-11-17 实测全绿
+```
+
+前端静态检查（在 `frontend/`）：
+
+```powershell
+npm.cmd run typecheck   # vue-tsc --noEmit
+npm.cmd run lint        # eslint src
+```
+
 ---
 
 ## 8. 评分口径速查
@@ -375,13 +399,13 @@ backend\.venv\Scripts\python.exe -m evaluation.rag_eval
 | 模块 | 前缀 | 端点数 | 职责 |
 |---|---|---|---|
 | `auth.py` | `/api/auth` | 3 | 注册、登录、取当前用户 |
-| `scenes.py` | `/api` | 2 | 场景列表、句型脚手架 |
-| `sessions.py` | `/api` | 6 | 建会话、提交轮次（普通/流式）、结束出报告、会话详情、历史列表 |
+| `scenes.py` | `/api` | 3 | 场景列表、句型脚手架、拍照生成场景 |
+| `asr.py` | `/api` | 1 | 服务端语音转写（DeepSeek / OpenAI 兼容，失败降级） |
+| `sessions.py` | `/api` | 7 | 建会话、提交轮次（普通/流式）、结束出报告（普通/流式）、会话详情、历史列表 |
 | `reports.py` | `/api` | 1 | 读取诊断报告 |
+| `knowledge.py` | `/api/knowledge` | 2 | MCP / 外部客户端的知识检索与查词 |
 | `exercises.py` | `/api` | 4 | 跟读重说队列与判分、最小对立对题组与判定 |
 | `hints.py` | `/api` | 1 | 句型提示 |
-| `asr.py` | `/api` | 1 | 服务端语音转写（DeepSeek / OpenAI 兼容，失败降级） |
-| `knowledge.py` | `/api/knowledge` | 2 | MCP / 外部客户端的知识检索与查词 |
 | `study.py` | `/api` | 21 | SM-2 学习闭环（今日队列/复习/建卡/词库/语法/口语）与随堂笔记 CRUD |
 | `words.py` | `/api/study/words` | 4 | 单词助手、导入、已学列表、造句检查 |
 | `account.py` | `/api/me` | 7 | 个人资料、偏好设置、学习看板、难度建议、清数据与注销 |

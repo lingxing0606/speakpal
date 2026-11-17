@@ -235,7 +235,7 @@ S_task_final = 0.6·S_task_rule + 0.4·S_pragmatic_llm     # 40% 来自语用得
 
 ### 3.5 发音的可测代理（v1 不参与融合，先采集）
 
-现状：`pronunciation` 完全由模型看文本猜。两个可以变成真证据的信号，现在都被丢掉了：
+现状：`pronunciation` 完全由模型看文本猜。阶段 3 虽然加了服务端 ASR（`/api/asr`），但它同样**只回文本、不回置信度**，所以仍没有可用的发音证据。两个可以变成真证据的信号，现在都被丢掉了：
 
 | 信号 | 现状 | 做法 |
 |---|---|---|
@@ -477,10 +477,13 @@ D:\python\python.exe -m evaluation.validate --csv <真实标注>.csv `
 | `evaluation/features.py` | `find_fillers()` 位置判定；`lexical_diversity()` 短文本回退 TTR；`mtld` 不足 50 词输出 `None`；新增 `diversity_metric / diversity` 字段 | ✅ 已完成 |
 | `evaluation/bands.py` | `score_to_band / band_to_score / band_to_cefr / cefr_of_score / cefr_distance / report_bands`（纯标准库，全项目唯一换算入口） | ✅ 已完成 |
 | `evaluation/scales.py` | 多量表视图（雅思 / CEFR / 托福 / 多邻国 / 四六级；高考只给难度标签），逐维只映射雅思 + CEFR | ✅ 已完成（§4.4） |
-| `backend/tests/` | 168 条 unittest 全绿（2026-11-14），含 band 取整、半值向上与多量表换算表 | ✅ 已完成 |
+| `backend/tests/` | 269 条 unittest 全绿（2026-11-17），含 band 取整、半值向上、多量表、RAG 与 Agent 相关回归 | ✅ 已完成 |
 | `evaluation/make_demo.py` | 档位改 CEFR 字母；重新生成 `demo_data.csv`（ICC 未变：0.9022 / 0.9486） | ✅ 已完成 |
 | `evaluation/validate.py` | `--system-band` 接线：一致率、档位距离、Cohen kappa（多数票 + 分人）；stdout 强制 UTF-8 | ✅ 已完成 |
-| `backend/app/services/scoring.py` | 模型直接输出 band；`original` 必须来自用户转写（否则丢弃）；降级报告不计分、不虚构句子 | ✅ 已完成 |
+| `evaluation/rag_eval.py` | BM25 检索评测：40 条错句 vs 随机基线（Recall@1 0.85 / Recall@3 1.00 / MRR 0.9125） | ✅ 已完成（阶段 2） |
+| `backend/app/services/scoring.py` | 模型直接输出 band；RAG 参考卡注入（最多 8 张，`rule_ref` 只认本次注入）；`original` 必须来自用户转写（否则丢弃）；降级报告不计分、不虚构句子 | ✅ 已完成 |
+| `backend/app/services/agent.py` | 诊断教练（4 步 / 每步 ≤3 调用 / 证据校验），结果落 `reports.coach_json`；失败不影响报告 | ✅ 已完成（阶段 1） |
+| `backend/app/services/report_view.py` | `report_out()` 统一出参，另派生 `transparency`（模型 / 安全标记 / 分数构成 / 教练证据覆盖） | ✅ 已完成（阶段 4） |
 | `backend/app/models.py` + `main.py` | `reports` 新增 `band / cefr / source / bands_json`，启动时按列补齐（旧库只加列不改数据） | ✅ 已完成 |
 | `backend/app/services/report_view.py` | `report_out()` 统一报告出参，`sessions` 与 `reports` 两个路由共用 | ✅ 已完成 |
 | `backend/app/schemas.py` | `ReportOut` 增加 `band / cefr / source / bands`，`total_score` 可空 | ✅ 已完成 |
