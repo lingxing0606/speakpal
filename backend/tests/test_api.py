@@ -2137,6 +2137,31 @@ class CoachAgentTests(unittest.TestCase):
         self.assertFalse(any(entry.get("forced") for entry in result["trace"]))
         self.assertEqual(len(result["trace"]), 1)
 
+    def test_total_budget_caps_each_call_timeout(self):
+        """每次调用的超时取剩余总预算；预算见底时不再发 JSON 重试。"""
+        replies = iter(
+            [
+                {"content": "", "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})]},
+                {"content": "not json"},
+            ]
+        )
+        timeouts = []
+
+        def fake_chat(llm, messages, **kw):
+            timeouts.append(kw.get("timeout"))
+            return next(replies)
+
+        # t0、第 1 步检查（已过 5 秒）、第 2 步检查（29 秒，超工具预算）、收尾计时、重试前检查
+        ticks = iter([0.0, 5.0, 29.0, 29.0, 29.5])
+        with mock.patch("app.services.agent.chat", fake_chat), mock.patch(
+            "app.services.agent.time.monotonic", side_effect=lambda: next(ticks, 29.5)
+        ):
+            result = agent_service.coach(
+                self._scene(), self._history(), self._fixes(), self.db, 1, self._cfg()
+            )
+        self.assertEqual(timeouts, [agent_service.COACH_TIMEOUT, 1.0])
+        self.assertEqual(result["source"], "skipped")
+
     def test_max_steps_still_forces_final_call(self):
         """预算没到但 4 步用满：仍走原来的强制收尾（带 tools + tool_choice=none）。"""
         steps = [

@@ -37,8 +37,12 @@ COACH_TOOLS = (
 )
 COACH_MAX_STEPS = 4
 COACH_MAX_TOOL_CALLS = 3
-# 诊断总预算：超过就不再开新一轮工具，直接用已有证据收尾（不硬中断请求）
+# 工具预算：超过就不再开新一轮工具，直接用已有证据收尾
 COACH_DEADLINE_S = 8.0
+# 诊断硬上限：每次模型调用的超时取「剩余总预算」，整段诊断不会超过这个秒数
+COACH_TOTAL_BUDGET_S = 30.0
+# 剩余预算不够一次正常调用时，不再发 JSON 重试
+COACH_MIN_CALL_S = 3.0
 COACH_MAX_PRIORITIES = 3
 COACH_TIMEOUT = 20.0
 TRACE_RESULT_CHARS = 2000
@@ -391,6 +395,12 @@ def _sanitize_coach(raw: dict, fixes: list, trace: list) -> dict:
     return {"priorities": priorities, "summary": str((raw or {}).get("summary") or "").strip()}
 
 
+def _coach_left(t0: float, now: float | None = None) -> float:
+    """下一次模型调用可用的超时：单次上限与剩余总预算取小，至少留 1 秒。"""
+    now = time.monotonic() if now is None else now
+    return max(1.0, min(COACH_TIMEOUT, COACH_TOTAL_BUDGET_S - (now - t0)))
+
+
 def coach(
     scene: dict,
     history: list,
@@ -419,11 +429,18 @@ def coach(
         message: dict = {}
         timed_out = False
         for step in range(COACH_MAX_STEPS):
-            if time.monotonic() - t0 >= COACH_DEADLINE_S:
+            elapsed = time.monotonic() - t0
+            if elapsed >= COACH_DEADLINE_S:
                 # 预算用完：不再开新一轮工具，收尾直接按已有结果出结论
                 timed_out = True
                 break
-            message = chat(llm, messages, tools=tools, temperature=0.2, timeout=COACH_TIMEOUT)
+            message = chat(
+                llm,
+                messages,
+                tools=tools,
+                temperature=0.2,
+                timeout=min(COACH_TIMEOUT, COACH_TOTAL_BUDGET_S - elapsed),
+            )
             calls = message.get("tool_calls") or []
             if not calls:
                 break
@@ -453,7 +470,7 @@ def coach(
                 tools=tools,
                 tool_choice="none",
                 temperature=0.2,
-                timeout=COACH_TIMEOUT,
+                timeout=_coach_left(t0),
             )
         if timed_out:
             # 超时收尾只有一次：不给 tools（chat() 会显式关思考），只用已有证据
@@ -464,7 +481,7 @@ def coach(
                 messages,
                 tool_choice="none",
                 temperature=0.2,
-                timeout=COACH_TIMEOUT,
+                timeout=_coach_left(t0, started),
             )
             trace.append(
                 {
@@ -479,6 +496,9 @@ def coach(
                 }
             )
         data = _loads_json(message.get("content") or "")
+        if not isinstance(data, dict) and _coach_left(t0) < COACH_MIN_CALL_S:
+            print("[agent] Coach 返回无法解析且预算已用完，跳过", flush=True)
+            return fallback
         if not isinstance(data, dict):
             # 只给一次机会：不带 tools（chat() 会关思考）重问一次，再不行就跳过
             previous = str(message.get("content") or "")[:600]
@@ -491,7 +511,7 @@ def coach(
                 messages,
                 tool_choice="none",
                 temperature=0.2,
-                timeout=COACH_TIMEOUT,
+                timeout=_coach_left(t0, started),
             )
             data = _loads_json(message.get("content") or "")
             ok = isinstance(data, dict)
