@@ -3067,6 +3067,45 @@ class LlmSafetyTests(unittest.TestCase):
             )
         self.assertEqual(client.last_json["safety_check"], {"level": "high"})
 
+    def test_chat_payload_with_safety_check_does_not_start_with_assistant(self):
+        """带 safety_check 时 messages 不能以 assistant 开头，否则官方接口整轮 400。"""
+        client = _CaptureClient
+        client.last_json = None
+        scene = {"role": "a barista", "id": "cafe_order"}
+        messages = llm_service.build_messages(
+            scene,
+            "medium",
+            [
+                {"role": "ai", "content": "Hi there! What can I get for you today?"},
+                {"role": "user", "content": "A large tea, please."},
+            ],
+        )
+        with mock.patch("app.services.llm.httpx.Client", client):
+            llm_service.chat(self._cfg("https://api.deepseek.com/v1"), messages)
+        self.assertEqual(client.last_json["safety_check"], {"level": "high"})
+        self.assertEqual(client.last_json["messages"][0]["role"], "system")
+        self.assertEqual(client.last_json["messages"][1]["role"], "user")
+
+    def test_stream_payload_with_safety_check_does_not_start_with_assistant(self):
+        resp = _FakeStreamResp(lines=list(_sse_lines("Sure. ", "Anything else?")))
+        cls = _stream_client(resp)
+        scene = {"role": "a barista", "id": "cafe_order"}
+        with mock.patch("app.services.llm.httpx.Client", cls):
+            stream = llm_service.open_chat_stream(
+                scene,
+                "medium",
+                [
+                    {"role": "ai", "content": "Hi there! What can I get for you today?"},
+                    {"role": "user", "content": "A large tea, please."},
+                ],
+                self._cfg("https://api.deepseek.com/v1"),
+            )
+            stream.close()
+        payload = cls.last.request_json
+        self.assertEqual(payload["safety_check"], {"level": "high"})
+        self.assertEqual(payload["messages"][0]["role"], "system")
+        self.assertEqual(payload["messages"][1]["role"], "user")
+
     def test_content_risk_400_raises_safety_blocked(self):
         class _RiskResp(_FakeResp):
             text = "Error: Content Exists Risk"
@@ -3114,6 +3153,36 @@ class LlmPromptTests(unittest.TestCase):
         )
         self.assertEqual(messages[1], {"role": "user", "content": "<learner>I want coffee.</learner>"})
         self.assertEqual(messages[0]["role"], "system")
+
+    def test_leading_assistant_turn_is_dropped(self):
+        """开场白（第一条 ai turn）不能作为 messages 首条发给模型：官方接口会 400。"""
+        messages = llm_service.build_messages(
+            self.scene,
+            "medium",
+            [
+                {"role": "ai", "content": "Hi there! What can I get for you today?"},
+                {"role": "user", "content": "A large tea, please."},
+            ],
+        )
+        self.assertEqual([m["role"] for m in messages], ["system", "user"])
+        self.assertNotIn("Hi there!", str(messages))
+
+    def test_middle_assistant_turn_is_kept(self):
+        """只去掉开头的 assistant，中间的多轮对话原样保留。"""
+        messages = llm_service.build_messages(
+            self.scene,
+            "medium",
+            [
+                {"role": "ai", "content": "Hi there!"},
+                {"role": "user", "content": "A tea, please."},
+                {"role": "ai", "content": "Anything else?"},
+                {"role": "user", "content": "No thanks."},
+            ],
+        )
+        self.assertEqual(
+            [m["role"] for m in messages], ["system", "user", "assistant", "user"]
+        )
+        self.assertEqual(messages[2]["content"], "Anything else?")
 
     def test_no_context_no_context_block(self):
         system = llm_service.system_prompt(self.scene, "medium", {})

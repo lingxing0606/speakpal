@@ -247,7 +247,13 @@ def system_prompt(scene: dict, difficulty: str, plan: dict | None = None) -> str
 
 def build_messages(scene: dict, difficulty: str, history: list, plan: dict | None = None) -> list:
     messages = [{"role": "system", "content": system_prompt(scene, difficulty, plan)}]
-    for t in history[-8:]:
+    turns = history[-8:]
+    # 开场白落库时是第一条 ai turn，但带 safety_check 的官方接口要求 messages
+    # 不能以 assistant 开头（会 400 "an assistant message must follow a user message"）。
+    # 开场白只用于界面展示，这里去掉开头连续的 assistant，中间的 assistant 不动。
+    while turns and turns[0]["role"] == "ai":
+        turns = turns[1:]
+    for t in turns:
         content = t["content"]
         if t["role"] != "ai":
             # 学习者的话可能包含「忽略以上指令」这类练习句：包起来，当成待练习的文本
