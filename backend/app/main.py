@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
@@ -314,8 +314,19 @@ def custom_docs():
     )
 
 
+def _frontend_dist() -> Path | None:
+    """配置了 FRONTEND_DIST 且里面有 index.html，才由后端托管前端。"""
+    if not settings.frontend_dist:
+        return None
+    dist = Path(settings.frontend_dist).resolve()
+    return dist if (dist / "index.html").is_file() else None
+
+
 @app.get("/", response_class=HTMLResponse)
 def root():
+    dist = _frontend_dist()
+    if dist:
+        return FileResponse(dist / "index.html")
     return _admin_page()
 
 
@@ -327,3 +338,15 @@ def admin_page():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def frontend(path: str):
+    """前端静态文件；其余路径交给前端路由（history 模式），刷新任意页面不 404。"""
+    dist = _frontend_dist()
+    if not dist or path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    target = (dist / path).resolve()
+    if target.is_file() and dist in target.parents:
+        return FileResponse(target)
+    return FileResponse(dist / "index.html")

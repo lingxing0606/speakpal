@@ -265,6 +265,35 @@ class FeedbackTests(ApiTestCase):
         self.assertFalse(any(x["id"] == fid for x in rows))
 
 
+class FrontendHostingTests(ApiTestCase):
+    """FRONTEND_DIST 配了才托管前端；没配时 / 仍是管理台。"""
+
+    def _dist(self):
+        dist = Path(_TMP, "dist-" + uuid.uuid4().hex[:6])
+        (dist / "assets").mkdir(parents=True)
+        (dist / "index.html").write_text("<div id=app>spa</div>", encoding="utf-8")
+        (dist / "assets" / "a.js").write_text("console.log(1)", encoding="utf-8")
+        (dist.parent / "secret.txt").write_text("nope", encoding="utf-8")
+        patcher = mock.patch.object(llm_config.settings, "frontend_dist", str(dist))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_without_dist_root_is_admin(self):
+        self.assertIn("管理", self.client.get("/").text)
+        self.assertEqual(self.client.get("/report/1").status_code, 404)
+
+    def test_serves_spa_files_and_history_fallback(self):
+        self._dist()
+        self.assertIn("spa", self.client.get("/").text)
+        self.assertEqual(self.client.get("/assets/a.js").text, "console.log(1)")
+        self.assertIn("spa", self.client.get("/report/12").text)
+        self.assertIn("管理", self.client.get("/admin").text)
+        self.assertEqual(self.client.get("/api/nope").status_code, 404)
+        self.assertEqual(self.client.get("/api/health").json(), {"status": "ok"})
+        # 不能借 .. 读到 dist 外的文件
+        self.assertNotIn("nope", self.client.get("/..%2Fsecret.txt").text)
+
+
 class OutboundTests(unittest.TestCase):
     def test_blocks_private_and_metadata_hosts(self):
         for url in (

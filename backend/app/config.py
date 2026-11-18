@@ -136,6 +136,8 @@ class Settings:
     allow_private_llm_hosts: bool = os.getenv("ALLOW_PRIVATE_LLM_HOSTS", "0") == "1"
     # 管理台「改数据位置」的目录白名单；留空不限目录（但始终不覆盖已存在的文件）
     storage_root: str = os.getenv("STORAGE_ROOT", "").strip()
+    # 部署时由后端直接托管前端构建产物（frontend/dist）；留空则只提供 API（本地开发走 vite）
+    frontend_dist: str = os.getenv("FRONTEND_DIST", "").strip()
 
 
 settings = Settings()
