@@ -9,12 +9,6 @@ const tip = ref('')
 
 const PLACEHOLDER = '<点「显示令牌」后复制>'
 
-// 本地开发（vite 5173）时 API 在 8000；部署后前后端同源，直接用当前站点地址
-const apiBase =
-  window.location.port === '5173'
-    ? `${window.location.protocol}//${window.location.hostname}:8000`
-    : window.location.origin
-
 /** 本机仓库路径客户端无法得知，配置里用占位路径，页面提示替换。 */
 const config = computed(() =>
   JSON.stringify(
@@ -24,7 +18,7 @@ const config = computed(() =>
           command: 'C:\\path\\to\\speakpal\\backend\\.venv\\Scripts\\python.exe',
           args: ['C:\\path\\to\\speakpal\\backend\\mcp_server.py'],
           env: {
-            SPEAKPAL_API: apiBase,
+            SPEAKPAL_API: `${window.location.protocol}//${window.location.hostname}:8000`,
             SPEAKPAL_TOKEN: showToken.value ? auth.token || '' : PLACEHOLDER,
           },
         },
