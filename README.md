@@ -2,7 +2,7 @@
 
 > **传智杯 AI-Web 网页开发挑战赛参赛作品**
 > 代码版本：`v0.2.0`（后端 `FastAPI(title="SpeakPal API", version="0.2.0")` / 前端 `speakpal-frontend@0.2.0`）
-> 文档版本：`v2.3` · 更新日期：`2026-11-17`
+> 文档版本：`v2.4` · 更新日期：`2026-11-18`
 > 核心定位：**真实场景多轮口语对练 + 模型与可测规则融合诊断 + 离线统计可验证闭环 + SM-2 间隔重复学习闭环**
 
 ---
@@ -41,7 +41,7 @@
 | **SM-2 学习闭环** | 今日待复习队列 + 四大板块（复习 / 新词 / 语法 / 口语）+ 随堂笔记（`notes`） | 报告错句自动建卡 + 离线 JSON 题库（高考/四级/六级词库、时态/冠词/介词/从句语法卡、书面转口语卡），支持拼写、选句、造句客观判分驱动 SM-2 调度 |
 | **针对性专项训练** | 错句跟读重说（Drills）+ 最小对立对发音训练（Minimal Pairs） | 报告错句支持语音跟读与词级相似度实时比对（≥0.85 达标）；内置 `/iː/ vs /ɪ/`、`/θ/ vs /s/` 等高频易混音素对立训练 |
 | **学习数据看板** | 连续打卡天数（Streak）+ 12 周练习热力图 + 维度均分 + 近 7 天进步幅度 | 按用户本地时区（`tz_offset`）切日聚合，自动过滤非正式计分报告，支持历史记录多维筛选 |
-| **自带密钥与安全加固** | 浏览器端 BYOK（`X-LLM-Key` / `X-TTS-Key`）+ `token_version` 踢旧设备 + SSRF 防护 | 服务端不存模型密钥；改密即递增 `token_version` 使旧 JWT 秒级失效；启动自动替换弱密钥；内置登录防暴破与内网地址 SSRF 拦截 |
+| **自带密钥与安全加固** | 浏览器端 BYOK（`X-LLM-Key` / `X-TTS-Key`）+ 可选服务端体验额度 + `token_version` 踢旧设备 + SSRF 防护 | 用户密钥不落服务端；体验额度按人按天限次，地址与模型不可被请求头改写；改密即递增 `token_version` 使旧 JWT 秒级失效；启动自动替换弱密钥；内置登录防暴破与内网地址 SSRF 拦截 |
 | **离线信效度验证层** | 纯标准库统计引擎 `evaluation/` + 内容静态检查器 `tools/check_content.py` | 零第三方科学计算库依赖即可复现 ICC(2,1)/ICC(2,k)、Kappa、Bland-Altman 等统计量；一键校验 720 条内置教研内容质量 |
 
 ---
@@ -204,6 +204,8 @@
 
 > ⚠️ 两个服务均只监听 `127.0.0.1`，局域网其他设备无法访问。答辩若需投屏演示，需改为 `--host 0.0.0.0`，并注意这会把管理台暴露出去。
 
+> 部署到云服务器（Docker + 自动 HTTPS）、费用和运维见 [`docs/deploy.md`](docs/deploy.md)。
+
 ### 5.4 在 Claude Desktop 中使用（MCP）
 
 SpeakPal 同时是一个标准 MCP server：把「今天该复习什么」「最近总犯什么错」、语法卡/词条检索、加生词本、记笔记这 8 个工具暴露给 Claude Desktop、Cursor 等支持 MCP 的客户端。服务只通过 HTTP 调后端 API，复用现有鉴权与用户隔离，不直连数据库；默认 stdio 传输，另支持 `--transport streamable-http`。
@@ -249,7 +251,8 @@ SpeakPal 采用**浏览器端自带密钥（Bring Your Own Key）**安全架构�
    - **默认供应商**：DeepSeek（接口地址 `https://api.deepseek.com/v1`，模型 `deepseek-flash`），也可填入任意兼容 OpenAI `/v1/chat/completions` 协议的接口（如 OpenAI、通义千问、硅基流动、Moonshot 等）。
    - 填入 API Key 后点击 **「测试连接」**，验证通过后即可回到首页开启场景对练。
 3. **本地私有模型（如 Ollama）**：出于 SSRF 安全防护，后端默认拒绝请求本机与内网地址。若需连接本机 Ollama，请在 `backend/.env` 中设置 `ALLOW_PRIVATE_LLM_HOSTS=1` 后重启后端。
-4. **可选语音合成（TTS）**：默认使用浏览器内置 `speechSynthesis` 免费朗读；如需高自然度神经网络语音，可在「设置」页配置兼容 OpenAI `/v1/audio/speech` 的 TTS 密钥与模型（如 OpenAI `tts-1` 或硅基流动 `FunAudioLLM/CosyVoice2-0.5B`）。前端先试 `POST /api/tts`，**任何失败都回落 `speechSynthesis`**。
+4. **体验额度（可选，给评委和新用户）**：在 `backend/.env`（部署时是 `deploy.env`）里填 `DEMO_LLM_API_KEY`，没填密钥的用户也能直接使用。每个用到模型的请求扣一次，每人每天 `DEMO_DAILY_PER_USER` 次、全站每天 `DEMO_DAILY_TOTAL` 次，用完返回 429 并提示填自己的密钥。体验额度固定使用 `LLM_BASE_URL` / `LLM_MODEL`，请求头里的地址和模型会被忽略，防止服务端密钥被发到别的地址。留空则和以前一样必须自带密钥。
+5. **可选语音合成（TTS）**：默认使用浏览器内置 `speechSynthesis` 免费朗读；如需高自然度神经网络语音，可在「设置」页配置兼容 OpenAI `/v1/audio/speech` 的 TTS 密钥与模型（如 OpenAI `tts-1` 或硅基流动 `FunAudioLLM/CosyVoice2-0.5B`）。前端先试 `POST /api/tts`，**任何失败都回落 `speechSynthesis`**。
 
 ---
 
@@ -258,7 +261,7 @@ SpeakPal 采用**浏览器端自带密钥（Bring Your Own Key）**安全架构�
 ### 7.1 30 秒核心体验路径
 
 1. **注册/登录**：访问 `http://127.0.0.1:5173/login` 创建账号。
-2. **配置密钥**：在 `/settings` 填入 DeepSeek / OpenAI 兼容 API Key 并测试通过。
+2. **配置密钥**：在 `/settings` 填入 DeepSeek / OpenAI 兼容 API Key 并测试通过；服务端开了体验额度时可跳过这一步。
 3. **开启对练**：在首页选择「求职面试」或「咖啡店点单」，使用麦克风录音或打字对话：3 个目标都达成、或到 6 轮上限，就会提示可以出报告（无目标的老会话回退 4 轮；可展开「句型提示」辅助表达）。
 4. **查看诊断报告**：点击「结束并出报告」，查看综合分、IELTS Band / CEFR 等级、各维规则分与模型分融合明细、流利度客观特征，以及逐句地道改写。
 5. **跟读与复习**：在报告页直接点击「跟读重说」训练错句（相似度 ≥0.85 通关），随后进入「学习」（`/study`）模块体验 SM-2 卡片复习、词汇拓展与语法/口语专项训练。
@@ -316,7 +319,7 @@ backend\.venv\Scripts\python.exe -m evaluation.rag_eval
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v   # 269 条，2026-11-17 实测全绿
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v   # 296 条，2026-11-18 实测全绿
 ```
 
 前端静态检查（在 `frontend/`）：
@@ -389,12 +392,15 @@ npm.cmd run lint        # eslint src
 | `TTS_API_KEY` | 空 | 服务端可选兜底 TTS 密钥（留空则使用浏览器原生朗读或用户自带 TTS Key） |
 | `TTS_BASE_URL` / `TTS_MODEL` / `TTS_VOICE` | `https://api.openai.com/v1` / `tts-1` / `alloy` | 可选语音合成端点、模型名与音色配置 |
 | `STORAGE_ROOT` | 空 | 管理台「改数据位置」的目录白名单；留空不限目录（始终不覆盖已存在文件） |
+| `DEMO_LLM_API_KEY` | 空 | 体验额度用的服务端密钥；留空则只认浏览器带来的密钥 |
+| `DEMO_DAILY_PER_USER` / `DEMO_DAILY_TOTAL` | `80` / `3000` | 体验额度：每人每天、全站每天可用的模型请求次数（按北京时间切日） |
+| `FRONTEND_DIST` | 空 | 部署时由后端托管前端构建产物的目录（Docker 镜像里已设好）；留空则 `/` 仍是管理台 |
 
 ---
 
 ## 10. 接口规模
 
-后端按业务域划分为 14 个路由模块，共 **66 个 `/api` 操作**（65 个路由注册 + `GET /api/health`），落在 **59 条 `/api` 路径**上（2026-11-17 取自 `GET /openapi.json`），另有 3 个非 API 页面入口：`/` 与 `/admin`（管理控制台 HTML）、`/docs`（离线 Swagger UI）。
+后端按业务域划分为 15 个路由模块，共 **68 个 `/api` 操作**，落在 **61 条 `/api` 路径**上（2026-11-18 取自 `GET /openapi.json`），另有 3 个非 API 页面入口：`/` 与 `/admin`（管理控制台 HTML）、`/docs`（离线 Swagger UI）。
 
 | 模块 | 前缀 | 端点数 | 职责 |
 |---|---|---|---|
@@ -411,7 +417,8 @@ npm.cmd run lint        # eslint src
 | `account.py` | `/api/me` | 7 | 个人资料、偏好设置、学习看板、难度建议、清数据与注销 |
 | `system.py` | `/api` | 3 | LLM 配置查询、密钥连通性测试、存储状态 |
 | `tts.py` | `/api` | 1 | 语音合成 |
-| `admin.py` | `/api/admin` | 7 | 全局统计、用户管理、清库、改数据目录 |
+| `feedback.py` | `/api` | 1 | 用户提交意见反馈 |
+| `admin.py` | `/api/admin` | 8 | 全局统计、用户管理、反馈列表、清库、改数据目录 |
 
 > 完整清单以运行期的 `GET /openapi.json` 为准——路由变动时先查它，勿依赖手抄表格。
 
@@ -428,6 +435,9 @@ npm.cmd run lint        # eslint src
 | 离线验证与统计方法论 | `docs/validation.md` | 数据采集规范与统计口径 |
 | 手动验收走查指南 | `docs/manual-walkthrough.md` | 评委逐项验收清单 |
 | 校赛答辩演示脚本 | `docs/demo-script.md` | 答辩现场操作核对表、演示数据与意外兜底 |
+| 作品介绍（按章程 7 项） | `docs/作品介绍.md` | 提交比赛用的作品介绍文档 |
+| 部署上线指南 | `docs/deploy.md` | 服务器选型与费用、Docker 部署、运维 |
+| 商业模式与运营计划 | `docs/business-plan.md` | 目标用户、竞品、收费模式、推广与反馈机制 |
 | 视觉规范 / 品牌资产 | `docs/ui-visual.md` / `docs/logo.md` | 配色、组件类、Logo 用法 |
 
 ---
