@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import api from '../api/client'
 import AppHeader from '../components/AppHeader.vue'
+import FeedbackForm from '../components/FeedbackForm.vue'
 import McpConnect from '../components/McpConnect.vue'
 import TabBar from '../components/TabBar.vue'
 import { useAuthStore } from '../stores/auth'
@@ -744,6 +745,8 @@ function logout() {
       </section>
 
       <McpConnect />
+
+      <FeedbackForm />
 
 <section id="data" class="sp-card scroll-mt-24 p-6 ring-rose-100 sm:p-7">
         <h2 class="sp-section-title">清除练习记录</h2>

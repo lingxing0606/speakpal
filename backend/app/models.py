@@ -35,6 +35,19 @@ class DemoUsage(Base):
     count = Column(Integer, default=0, nullable=False)
 
 
+class Feedback(Base):
+    """用户反馈：设置页提交，管理台查看。"""
+
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kind = Column(String(16), default="other")  # bug | idea | other
+    content = Column(Text, nullable=False)
+    page = Column(String(200), default="")
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
 class PracticeSession(Base):
     __tablename__ = "sessions"
 

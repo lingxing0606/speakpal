@@ -9,7 +9,9 @@ from __future__ import annotations
 from sqlalchemy.orm import Session as OrmSession
 
 from ..models import (
+    DemoUsage,
     DrillAttempt,
+    Feedback,
     Note,
     NoteLink,
     NoteLinkMute,
@@ -92,3 +94,9 @@ def delete_user_data(db: OrmSession, user_id: int) -> dict:
         .delete(synchronize_session=False)
     )
     return {key: int(value or 0) for key, value in deleted.items()}
+
+
+def delete_account_rows(db: OrmSession, user_id: int) -> None:
+    """注销时才删的行：反馈与体验额度用量（只清记录时保留，免得清记录就能重置额度）。"""
+    db.query(Feedback).filter(Feedback.user_id == user_id).delete(synchronize_session=False)
+    db.query(DemoUsage).filter(DemoUsage.user_id == user_id).delete(synchronize_session=False)

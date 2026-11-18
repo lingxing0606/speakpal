@@ -33,7 +33,7 @@ from ..security import (
 from ..services import wordbank
 from ..services.dashboard import build_dashboard
 from ..timeutil import utcnow
-from ..services.user_data import delete_user_data
+from ..services.user_data import delete_account_rows, delete_user_data
 from evaluation.scales import DEFAULT_SCALE, SCALE_IDS
 
 router = APIRouter(prefix="/api/me", tags=["me"])
@@ -219,6 +219,7 @@ def delete_my_account(
         raise HTTPException(status_code=400, detail="注销不可恢复，请输入「注销」确认")
 
     deleted = delete_user_data(db, user.id)
+    delete_account_rows(db, user.id)
     deleted_account = db.query(User).filter(User.id == user.id).delete(synchronize_session=False)
     db.commit()
     return {

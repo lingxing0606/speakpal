@@ -15,6 +15,7 @@ from .routers import (
     asr,
     auth,
     exercises,
+    feedback,
     hints,
     knowledge,
     reports,
@@ -292,6 +293,7 @@ app.include_router(study.router)
 app.include_router(words.router)
 app.include_router(knowledge.router)
 app.include_router(asr.router)
+app.include_router(feedback.router)
 
 
 _ADMIN_HTML = _STATIC_DIR / "admin.html"

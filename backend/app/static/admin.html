@@ -92,6 +92,16 @@
         </div>
       </div>
 
+      <div class="card">
+        <h2 style="margin:0;font-size:16px;">用户反馈</h2>
+        <table>
+          <thead>
+            <tr><th>ID</th><th>用户</th><th>类型</th><th>内容</th><th>页面</th><th>时间</th></tr>
+          </thead>
+          <tbody id="feedbackRows"></tbody>
+        </table>
+      </div>
+
       <div class="card danger-card">
         <h2 style="margin:0 0 8px;font-size:16px;">清空全库（不可恢复）</h2>
         <p class="hint" style="margin-top:0;">删除后无法找回。只清练习记录时账号保留；连账号一起清会删掉所有用户，包括你自己的账号。</p>
@@ -298,6 +308,21 @@
           tr.appendChild(cell(it.score === null ? '—' : it.score));
           tr.appendChild(cell(new Date(it.created_at).toLocaleString()));
           tbody.appendChild(tr);
+        }
+
+        const KIND = { bug: '问题', idea: '建议', other: '其他' };
+        const feedback = await api('/api/admin/feedback?limit=50');
+        const fbody = document.getElementById('feedbackRows');
+        fbody.replaceChildren();
+        for (const it of feedback) {
+          const tr = document.createElement('tr');
+          tr.appendChild(cell(it.id));
+          tr.appendChild(cell(it.user));
+          tr.appendChild(cell(KIND[it.kind] || it.kind));
+          tr.appendChild(cell(it.content));
+          tr.appendChild(cell(it.page || '—'));
+          tr.appendChild(cell(new Date(it.created_at).toLocaleString()));
+          fbody.appendChild(tr);
         }
 
         document.getElementById('login').classList.add('hidden');

@@ -55,6 +55,12 @@ class SceneOut(BaseModel):
     desc: str
 
 
+class FeedbackIn(BaseModel):
+    kind: str = "other"
+    content: str = Field(min_length=1, max_length=1000)
+    page: str = Field(default="", max_length=200)
+
+
 class CreateSessionIn(BaseModel):
     scene_id: str
     # 不传就用设置里的偏好难度，见 PATCH /api/me/preferences

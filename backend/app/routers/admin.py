@@ -12,7 +12,9 @@ from sqlalchemy.orm import selectinload
 from ..config import database_url_locked_by_env, settings
 from ..db import get_db
 from ..models import (
+    DemoUsage,
     DrillAttempt,
+    Feedback,
     Note,
     NoteLink,
     NoteLinkMute,
@@ -33,7 +35,7 @@ from ..services.storage import (
     storage_info,
     write_location,
 )
-from ..services.user_data import delete_user_data
+from ..services.user_data import delete_account_rows, delete_user_data
 from ..timeutil import utc_iso
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -158,6 +160,33 @@ def recent_sessions(
     return out
 
 
+@router.get("/feedback")
+def recent_feedback(
+    limit: int = 50,
+    _=Depends(require_admin),
+    db: OrmSession = Depends(get_db),
+):
+    limit = max(1, min(limit, 200))
+    rows = (
+        db.query(Feedback, User)
+        .outerjoin(User, Feedback.user_id == User.id)
+        .order_by(Feedback.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": f.id,
+            "user": (u.nickname or u.username) if u else "",
+            "kind": f.kind,
+            "content": f.content,
+            "page": f.page,
+            "created_at": utc_iso(f.created_at),
+        }
+        for f, u in rows
+    ]
+
+
 class StorageIn(BaseModel):
     path: str
     copy_existing: bool = True
@@ -275,6 +304,8 @@ def delete_all_data(
     deleted_sessions = db.query(PracticeSession).delete(synchronize_session=False)
     deleted_users = 0
     if scope == "account":
+        db.query(Feedback).delete(synchronize_session=False)
+        db.query(DemoUsage).delete(synchronize_session=False)
         deleted_users = db.query(User).delete(synchronize_session=False)
     db.commit()
     return {
@@ -333,6 +364,7 @@ def delete_user(
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
     deleted = delete_user_data(db, user_id)
+    delete_account_rows(db, user_id)
     db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
     db.commit()
     return {

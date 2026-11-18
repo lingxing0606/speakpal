@@ -218,6 +218,53 @@ class DemoQuotaTests(ApiTestCase):
         self.assertEqual(r.status_code, 401)
 
 
+class FeedbackTests(ApiTestCase):
+    ADMIN = {"X-Admin-Key": "test-admin-key"}
+
+    def test_submit_and_admin_list(self):
+        _, headers = self.register()
+        r = self.client.post(
+            "/api/feedback",
+            json={"kind": "idea", "content": "  希望加口语考试模拟  ", "page": "/settings"},
+            headers=headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        rows = self.client.get("/api/admin/feedback", headers=self.ADMIN).json()
+        mine = next(x for x in rows if x["id"] == r.json()["id"])
+        self.assertEqual(mine["content"], "希望加口语考试模拟")
+        self.assertEqual(mine["kind"], "idea")
+        self.assertEqual(self.client.get("/api/admin/feedback").status_code, 401)
+
+    def test_rejects_blank_and_unknown_kind_becomes_other(self):
+        _, headers = self.register()
+        self.assertEqual(
+            self.client.post("/api/feedback", json={"content": "   "}, headers=headers).status_code, 400
+        )
+        r = self.client.post("/api/feedback", json={"kind": "spam", "content": "x"}, headers=headers)
+        rows = self.client.get("/api/admin/feedback", headers=self.ADMIN).json()
+        self.assertEqual(next(x for x in rows if x["id"] == r.json()["id"])["kind"], "other")
+
+    def test_daily_limit(self):
+        from app.routers import feedback as feedback_router
+
+        _, headers = self.register()
+        with mock.patch.object(feedback_router, "DAILY_LIMIT", 2):
+            for _ in range(2):
+                self.assertEqual(
+                    self.client.post("/api/feedback", json={"content": "a"}, headers=headers).status_code, 200
+                )
+            r = self.client.post("/api/feedback", json={"content": "a"}, headers=headers)
+        self.assertEqual(r.status_code, 429)
+
+    def test_account_deletion_removes_feedback(self):
+        _, headers = self.register()
+        fid = self.client.post("/api/feedback", json={"content": "bye"}, headers=headers).json()["id"]
+        r = self.client.request("DELETE", "/api/me/account", json={"confirm": "注销"}, headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        rows = self.client.get("/api/admin/feedback", headers=self.ADMIN).json()
+        self.assertFalse(any(x["id"] == fid for x in rows))
+
+
 class OutboundTests(unittest.TestCase):
     def test_blocks_private_and_metadata_hosts(self):
         for url in (
