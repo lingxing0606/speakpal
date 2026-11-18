@@ -272,6 +272,15 @@ _COACH_FINALIZE_PROMPT = (
     "Evidence may only cite items from those results; invent nothing."
 )
 
+# 模型没按 JSON 回时的唯一一次重试：不带 tools（走 thinking disabled，快），只强调格式
+_COACH_JSON_RETRY_PROMPT = (
+    "Your previous reply was rejected because it was not valid JSON:\n"
+    "<previous>{previous}</previous>\n"
+    "Reply again with ONLY the JSON object, no explanation, no markdown fences:\n"
+    '{"priorities":[...],"summary":"..."}\n'
+    "Evidence may only cite tool results already returned; invent nothing."
+)
+
 
 def _coach_prompt(scene: dict, history: list, fixes: list) -> str:
     lines = []
@@ -470,6 +479,35 @@ def coach(
                 }
             )
         data = _loads_json(message.get("content") or "")
+        if not isinstance(data, dict):
+            # 只给一次机会：不带 tools（chat() 会关思考）重问一次，再不行就跳过
+            previous = str(message.get("content") or "")[:600]
+            messages.append(
+                {"role": "user", "content": _COACH_JSON_RETRY_PROMPT.replace("{previous}", previous)}
+            )
+            started = time.monotonic()
+            message = chat(
+                llm,
+                messages,
+                tool_choice="none",
+                temperature=0.2,
+                timeout=COACH_TIMEOUT,
+            )
+            data = _loads_json(message.get("content") or "")
+            ok = isinstance(data, dict)
+            trace.append(
+                {
+                    "step": (trace[-1]["step"] if trace else 0) + 1,
+                    "tool": "retry_json",
+                    "args": {},
+                    "ok": ok,
+                    "ms": int((time.monotonic() - started) * 1000),
+                    "summary": "模型没按 JSON 回，重试一次"
+                    + ("，仍然不合法" if not ok else "，这次合法"),
+                    "result": previous,
+                    "forced": True,
+                }
+            )
         if not isinstance(data, dict):
             print("[agent] Coach 返回无法解析，跳过", flush=True)
             return fallback

@@ -2153,6 +2153,50 @@ class CoachAgentTests(unittest.TestCase):
         self.assertFalse(any(entry.get("forced") for entry in result["trace"]))
         self.assertEqual(len(result["trace"]), 4)
 
+    @staticmethod
+    def _expired_clock():
+        # t0 = 0，第一次步前检查就超过 8s：直接进收尾，步内不发工具请求
+        ticks = iter([0.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0])
+        return mock.patch("app.services.agent.time.monotonic", side_effect=lambda: next(ticks, 9.0))
+
+    def test_invalid_json_is_retried_once_without_tools(self):
+        client = _ToolCallClient.with_messages(
+            [
+                {"content": "Sure! Some tips: use Could I get ... please."},
+                {"content": self._final()},
+            ]
+        )
+        with self._expired_clock():
+            result = self._run_deepseek(client)
+        self.assertEqual(result["source"], "llm")
+        self.assertEqual(len(client.requests), 2)
+        self.assertNotIn("tools", client.requests[0])
+        self.assertNotIn("tools", client.requests[1])
+        self.assertEqual(client.requests[1]["tool_choice"], "none")
+        prompt = client.requests[1]["messages"][-1]["content"]
+        self.assertIn("not valid JSON", prompt)
+        self.assertIn("Sure! Some tips", prompt)
+        retry = result["trace"][-1]
+        self.assertEqual(retry["tool"], "retry_json")
+        self.assertTrue(retry["ok"])
+        self.assertEqual(len(result["priorities"]), 1)
+
+    def test_second_invalid_json_skips_without_third_call(self):
+        client = _ToolCallClient.with_messages(
+            [
+                {"content": "still prose"},
+                {"content": "prose again"},
+            ]
+        )
+        with self._expired_clock():
+            result = self._run_deepseek(client)
+        self.assertEqual(result["source"], "skipped")
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(result["priorities"], [])
+        retry = result["trace"][-1]
+        self.assertEqual(retry["tool"], "retry_json")
+        self.assertFalse(retry["ok"])
+
     def test_hallucinated_evidence_is_dropped(self):
         client = _ToolCallClient.with_messages(
             [
