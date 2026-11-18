@@ -2025,6 +2025,58 @@ class CoachAgentTests(unittest.TestCase):
             client.requests[0]["tools"][0]["function"]["parameters"]["type"], "object"
         )
 
+    def test_reasoning_content_is_passed_back_in_tool_loop(self):
+        """官方思考模式要求把 reasoning_content 带回，否则工具循环第二步 400。"""
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "reasoning_content": "先查这个词的用法",
+                    "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})],
+                },
+                {"content": self._final()},
+            ]
+        )
+        result = self._run(client)
+        self.assertEqual(result["source"], "llm")
+        second = client.requests[1]["messages"]
+        assistant = [m for m in second if m["role"] == "assistant"][-1]
+        self.assertEqual(assistant["reasoning_content"], "先查这个词的用法")
+
+    def test_no_reasoning_content_key_when_provider_omits_it(self):
+        """非思考模式（其他厂商）不额外塞字段。"""
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})],
+                },
+                {"content": self._final()},
+            ]
+        )
+        self._run(client)
+        second = client.requests[1]["messages"]
+        assistant = [m for m in second if m["role"] == "assistant"][-1]
+        self.assertNotIn("reasoning_content", assistant)
+
+    def test_extra_tool_calls_are_not_echoed_without_results(self):
+        """一次回 4 个 tool call 只执行 3 个：回传的 assistant 也必须只带这 3 个。"""
+        calls = [_tool_call(f"call_{i}", "lookup_word", {"term": "abandon"}) for i in range(1, 5)]
+        client = _ToolCallClient.with_messages(
+            [
+                {"content": "", "tool_calls": calls},
+                {"content": self._final()},
+            ]
+        )
+        result = self._run(client)
+        self.assertEqual(result["source"], "llm")
+        self.assertEqual(len(result["trace"]), 3)
+        second = client.requests[1]["messages"]
+        assistant = [m for m in second if m["role"] == "assistant" and m.get("tool_calls")][-1]
+        tool_ids = [m["tool_call_id"] for m in second if m["role"] == "tool"]
+        self.assertEqual(len(assistant["tool_calls"]), 3)
+        self.assertEqual([c["id"] for c in assistant["tool_calls"]], tool_ids)
+
     def test_hallucinated_evidence_is_dropped(self):
         client = _ToolCallClient.with_messages(
             [
@@ -3105,6 +3157,34 @@ class LlmSafetyTests(unittest.TestCase):
         self.assertEqual(payload["safety_check"], {"level": "high"})
         self.assertEqual(payload["messages"][0]["role"], "system")
         self.assertEqual(payload["messages"][1]["role"], "user")
+
+    def test_chat_with_tools_keeps_thinking_mode(self):
+        """官方接口：client tools 只允许在思考模式下配 safety_check，不能发 thinking:disabled。"""
+        client = _CaptureClient
+        client.last_json = None
+        tools = [
+            {
+                "type": "function",
+                "function": {"name": "lookup_word", "parameters": {"type": "object", "properties": {}}},
+            }
+        ]
+        with mock.patch("app.services.llm.httpx.Client", client):
+            llm_service.chat(
+                self._cfg("https://api.deepseek.com/v1"),
+                [{"role": "user", "content": "hi"}],
+                tools=tools,
+            )
+        self.assertEqual(client.last_json["thinking"], {"type": "enabled"})
+        self.assertEqual(client.last_json["safety_check"], {"level": "high"})
+        self.assertEqual(client.last_json["tools"], tools)
+
+    def test_chat_without_tools_disables_thinking(self):
+        client = _CaptureClient
+        client.last_json = None
+        with mock.patch("app.services.llm.httpx.Client", client):
+            llm_service.chat(self._cfg("https://api.deepseek.com/v1"), [{"role": "user", "content": "hi"}])
+        self.assertEqual(client.last_json["thinking"], {"type": "disabled"})
+        self.assertEqual(client.last_json["safety_check"], {"level": "high"})
 
     def test_content_risk_400_raises_safety_blocked(self):
         class _RiskResp(_FakeResp):

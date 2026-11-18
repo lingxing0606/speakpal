@@ -62,6 +62,17 @@ def thinking_disabled(base_url: str) -> dict:
     return {"thinking": {"type": "disabled"}} if host == "api.deepseek.com" else {}
 
 
+def thinking_enabled(base_url: str) -> dict:
+    """带 tools 时必须显式开思考：官方接口要求 client tools 在思考模式下配 safety_check，
+    不传 thinking 字段同样 400，所以这里显式写 enabled。其他厂商不加这个参数。
+    """
+    try:
+        host = urlparse(base_url).hostname
+    except ValueError:
+        return {}
+    return {"thinking": {"type": "enabled"}} if host == "api.deepseek.com" else {}
+
+
 def chat(
     llm: LLMConfig,
     messages: list,
@@ -93,7 +104,12 @@ def chat(
         payload["tool_choice"] = tool_choice
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-    payload.update(thinking_disabled(llm.base_url))
+    # 官方接口：带 client tools 时必须处在思考模式，thinking:disabled 会 400，
+    # 且不传 thinking 字段也 400，所以有 tools 时显式开思考；其余调用仍然显式关掉。
+    if tools:
+        payload.update(thinking_enabled(llm.base_url))
+    else:
+        payload.update(thinking_disabled(llm.base_url))
     payload.update(safety_check(llm.base_url))
 
     url = f"{llm.base_url.rstrip('/')}/chat/completions"

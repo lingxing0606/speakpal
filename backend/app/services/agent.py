@@ -403,14 +403,20 @@ def coach(
             calls = message.get("tool_calls") or []
             if not calls:
                 break
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.get("content") or "",
-                    "tool_calls": calls,
-                }
-            )
-            for tool_call in calls[:COACH_MAX_TOOL_CALLS]:
+            # 只回传真正执行的那几个：assistant 消息里的每个 tool_call 都必须有
+            # 对应的 tool 响应，否则下一次调用 400
+            used_calls = calls[:COACH_MAX_TOOL_CALLS]
+            assistant_message = {
+                "role": "assistant",
+                "content": message.get("content") or "",
+                "tool_calls": used_calls,
+            }
+            reasoning = message.get("reasoning_content")
+            if reasoning:
+                # 官方思考模式要求把 reasoning_content 原样带回，否则下一次调用 400
+                assistant_message["reasoning_content"] = reasoning
+            messages.append(assistant_message)
+            for tool_call in used_calls:
                 entry = _run_coach_tool(step + 1, tool_call, db, user_id, messages)
                 trace.append(entry)
                 if on_step is not None:
