@@ -54,6 +54,17 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 本浏览器是否已配置对话模型密钥 */
   const configured = computed(() => !!apiKey.value.trim())
+  /** 服务端是否开了体验额度（没填密钥也能用，按人按天限次；服务端为准，不存本地） */
+  const demoAvailable = ref(false)
+  const demoLimit = ref(0)
+  const demoUsed = ref(0)
+  function setDemo(available: boolean, limit: number, used: number) {
+    demoAvailable.value = available
+    demoLimit.value = limit
+    demoUsed.value = used
+  }
+  /** 能不能调模型：自己的密钥，或服务端体验额度（用完由服务端 429 提示） */
+  const canUseLlm = computed(() => configured.value || demoAvailable.value)
   /** 本浏览器是否已配置语音合成密钥（可选） */
   const ttsConfigured = computed(() => !!ttsKey.value.trim())
 
@@ -167,6 +178,11 @@ export const useSettingsStore = defineStore('settings', () => {
     cetPassOnly,
     setCetPassOnly,
     configured,
+    demoAvailable,
+    demoLimit,
+    demoUsed,
+    setDemo,
+    canUseLlm,
     ttsConfigured,
     masked,
     ttsMasked,

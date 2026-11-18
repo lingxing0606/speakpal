@@ -134,7 +134,7 @@ export function useRecorder({ onResult, onEmpty, onError, onStart }: RecorderHan
         interim.value = ''
         let asrSource: 'cloud' | 'browser' | null = null
         let text = browserText
-        if (settings.configured && blob) {
+        if (settings.canUseLlm && blob) {
           transcribing.value = true
           const cloud = await transcribeCloud(blob)
           transcribing.value = false

@@ -148,8 +148,8 @@ async function begin(scene: SceneOut, extra: Record<string, unknown> = {}) {
 }
 
 function start(scene: SceneOut) {
-  // 点场景开练必须先有密钥：服务端不提供，本浏览器没填就只给「去设置填密钥」这一条路
-  if (!settings.configured) {
+  // 点场景开练必须能用模型：自己的密钥或服务端体验额度，都没有才给「去设置填密钥」
+  if (!settings.canUseLlm) {
     pendingScene.value = scene
     needKey.value = true
     return
@@ -158,7 +158,7 @@ function start(scene: SceneOut) {
 }
 
 function startFromPhoto(photo: ImageSceneOut) {
-  if (!settings.configured) {
+  if (!settings.canUseLlm) {
     needKey.value = true
     return
   }

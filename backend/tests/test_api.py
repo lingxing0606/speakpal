@@ -147,6 +147,77 @@ class AdminTests(ApiTestCase):
         self.assertEqual(existing.read_bytes(), b"keep me")
 
 
+class DemoQuotaTests(ApiTestCase):
+    """体验额度：没带密钥时用服务端 key，按人按天限次，地址与模型不可被请求头改写。"""
+
+    def _user(self):
+        from app.db import SessionLocal
+        from app.models import User
+
+        name, headers = self.register()
+        db = SessionLocal()
+        self.addCleanup(db.close)
+        return db, db.query(User).filter(User.username == name).one(), headers
+
+    def _demo(self, per_user=2, total=1000):
+        for attr, value in (
+            ("demo_llm_api_key", "sk-demo"),
+            ("demo_daily_per_user", per_user),
+            ("demo_daily_total", total),
+        ):
+            patcher = mock.patch.object(llm_config.settings, attr, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_without_demo_key_stays_unconfigured(self):
+        _, headers = self.register()
+        r = self.client.post("/api/sessions", json={"scene_id": "cafe_order"}, headers=headers)
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.json()["kind"], "llm_not_configured")
+
+    def test_demo_key_used_and_counted_until_limit(self):
+        self._demo(per_user=2)
+        db, user, _ = self._user()
+        for _ in range(2):
+            cfg = llm_config.get_llm_config(None, "https://evil.example.com/v1", "other", user, db)
+            self.assertEqual(cfg.key_source, "demo")
+            self.assertEqual(cfg.api_key, "sk-demo")
+            # 服务端 key 只发往服务端配置的地址
+            self.assertEqual(cfg.base_url, llm_config.settings.llm_base_url)
+            self.assertEqual(cfg.model, llm_config.settings.llm_model)
+        with self.assertRaises(llm_config.HTTPException) as ctx:
+            llm_config.get_llm_config(None, None, None, user, db)
+        self.assertEqual(ctx.exception.status_code, 429)
+        self.assertEqual(llm_config.demo_used(db, user.id), 2)
+
+    def test_user_key_wins_and_does_not_count(self):
+        self._demo(per_user=1)
+        db, user, _ = self._user()
+        cfg = llm_config.get_llm_config("sk-mine", None, None, user, db)
+        self.assertEqual(cfg.key_source, "user")
+        self.assertEqual(llm_config.demo_used(db, user.id), 0)
+
+    def test_site_wide_daily_cap(self):
+        self._demo(per_user=10, total=0)
+        db, user, _ = self._user()
+        with self.assertRaises(llm_config.HTTPException) as ctx:
+            llm_config.get_llm_config(None, None, None, user, db)
+        self.assertEqual(ctx.exception.status_code, 429)
+
+    def test_config_reports_demo_quota(self):
+        self._demo(per_user=5)
+        _, headers = self.register()
+        body = self.client.get("/api/config/llm", headers=headers).json()
+        self.assertTrue(body["demo_available"])
+        self.assertEqual(body["demo_daily_per_user"], 5)
+        self.assertEqual(body["demo_used_today"], 0)
+        self.assertNotIn("sk-demo", str(body))
+
+    def test_asr_requires_login(self):
+        r = self.client.post("/api/asr", files={"file": ("a.wav", b"RIFF", "audio/wav")})
+        self.assertEqual(r.status_code, 401)
+
+
 class OutboundTests(unittest.TestCase):
     def test_blocks_private_and_metadata_hosts(self):
         for url in (

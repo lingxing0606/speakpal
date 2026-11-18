@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 
 from ..config import settings
 from ..services.asr import MAX_AUDIO_BYTES, AudioInvalid, transcribe, validate_audio
+from ..models import User
+from ..security import get_current_user
 from ..services.llm_config import LLMConfig, UserKeyInvalid, get_llm_config
 
 router = APIRouter(prefix="/api", tags=["asr"])
@@ -27,6 +29,7 @@ KEY_REQUIRED_BODY = {
 @router.post("/asr")
 def transcribe_audio(
     file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
     llm: LLMConfig = Depends(get_llm_config),
     x_asr_model: str | None = Header(default=None, alias="X-ASR-Model"),
 ):

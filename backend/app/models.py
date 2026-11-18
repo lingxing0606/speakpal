@@ -25,6 +25,16 @@ class User(Base):
     sessions = relationship("PracticeSession", back_populates="user")
 
 
+class DemoUsage(Base):
+    """体验额度用量：每人每天一行，day 按北京时间（YYYY-MM-DD）。"""
+
+    __tablename__ = "demo_usage"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    day = Column(String(10), primary_key=True)
+    count = Column(Integer, default=0, nullable=False)
+
+
 class PracticeSession(Base):
     __tablename__ = "sessions"
 

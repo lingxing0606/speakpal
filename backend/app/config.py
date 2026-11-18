@@ -114,6 +114,11 @@ class Settings:
     # 所以这里没有 llm_api_key；.env 里就算写了 LLM_API_KEY 也不会被读取。
     llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     llm_model: str = os.getenv("LLM_MODEL", "deepseek-flash")
+    # 体验额度（可选）：没填密钥的用户（比如评委）用这把服务端 key，按人按天限次。
+    # 留空就和以前一样只认浏览器密钥。地址和模型固定用上面两项，不接受请求头覆盖。
+    demo_llm_api_key: str = os.getenv("DEMO_LLM_API_KEY", "").strip()
+    demo_daily_per_user: int = int(os.getenv("DEMO_DAILY_PER_USER", "80"))
+    demo_daily_total: int = int(os.getenv("DEMO_DAILY_TOTAL", "3000"))
     # 服务端语音转写：DeepSeek 主机走 /tools/asr；其他兼容厂商走 /audio/transcriptions 的模型名
     asr_model: str = os.getenv("ASR_MODEL", "whisper-1")
     # 语音合成（可选）：用的是 OpenAI 兼容的 /audio/speech，不填就走浏览器内置朗读

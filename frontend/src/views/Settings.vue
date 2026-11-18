@@ -226,6 +226,7 @@ async function loadServerStatus() {
       default_tts_voice: data?.default_tts_voice || '',
       error: '',
     }
+    settings.setDemo(!!data?.demo_available, Number(data?.demo_daily_per_user) || 0, Number(data?.demo_used_today) || 0)
     if (!modelInput.value && data?.default_model) modelInput.value = data.default_model
     if (!baseInput.value && data?.default_base_url) baseInput.value = data.default_base_url
     // 语音合成的输入框也填「页面上教的供应商」那套，而不是服务端的 OpenAI 出厂值：
@@ -660,6 +661,9 @@ function logout() {
           <p class="text-xs leading-5 text-ink-mute">
             当前：{{ settings.configured ? `已配置 ${settings.masked}` : '本浏览器未配置' }}
             <span v-if="server.error">· 状态读取失败</span>
+          </p>
+          <p v-if="!settings.configured && settings.demoAvailable" class="text-xs leading-5 text-good">
+            不填也能用：今天的免费体验额度已用 {{ settings.demoUsed }} / {{ settings.demoLimit }} 次，用完后明天恢复，或填自己的密钥继续。
           </p>
         </div>
       </section>

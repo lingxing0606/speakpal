@@ -6,12 +6,14 @@ import time
 
 import httpx
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session as OrmSession
 
 from ..config import settings
+from ..db import get_db
 from ..models import User
 from ..security import get_current_user
 from ..services.llm import thinking_disabled
-from ..services.llm_config import LLMConfig, get_llm_config
+from ..services.llm_config import LLMConfig, demo_used, get_llm_config
 from ..services.outbound import UnsafeBaseURL, check_base_url
 from ..services.storage import storage_info
 
@@ -19,12 +21,15 @@ router = APIRouter(prefix="/api", tags=["system"])
 
 
 @router.get("/config/llm")
-def get_llm_settings(user: User = Depends(get_current_user)):
+def get_llm_settings(user: User = Depends(get_current_user), db: OrmSession = Depends(get_db)):
     """默认地址与是否配置了服务端密钥；绝不回显任何密钥。"""
+    demo = bool(settings.demo_llm_api_key)
     return {
-        # 服务端不再提供对话密钥（用户要求）：恒为 false，
-        # 前端据此去掉「用服务端密钥继续」，只留「去设置填密钥」。
+        # 服务端不提供长期对话密钥：恒为 false；体验额度单独用 demo_* 三项表示
         "env_configured": False,
+        "demo_available": demo,
+        "demo_daily_per_user": settings.demo_daily_per_user if demo else 0,
+        "demo_used_today": demo_used(db, user.id) if demo else 0,
         "default_base_url": settings.llm_base_url,
         "default_model": settings.llm_model,
         # 语音合成仍可有服务端兜底 key：前端据此决定要不要试 /api/tts

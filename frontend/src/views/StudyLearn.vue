@@ -308,7 +308,7 @@ async function submitUse() {
   if (!useText.value.trim()) return
   useChecking.value = true
   useFeedback.value = null
-  if (!settings.configured) {
+  if (!settings.canUseLlm) {
     // 没有 key 时不做造句判分：直接通过，给中性提示，不阻塞
     useFeedback.value = { title: '这次没拿到反馈', body: '', passed: true, neutral: true }
     useChecking.value = false

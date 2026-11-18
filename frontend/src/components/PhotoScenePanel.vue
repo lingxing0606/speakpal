@@ -148,7 +148,7 @@ async function compressImage(picked: File) {
 
 async function generate() {
   if (!sourceBlob.value || stage.value === 'uploading') return
-  if (!settings.configured) {
+  if (!settings.canUseLlm) {
     errorText.value = '还没有接入模型密钥，先去设置里填一个。'
     return
   }

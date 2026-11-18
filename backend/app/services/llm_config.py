@@ -1,19 +1,27 @@
-"""每个请求的模型配置：只用浏览器带来的 key。
+"""每个请求的模型配置：优先用浏览器带来的 key。
 
-用户要求服务端不再提供密钥，所以这里**没有 `.env` 兜底**：
-没有 `X-LLM-Key` 就是未配置，接口按 409 `llm_not_configured` 拦住，
-前端只留「去设置填密钥」这一条路。密钥只在内存里用一次，不落库、不打日志。
+没有 `X-LLM-Key` 时：服务端配了 `DEMO_LLM_API_KEY` 就走体验额度（按人按天限次，
+地址与模型固定，不接受请求头覆盖，防止把服务端 key 发到别人的地址）；
+没配就是未配置，接口按 409 `llm_not_configured` 拦住。
+密钥只在内存里用一次，不落库、不打日志。
 base_url / model 仍支持请求头覆盖，用户可以用自己的中转或别的 OpenAI 兼容服务。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from urllib.parse import urlparse
 
-from fastapi import Header
+from fastapi import Depends, Header, HTTPException
+from sqlalchemy import func
+from sqlalchemy.orm import Session as OrmSession
 
 from ..config import settings
+from ..db import get_db
+from ..models import DemoUsage, User
+from ..security import get_current_user
+from ..timeutil import utcnow
 
 
 @dataclass(frozen=True)
@@ -21,7 +29,7 @@ class LLMConfig:
     api_key: str
     base_url: str
     model: str
-    key_source: str  # user | none（服务端密钥已下线，不再有 env）
+    key_source: str  # user | demo | none
 
     @property
     def from_user(self) -> bool:
@@ -60,12 +68,53 @@ def build_llm_config(
     )
 
 
+DEMO_QUOTA_USED_UP = "今天的免费体验次数用完了：明天再来，或在「设置」里填自己的密钥继续"
+DEMO_QUOTA_BUSY = "今天的免费体验名额已经发完了：明天再来，或在「设置」里填自己的密钥继续"
+
+
+def demo_day() -> str:
+    """体验额度按北京时间切日。"""
+    return (utcnow() + timedelta(hours=8)).date().isoformat()
+
+
+def demo_used(db: OrmSession, user_id: int) -> int:
+    row = db.get(DemoUsage, (user_id, demo_day()))
+    return int(row.count) if row else 0
+
+
+def take_demo_quota(db: OrmSession, user_id: int) -> None:
+    """扣一次体验额度；个人或全站当天用完抛 429。每个用到模型的请求扣一次。"""
+    day = demo_day()
+    row = db.get(DemoUsage, (user_id, day))
+    if row and row.count >= settings.demo_daily_per_user:
+        raise HTTPException(status_code=429, detail=DEMO_QUOTA_USED_UP)
+    total = db.query(func.coalesce(func.sum(DemoUsage.count), 0)).filter(DemoUsage.day == day).scalar()
+    if int(total or 0) >= settings.demo_daily_total:
+        raise HTTPException(status_code=429, detail=DEMO_QUOTA_BUSY)
+    if row is None:
+        row = DemoUsage(user_id=user_id, day=day, count=0)
+        db.add(row)
+    row.count += 1
+    db.commit()
+
+
 def get_llm_config(
     x_llm_key: str | None = Header(default=None, alias="X-LLM-Key"),
     x_llm_base_url: str | None = Header(default=None, alias="X-LLM-Base-URL"),
     x_llm_model: str | None = Header(default=None, alias="X-LLM-Model"),
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
 ) -> LLMConfig:
-    return build_llm_config(x_llm_key, x_llm_base_url, x_llm_model)
+    llm = build_llm_config(x_llm_key, x_llm_base_url, x_llm_model)
+    if llm.configured or not settings.demo_llm_api_key:
+        return llm
+    take_demo_quota(db, user.id)
+    return LLMConfig(
+        api_key=settings.demo_llm_api_key,
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        key_source="demo",
+    )
 
 
 class UserKeyInvalid(Exception):

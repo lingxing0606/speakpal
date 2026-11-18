@@ -6,6 +6,7 @@ import api from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSettingsStore } from '../stores/settings'
+import { loadDemoQuota } from '../utils/llmGate'
 
 const router = useRouter()
 const route = useRoute()
@@ -48,8 +49,9 @@ const error = ref('')
 const loading = ref(false)
 
 async function firstStop() {
-  // 服务端不再提供密钥：本浏览器填过就直接进首页，没填就去设置页
-  return settings.configured ? '/' : '/settings?onboarding=1'
+  // 本浏览器填过密钥、或服务端开了体验额度，就直接进首页；都没有才去设置页
+  if (!settings.configured) await loadDemoQuota()
+  return settings.canUseLlm ? '/' : '/settings?onboarding=1'
 }
 
 async function submit() {

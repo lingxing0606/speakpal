@@ -6,6 +6,8 @@ import type { AxiosRequestConfig } from 'axios'
 import api, { endStartupProbe } from './api/client'
 import FatalErrorCard from './components/FatalErrorCard.vue'
 import { useAuthStore } from './stores/auth'
+import { useSettingsStore } from './stores/settings'
+import { loadDemoQuota } from './utils/llmGate'
 
 interface AuthError {
   response?: { status?: number; headers?: Record<string, string> }
@@ -46,6 +48,8 @@ onMounted(async () => {
     // 探测带超时：后端没起来时不能把 startupProbePending 一直挂着，否则全站 401 都被静默吞掉
     const { data } = await api.get('/auth/me', { skipAuthRedirect: true, timeout: 5000 } as AxiosRequestConfig)
     auth.setAuth(auth.token, data)
+    // 没填密钥时顺带读一次体验额度，首页「开练」按它判断，不用等
+    if (!useSettingsStore().configured) loadDemoQuota()
   } catch (e) {
     const err = e as AuthError
     if (err?.response?.status === 401) {
