@@ -2077,6 +2077,82 @@ class CoachAgentTests(unittest.TestCase):
         self.assertEqual(len(assistant["tool_calls"]), 3)
         self.assertEqual([c["id"] for c in assistant["tool_calls"]], tool_ids)
 
+    def _run_deepseek(self, client):
+        cfg = llm_config.LLMConfig(
+            api_key="sk-test",
+            base_url="https://api.deepseek.com/v1",
+            model="deepseek-chat",
+            key_source="user",
+        )
+        with mock.patch("app.services.llm.httpx.Client", client):
+            return agent_service.coach(
+                self._scene(), self._history(), self._fixes(), self.db, 1, cfg
+            )
+
+    def test_time_budget_forces_tool_free_finalize(self):
+        """第一步就耗掉 9 秒：收尾请求不带 tools / tool_choice=none / 关思考。"""
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})],
+                },
+                {"content": self._final()},
+            ]
+        )
+        # 调用顺序：t0、第 1 步前检查、第 2 步前检查（已超时）、收尾计时、收尾结束
+        ticks = iter([0.0, 0.0, 9.0, 9.0, 9.0])
+        with mock.patch(
+            "app.services.agent.time.monotonic", side_effect=lambda: next(ticks, 9.0)
+        ):
+            result = self._run_deepseek(client)
+        self.assertEqual(result["source"], "llm")
+        self.assertEqual(len(client.requests), 2)
+        final = client.requests[1]
+        self.assertNotIn("tools", final)
+        self.assertEqual(final["tool_choice"], "none")
+        self.assertEqual(final["thinking"], {"type": "disabled"})
+        self.assertEqual(final["safety_check"], {"level": "high"})
+        self.assertEqual(final["messages"][-1]["role"], "user")
+        self.assertIn("Do not call any tool", final["messages"][-1]["content"])
+        forced = result["trace"][-1]
+        self.assertEqual(forced["tool"], "finalize")
+        self.assertTrue(forced["forced"])
+
+    def test_fast_run_has_no_forced_finalize(self):
+        client = _ToolCallClient.with_messages(
+            [
+                {
+                    "content": "",
+                    "tool_calls": [_tool_call("call_1", "lookup_word", {"term": "abandon"})],
+                },
+                {"content": self._final()},
+            ]
+        )
+        result = self._run(client)
+        self.assertEqual(result["source"], "llm")
+        self.assertEqual(len(client.requests), 2)
+        self.assertIn("tools", client.requests[1])
+        self.assertNotIn("tool_choice", client.requests[1])
+        self.assertFalse(any(entry.get("forced") for entry in result["trace"]))
+        self.assertEqual(len(result["trace"]), 1)
+
+    def test_max_steps_still_forces_final_call(self):
+        """预算没到但 4 步用满：仍走原来的强制收尾（带 tools + tool_choice=none）。"""
+        steps = [
+            {"content": "", "tool_calls": [_tool_call(f"call_{i}", "lookup_word", {"term": "abandon"})]}
+            for i in range(1, 5)
+        ]
+        client = _ToolCallClient.with_messages(steps + [{"content": self._final()}])
+        result = self._run(client)
+        self.assertEqual(result["source"], "llm")
+        self.assertEqual(len(client.requests), 5)
+        last = client.requests[4]
+        self.assertIn("tools", last)
+        self.assertEqual(last["tool_choice"], "none")
+        self.assertFalse(any(entry.get("forced") for entry in result["trace"]))
+        self.assertEqual(len(result["trace"]), 4)
+
     def test_hallucinated_evidence_is_dropped(self):
         client = _ToolCallClient.with_messages(
             [
